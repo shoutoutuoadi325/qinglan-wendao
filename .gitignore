@@ -1,0 +1,32 @@
+# Unreal generated content
+game/Binaries/
+game/Intermediate/
+game/Saved/
+game/DerivedDataCache/
+game/.vs/
+game/*.sln
+game/*.xcodeproj/
+game/*.xcworkspace/
+
+# Private or source-redistribution-restricted dependencies
+game/Content/ExternalRestricted/
+private/
+.env
+.env.*
+*.pfx
+*.p12
+*.key
+*.cer
+*.ekb
+*.lekb
+*.pem
+
+# Build artifacts and local caches
+build/
+dist/
+output/
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
+*.log

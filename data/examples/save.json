@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "content_version": "design-1",
+  "profile_id": "example-profile-001",
+  "save_sequence": 1,
+  "cultivation": {
+    "stage": "qi_refining",
+    "rank": 0
+  },
+  "inventory": {
+    "spirit_shards": 0,
+    "spirit_herb": 0,
+    "vein_crystal": 0
+  },
+  "unlocked_techniques": [
+    "jade_sword_arc",
+    "flowing_ward"
+  ],
+  "equipped_techniques": [
+    "jade_sword_arc",
+    "flowing_ward"
+  ],
+  "campaign_flags": [],
+  "committed_transaction_ids": [],
+  "checkpoint": null
+}

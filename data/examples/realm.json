@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "id": "bamboo_hollow",
+  "name_key": "realm.bamboo_hollow",
+  "seed": 12345,
+  "max_concurrent_enemies": 8,
+  "rooms": [
+    {
+      "index": 0,
+      "kind": "entrance",
+      "spirit_shards": 0
+    },
+    {
+      "index": 1,
+      "kind": "combat",
+      "spirit_shards": 30
+    },
+    {
+      "index": 2,
+      "kind": "combat",
+      "spirit_shards": 40
+    },
+    {
+      "index": 3,
+      "kind": "shrine",
+      "spirit_shards": 0
+    },
+    {
+      "index": 4,
+      "kind": "elite",
+      "spirit_shards": 50
+    },
+    {
+      "index": 5,
+      "kind": "boss",
+      "spirit_shards": 60
+    },
+    {
+      "index": 6,
+      "kind": "exit",
+      "spirit_shards": 0
+    }
+  ],
+  "first_clear_bonus": {
+    "spirit_shards": 120,
+    "spirit_herb": 3,
+    "vein_crystal": 1
+  }
+}

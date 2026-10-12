@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "content_version": "design-1",
+  "techniques": [
+    {
+      "id": "jade_sword_arc",
+      "name_key": "technique.jade_sword_arc.name",
+      "element": "Metal",
+      "energy_cost": 12,
+      "cooldown_seconds": 2.5,
+      "power_coefficient": 1.5,
+      "flat_damage": 5
+    },
+    {
+      "id": "ember_lance",
+      "name_key": "technique.ember_lance.name",
+      "element": "Fire",
+      "energy_cost": 20,
+      "cooldown_seconds": 6.0,
+      "power_coefficient": 2.0,
+      "flat_damage": 5
+    },
+    {
+      "id": "flowing_ward",
+      "name_key": "technique.flowing_ward.name",
+      "element": "Water",
+      "energy_cost": 18,
+      "cooldown_seconds": 8.0,
+      "power_coefficient": 0,
+      "flat_damage": 0
+    },
+    {
+      "id": "thunder_seal",
+      "name_key": "technique.thunder_seal.name",
+      "element": "Lightning",
+      "energy_cost": 24,
+      "cooldown_seconds": 7.0,
+      "power_coefficient": 2.2,
+      "flat_damage": 8
+    },
+    {
+      "id": "stone_aegis",
+      "name_key": "technique.stone_aegis.name",
+      "element": "Earth",
+      "energy_cost": 22,
+      "cooldown_seconds": 10.0,
+      "power_coefficient": 0,
+      "flat_damage": 0
+    },
+    {
+      "id": "verdant_pulse",
+      "name_key": "technique.verdant_pulse.name",
+      "element": "Wood",
+      "energy_cost": 25,
+      "cooldown_seconds": 12.0,
+      "power_coefficient": 0,
+      "flat_damage": 0
+    },
+    {
+      "id": "mist_step",
+      "name_key": "technique.mist_step.name",
+      "element": "Water",
+      "energy_cost": 15,
+      "cooldown_seconds": 9.0,
+      "power_coefficient": 0,
+      "flat_damage": 0
+    },
+    {
+      "id": "orbiting_blades",
+      "name_key": "technique.orbiting_blades.name",
+      "element": "Metal",
+      "energy_cost": 30,
+      "cooldown_seconds": 14.0,
+      "power_coefficient": 0.6,
+      "flat_damage": 2
+    }
+  ]
+}

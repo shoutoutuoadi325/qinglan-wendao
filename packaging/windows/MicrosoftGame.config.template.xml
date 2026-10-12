@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Planning template only. Replace identities and paths from the actual product.
+     This is not a validated package configuration or a submit-ready manifest.
+     This offline PC game does not integrate Xbox services. -->
+<Game configVersion="1">
+  <Identity Name="REPLACE_FROM_PARTNER_CENTER" Publisher="REPLACE_FROM_PARTNER_CENTER" Version="0.1.0.0" />
+  <StoreId>REPLACE_FROM_PARTNER_CENTER</StoreId>
+  <Resources>
+    <Resource Language="en-US" />
+    <Resource Language="zh-Hans" />
+  </Resources>
+  <ExecutableList>
+    <Executable Name="REPLACE_WITH_VALIDATED_WIN64_EXECUTABLE_PATH" Id="Game" />
+  </ExecutableList>
+  <ShellVisuals DefaultDisplayName="Qinglan: Path of Ascension"
+    PublisherDisplayName="REPLACE_FROM_PARTNER_CENTER"
+    StoreLogo="REPLACE_WITH_STORE_LOGO_PATH"
+    Square150x150Logo="REPLACE_WITH_150_LOGO_PATH"
+    Square44x44Logo="REPLACE_WITH_44_LOGO_PATH"
+    Description="An offline cultivation adventure."
+    BackgroundColor="#17212A"
+    SplashScreenImage="REPLACE_WITH_SPLASH_PATH" />
+  <DesktopRegistration>
+    <ProcessorArchitecture>x64</ProcessorArchitecture>
+  </DesktopRegistration>
+</Game>

@@ -26,7 +26,10 @@ public class QinglanAscension : ModuleRules
 			"Slate",
 			"SlateCore",
 			"NavigationSystem",
-			"AIModule"
+			"AIModule",
+			// Platform/QinglanGraphicsSettingsService reads the active RHI name,
+			// adapter string, and ray-tracing capability globals (docs/06 §2-§3).
+			"RHI"
 		});
 	}
 }

@@ -14,6 +14,7 @@ class AQinglanHubGameMode : public AGameModeBase
 {
 	GENERATED_BODY()
 public:
+	AQinglanHubGameMode();
 	virtual void BeginPlay() override;
 };
 
@@ -22,6 +23,7 @@ class AQinglanRealmGameMode : public AGameModeBase
 {
 	GENERATED_BODY()
 public:
+	AQinglanRealmGameMode();
 	virtual void BeginPlay() override;
 	/** Respawns at room entrance with pre-room snapshot on crash-resume. */
 	void RestartRoomFromSnapshot();

@@ -70,4 +70,32 @@ public:
 	UPROPERTY(BlueprintAssignable) FQinglanInventoryChanged OnInventoryChanged;
 	UPROPERTY(BlueprintAssignable) FQinglanCultivationChanged OnCultivationChanged;
 	UPROPERTY(BlueprintAssignable) FQinglanCampaignFlagSet OnCampaignFlagSet;
+
+private:
+	// --- Implementation-only additions; the public API above is unchanged. ---
+	// State is deliberately not reflected: serialization flows exclusively
+	// through Export/ImportStateForSave so the save subsystem stays the single
+	// owner of on-disk schema (code-contracts.md "One authoritative mutation path").
+
+	/** Seeds the fresh-profile defaults (docs/03 section 3; data/examples/save.json). */
+	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+	void ResetToFreshProfile();
+	/** Shared gate validator for TryBreakthrough and CanAttemptBreakthrough. */
+	bool CheckBreakthroughGate(struct FText& OutBlockingReason) const;
+	/** Boss/trial proofs accept either the campaign proof flag or the story flag. */
+	bool IsBambooCleared() const;
+	bool IsAshenCleared() const;
+	bool IsGoldenCoreTrialWon() const;
+	/** Adds a proof flag without broadcasting; true when newly added. */
+	bool SetCampaignFlagInternal(FName Flag);
+
+	FQinglanInventory Inventory;
+	EQinglanStage Stage = EQinglanStage::QiRefining;
+	int32 Rank = 0; // 0..3 purchased ranks within the current stage; Golden Core stays 0 (docs/03 section 1)
+	TSet<FName> CampaignFlags;
+	TSet<FName> UnlockedTechniques;
+	TArray<FName> EquippedTechniques;
+	TSet<FName> CommittedTransactionIds;
+	TSet<FName> ReadRecords;
+	TSet<FName> CompletedSideStages;
 };

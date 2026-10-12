@@ -1,0 +1,170 @@
+// Story registry data assets: imported from data/story/*.json at edit time.
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Engine/DataAsset.h"
+#include "Core/QinglanCoreTypes.h"
+#include "QinglanStoryDataTypes.generated.h"
+
+/** One scripted line; text resolved from the loc string table via TextKey. */
+USTRUCT()
+struct FQinglanRegistryLine
+{
+	GENERATED_BODY()
+	UPROPERTY() FName Speaker = NAME_None;
+	UPROPERTY() FName TextKey = NAME_None;
+	UPROPERTY() FName SpeakerKey = NAME_None;
+	UPROPERTY() EQinglanSourceKind SourceKind = EQinglanSourceKind::Live;
+	UPROPERTY() FName SourceKindKey = NAME_None;
+	/** Optional conditional trigger: line only plays when WhenAll/WhenNone match. */
+	UPROPERTY() FName Event = NAME_None;
+	UPROPERTY() FName Trigger = NAME_None;
+	UPROPERTY() TArray<FName> WhenAll;
+	UPROPERTY() TArray<FName> WhenNone;
+};
+
+USTRUCT()
+struct FQinglanRegistryChoice
+{
+	GENERATED_BODY()
+	UPROPERTY() FName ChoiceId = NAME_None;
+	UPROPERTY() FName LabelKey = NAME_None;
+	UPROPERTY() TArray<FName> ResponseKeys;
+	UPROPERTY() TArray<FName> SetsFlags;
+	/** Optional action payload (enter_trial, release_guardian, preview_ending, ...). */
+	UPROPERTY() FName Action = NAME_None;
+	UPROPERTY() TArray<FName> Prerequisites;
+	UPROPERTY() FName PresentationGroup = NAME_None;
+	UPROPERTY() FName ShowAfterTextKey = NAME_None;
+};
+
+USTRUCT()
+struct FQinglanRegistryObjective
+{
+	GENERATED_BODY()
+	UPROPERTY() FName ObjectiveId = NAME_None;
+	UPROPERTY() FName TextKey = NAME_None;
+	/** English-only completion contract note for QA; not player-facing. */
+	UPROPERTY() FString Completion;
+};
+
+USTRUCT()
+struct FQinglanRegistryScene
+{
+	GENERATED_BODY()
+	UPROPERTY() FName SceneId = NAME_None;
+	UPROPERTY() FName ChapterId = NAME_None;
+	UPROPERTY() FName Location = NAME_None;
+	UPROPERTY() FName TitleKey = NAME_None;
+	UPROPERTY() TArray<FName> Prerequisites;
+	UPROPERTY() TArray<FQinglanRegistryLine> Script;
+	UPROPERTY() TArray<FQinglanRegistryChoice> Choices;
+	UPROPERTY() TArray<FQinglanRegistryObjective> Objectives;
+	UPROPERTY() TArray<FName> SetsFlags;
+	UPROPERTY() TArray<FName> NextSceneIds;
+	UPROPERTY() FName RetryKey = NAME_None;
+	UPROPERTY() FName ConfirmationGuard = NAME_None;
+	UPROPERTY() FName AdvanceDeliveryKey = NAME_None;
+	UPROPERTY() FName DeliveryTimeKey = NAME_None;
+	UPROPERTY() FName DeliveryTransition = NAME_None;
+};
+
+USTRUCT()
+struct FQinglanRegistryChapter
+{
+	GENERATED_BODY()
+	UPROPERTY() FName ChapterId = NAME_None;
+	UPROPERTY() FName TitleKey = NAME_None;
+	UPROPERTY() FName SummaryKey = NAME_None;
+	UPROPERTY() TArray<FName> SceneIds;
+};
+
+USTRUCT()
+struct FQinglanRegistrySideQuest
+{
+	GENERATED_BODY()
+	UPROPERTY() FName QuestId = NAME_None;
+	UPROPERTY() FName TitleKey = NAME_None;
+	UPROPERTY() FName SummaryKey = NAME_None;
+	UPROPERTY() TArray<FName> Availability;
+	UPROPERTY() TArray<FQinglanRegistryScene> Stages;
+	UPROPERTY() TArray<FName> CompletionFlags;
+};
+
+USTRUCT()
+struct FQinglanRegistryRecord
+{
+	GENERATED_BODY()
+	UPROPERTY() FName RecordId = NAME_None;
+	UPROPERTY() FName Location = NAME_None;
+	UPROPERTY() TArray<FName> RequiredFlags;
+	UPROPERTY() FName DateLabelKey = NAME_None;
+	UPROPERTY() FName TitleKey = NAME_None;
+	UPROPERTY() FName BodyKey = NAME_None;
+	UPROPERTY() FName CollectionFlag = NAME_None;
+};
+
+USTRUCT()
+struct FQinglanRegistryBark
+{
+	GENERATED_BODY()
+	UPROPERTY() FName BarkId = NAME_None;
+	UPROPERTY() FName Speaker = NAME_None;
+	UPROPERTY() FName Location = NAME_None;
+	UPROPERTY() TArray<FName> RequiredFlags;
+	UPROPERTY() TArray<FName> ForbiddenFlags;
+	UPROPERTY() FName TextKey = NAME_None;
+	UPROPERTY() float CooldownSeconds = 180.f;
+	UPROPERTY() int32 MaxPerVisit = 1;
+	UPROPERTY() bool bSuppressDuringCombat = true;
+};
+
+/**
+ * Complete narrative registry. Populated by the editor importer from
+ * data/story/*.json and validated against both locales. Immutable at runtime.
+ */
+UCLASS()
+class UQinglanStoryRegistry : public UDataAsset
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY() TArray<FQinglanRegistryChapter> Chapters;
+	UPROPERTY() TArray<FQinglanRegistryScene> MainScenes;
+	UPROPERTY() TArray<FQinglanRegistrySideQuest> SideQuests;
+	UPROPERTY() TArray<FQinglanRegistryRecord> Records;
+	UPROPERTY() TArray<FQinglanRegistryBark> Barks;
+	UPROPERTY() FName NarrativeRevision = NAME_None;
+
+	const FQinglanRegistryScene* FindMainScene(FName SceneId) const;
+	const FQinglanRegistryScene* FindSideStage(FName StageId, FName& OutQuestId) const;
+	const FQinglanRegistrySideQuest* FindQuest(FName QuestId) const;
+};
+
+/** One realm room in the 7-room contract. */
+USTRUCT()
+struct FQinglanRealmRoom
+{
+	GENERATED_BODY()
+	UPROPERTY() EQinglanRoomKind Kind = EQinglanRoomKind::Entrance;
+	UPROPERTY() int32 SpiritShards = 0;
+};
+
+/** Realm (expedition template) data asset; mirrors data/examples/realm.json. */
+UCLASS()
+class UQinglanRealmDataAsset : public UPrimaryDataAsset
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY() FName RealmId = NAME_None;
+	UPROPERTY() FName NameTextKey = NAME_None;
+	UPROPERTY() int32 DefaultSeed = 0;
+	UPROPERTY() int32 MaxConcurrentEnemies = 8;
+	UPROPERTY() TArray<FQinglanRealmRoom> Rooms;
+	UPROPERTY() FQinglanInventory FirstClearBonus;
+
+	EQinglanRoomKind GetRoomKind(int32 RoomIndex) const;
+	int32 GetRoomShards(int32 RoomIndex) const;
+	int32 GetRoomCount() const { return Rooms.Num(); }
+};

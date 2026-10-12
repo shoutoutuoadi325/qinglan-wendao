@@ -1,0 +1,903 @@
+{
+  "schema_version": 1,
+  "barks": [
+    {
+      "id": "B01",
+      "speaker": "Lan",
+      "location": "Hub",
+      "required_flags": [
+        "mq_ch00_complete"
+      ],
+      "text_key": "story.bark.b01",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b01",
+        "story.speaker.lan",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.lan",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": [
+        "mq_ch02_complete"
+      ]
+    },
+    {
+      "id": "B02",
+      "speaker": "Apprentice",
+      "location": "Hub",
+      "required_flags": [
+        "mq_ch00_complete"
+      ],
+      "text_key": "story.bark.b02",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b02",
+        "story.speaker.apprentice",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.apprentice",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": [
+        "mq_ch02_complete"
+      ]
+    },
+    {
+      "id": "B03",
+      "speaker": "Lan",
+      "location": "Hub",
+      "required_flags": [
+        "mq_ch00_complete"
+      ],
+      "text_key": "story.bark.b03",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b03",
+        "story.speaker.lan",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.lan",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": [
+        "mq_ch02_complete"
+      ]
+    },
+    {
+      "id": "B04",
+      "speaker": "Apprentice",
+      "location": "Bamboo",
+      "required_flags": [
+        "mq_ch01_complete"
+      ],
+      "text_key": "story.bark.b04",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b04",
+        "story.speaker.apprentice",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.apprentice",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": [
+        "mq_ch06_complete"
+      ]
+    },
+    {
+      "id": "B05",
+      "speaker": "Apprentice",
+      "location": "Bamboo",
+      "required_flags": [
+        "mq_ch01_complete"
+      ],
+      "text_key": "story.bark.b05",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b05",
+        "story.speaker.apprentice",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.apprentice",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": [
+        "mq_ch06_complete"
+      ]
+    },
+    {
+      "id": "B06",
+      "speaker": "Lan",
+      "location": "Hub",
+      "required_flags": [
+        "mq_ch01_complete"
+      ],
+      "text_key": "story.bark.b06",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b06",
+        "story.speaker.lan",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.lan",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": [
+        "mq_ch06_complete"
+      ]
+    },
+    {
+      "id": "B07",
+      "speaker": "Apprentice",
+      "location": "Bamboo",
+      "required_flags": [
+        "mq_ch02_complete"
+      ],
+      "text_key": "story.bark.b07",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b07",
+        "story.speaker.apprentice",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.apprentice",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": [
+        "mq_ch06_complete"
+      ]
+    },
+    {
+      "id": "B08",
+      "speaker": "Lan",
+      "location": "Hub",
+      "required_flags": [
+        "mq_ch02_complete"
+      ],
+      "text_key": "story.bark.b08",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b08",
+        "story.speaker.lan",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.lan",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": [
+        "mq_ch06_complete"
+      ]
+    },
+    {
+      "id": "B09",
+      "speaker": "Apprentice",
+      "location": "Hub",
+      "required_flags": [
+        "mq_ch02_complete"
+      ],
+      "text_key": "story.bark.b09",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b09",
+        "story.speaker.apprentice",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.apprentice",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": [
+        "mq_ch06_complete"
+      ]
+    },
+    {
+      "id": "B10",
+      "speaker": "Lan",
+      "location": "Hub",
+      "required_flags": [
+        "mq_ch02_complete"
+      ],
+      "text_key": "story.bark.b10",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b10",
+        "story.speaker.lan",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.lan",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "required_barks_this_visit": [
+        "B09"
+      ],
+      "forbidden_flags": [
+        "mq_ch06_complete"
+      ]
+    },
+    {
+      "id": "B11",
+      "speaker": "Apprentice",
+      "location": "Trial",
+      "required_flags": [
+        "mq_ch03_complete"
+      ],
+      "text_key": "story.bark.b11",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b11",
+        "story.speaker.apprentice",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.apprentice",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": [
+        "mq_ch06_complete"
+      ]
+    },
+    {
+      "id": "B12",
+      "speaker": "Lan",
+      "location": "Hub",
+      "required_flags": [
+        "mq_ch03_complete"
+      ],
+      "text_key": "story.bark.b12",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b12",
+        "story.speaker.lan",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.lan",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": [
+        "mq_ch06_complete"
+      ]
+    },
+    {
+      "id": "B13",
+      "speaker": "Apprentice",
+      "location": "Ashen",
+      "required_flags": [
+        "mq_ch04_complete"
+      ],
+      "text_key": "story.bark.b13",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b13",
+        "story.speaker.apprentice",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.apprentice",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": [
+        "mq_ch06_complete"
+      ]
+    },
+    {
+      "id": "B14",
+      "speaker": "Apprentice",
+      "location": "Ashen",
+      "required_flags": [
+        "mq_ch04_complete"
+      ],
+      "text_key": "story.bark.b14",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b14",
+        "story.speaker.apprentice",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.apprentice",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": [
+        "mq_ch06_complete"
+      ]
+    },
+    {
+      "id": "B15",
+      "speaker": "Lan",
+      "location": "Hub",
+      "required_flags": [
+        "mq_ch04_complete"
+      ],
+      "text_key": "story.bark.b15",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b15",
+        "story.speaker.lan",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.lan",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": [
+        "mq_ch06_complete"
+      ]
+    },
+    {
+      "id": "B16",
+      "speaker": "Apprentice",
+      "location": "Ashen",
+      "required_flags": [
+        "mq_ch05_complete"
+      ],
+      "text_key": "story.bark.b16",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b16",
+        "story.speaker.apprentice",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.apprentice",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": [
+        "mq_ch06_complete"
+      ]
+    },
+    {
+      "id": "B17",
+      "speaker": "Shen",
+      "location": "Reader",
+      "required_flags": [
+        "mq_ch05_complete"
+      ],
+      "text_key": "story.bark.b17",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b17",
+        "story.speaker.shen",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.shen",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": [
+        "mq_shen_released",
+        "mq_ch06_complete"
+      ]
+    },
+    {
+      "id": "B18",
+      "speaker": "Lan",
+      "location": "Hub",
+      "required_flags": [
+        "mq_ch05_complete"
+      ],
+      "text_key": "story.bark.b18",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b18",
+        "story.speaker.lan",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.lan",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": [
+        "mq_ch06_complete"
+      ]
+    },
+    {
+      "id": "B19",
+      "speaker": "Apprentice",
+      "location": "Hub",
+      "required_flags": [
+        "mq_ch05_complete"
+      ],
+      "text_key": "story.bark.b19",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b19",
+        "story.speaker.apprentice",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.apprentice",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": [
+        "mq_ch06_complete"
+      ]
+    },
+    {
+      "id": "B20",
+      "speaker": "Shen",
+      "location": "Reader",
+      "required_flags": [
+        "mq_ch05_complete"
+      ],
+      "text_key": "story.bark.b20",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b20",
+        "story.speaker.shen",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.shen",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": [
+        "mq_shen_released",
+        "mq_ch06_complete"
+      ]
+    },
+    {
+      "id": "B21",
+      "speaker": "Lan",
+      "location": "Hub",
+      "required_flags": [
+        "mq_ch05_complete"
+      ],
+      "text_key": "story.bark.b21",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b21",
+        "story.speaker.lan",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.lan",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": [
+        "mq_ch06_complete"
+      ]
+    },
+    {
+      "id": "B22",
+      "speaker": "Apprentice",
+      "location": "Trial",
+      "required_flags": [
+        "mq_ch06_complete"
+      ],
+      "text_key": "story.bark.b22",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b22",
+        "story.speaker.apprentice",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.apprentice",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": []
+    },
+    {
+      "id": "B23",
+      "speaker": "Lan",
+      "location": "Hub",
+      "required_flags": [
+        "ending_open"
+      ],
+      "text_key": "story.bark.b23",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b23",
+        "story.speaker.lan",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.lan",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": []
+    },
+    {
+      "id": "B24",
+      "speaker": "Apprentice",
+      "location": "Hub",
+      "required_flags": [
+        "ending_open"
+      ],
+      "text_key": "story.bark.b24",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b24",
+        "story.speaker.apprentice",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.apprentice",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": []
+    },
+    {
+      "id": "B25",
+      "speaker": "Lan",
+      "location": "Hub",
+      "required_flags": [
+        "ending_seal"
+      ],
+      "text_key": "story.bark.b25",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b25",
+        "story.speaker.lan",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.lan",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": []
+    },
+    {
+      "id": "B26",
+      "speaker": "Apprentice",
+      "location": "Hub",
+      "required_flags": [
+        "ending_seal"
+      ],
+      "text_key": "story.bark.b26",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b26",
+        "story.speaker.apprentice",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.apprentice",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": []
+    },
+    {
+      "id": "B27",
+      "speaker": "Lan",
+      "location": "Hub",
+      "required_flags": [
+        "ending_shared"
+      ],
+      "text_key": "story.bark.b27",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b27",
+        "story.speaker.lan",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.lan",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": []
+    },
+    {
+      "id": "B28",
+      "speaker": "Apprentice",
+      "location": "Hub",
+      "required_flags": [
+        "ending_shared"
+      ],
+      "text_key": "story.bark.b28",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b28",
+        "story.speaker.apprentice",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.apprentice",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": []
+    },
+    {
+      "id": "B29",
+      "speaker": "Apprentice",
+      "location": "Training expedition",
+      "required_flags": [
+        "mq_ch07_complete"
+      ],
+      "text_key": "story.bark.b29",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b29",
+        "story.speaker.apprentice",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.apprentice",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": []
+    },
+    {
+      "id": "B30",
+      "speaker": "Lan",
+      "location": "Hub",
+      "required_flags": [
+        "mq_ch07_complete"
+      ],
+      "text_key": "story.bark.b30",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b30",
+        "story.speaker.lan",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.lan",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": []
+    },
+    {
+      "id": "B31",
+      "speaker": "Lan",
+      "location": "Hub",
+      "required_flags": [
+        "mq_ch00_complete"
+      ],
+      "text_key": "story.bark.b31",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b31",
+        "story.speaker.lan",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.lan",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": [
+        "mq_ch02_complete"
+      ]
+    },
+    {
+      "id": "B32",
+      "speaker": "Apprentice",
+      "location": "Bamboo",
+      "required_flags": [
+        "mq_ch01_complete"
+      ],
+      "text_key": "story.bark.b32",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b32",
+        "story.speaker.apprentice",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.apprentice",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": []
+    },
+    {
+      "id": "B33",
+      "speaker": "Lan",
+      "location": "Hub",
+      "required_flags": [
+        "mq_ch02_complete"
+      ],
+      "text_key": "story.bark.b33",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b33",
+        "story.speaker.lan",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.lan",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": []
+    },
+    {
+      "id": "B34",
+      "speaker": "Apprentice",
+      "location": "Trial",
+      "required_flags": [
+        "mq_ch03_complete"
+      ],
+      "text_key": "story.bark.b34",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b34",
+        "story.speaker.apprentice",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.apprentice",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": []
+    },
+    {
+      "id": "B35",
+      "speaker": "Lan",
+      "location": "Hub",
+      "required_flags": [
+        "mq_ch04_complete"
+      ],
+      "text_key": "story.bark.b35",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b35",
+        "story.speaker.lan",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.lan",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": [
+        "mq_ch06_complete"
+      ]
+    },
+    {
+      "id": "B36",
+      "speaker": "Apprentice",
+      "location": "Ashen",
+      "required_flags": [
+        "mq_ch04_complete"
+      ],
+      "text_key": "story.bark.b36",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b36",
+        "story.speaker.apprentice",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.apprentice",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": [
+        "mq_ch06_complete"
+      ]
+    },
+    {
+      "id": "B37",
+      "speaker": "Lan",
+      "location": "Hub",
+      "required_flags": [
+        "mq_ch05_complete"
+      ],
+      "text_key": "story.bark.b37",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b37",
+        "story.speaker.lan",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.lan",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": [
+        "mq_ch06_complete"
+      ]
+    },
+    {
+      "id": "B38",
+      "speaker": "Apprentice",
+      "location": "Hub",
+      "required_flags": [
+        "mq_ch05_complete"
+      ],
+      "text_key": "story.bark.b38",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b38",
+        "story.speaker.apprentice",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.apprentice",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": [
+        "mq_ch06_complete",
+        "sq_handover_accepted"
+      ]
+    },
+    {
+      "id": "B39",
+      "speaker": "Lan",
+      "location": "Hub",
+      "required_flags": [
+        "mq_ch07_complete"
+      ],
+      "text_key": "story.bark.b39",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b39",
+        "story.speaker.lan",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.lan",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": []
+    },
+    {
+      "id": "B40",
+      "speaker": "Apprentice",
+      "location": "Hub",
+      "required_flags": [
+        "mq_ch07_complete"
+      ],
+      "text_key": "story.bark.b40",
+      "cooldown_seconds": 180,
+      "max_per_visit": 1,
+      "suppress_during_combat": true,
+      "player_text_keys": [
+        "story.bark.b40",
+        "story.speaker.apprentice",
+        "story.speaker.source.live"
+      ],
+      "speaker_key": "story.speaker.apprentice",
+      "source_kind": "live",
+      "source_kind_key": "story.speaker.source.live",
+      "forbidden_flags": []
+    }
+  ]
+}

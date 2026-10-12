@@ -22,5 +22,16 @@
   ],
   "campaign_flags": [],
   "committed_transaction_ids": [],
-  "checkpoint": null
+  "checkpoint": null,
+  "narrative": {
+    "revision": "narrative-1",
+    "completed_scenes": [],
+    "completed_side_stages": [],
+    "flags": [],
+    "choice_decisions": {},
+    "read_records": [],
+    "pending_agreements": {},
+    "effective_agreements": {},
+    "confirmed_ending": null
+  }
 }

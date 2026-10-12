@@ -1,0 +1,22 @@
+{
+  "story.speaker.apprentice": "Apprentice",
+  "story.speaker.lan": "Keeper Lan",
+  "story.speaker.yun": "Elder Yun",
+  "story.speaker.shen": "Shen Heng",
+  "story.speaker.unknown": "Unidentified Voice",
+  "story.speaker.document": "Document",
+  "story.speaker.inspection": "Inspection",
+  "story.speaker.array": "Array Notice",
+  "story.speaker.combat": "Combat Warning",
+  "story.speaker.time": "Time",
+  "story.speaker.record": "Record",
+  "story.speaker.ledger": "Ledger",
+  "story.speaker.diagram": "Diagram",
+  "story.speaker.letter": "Letter",
+  "story.speaker.source.live": "Present conversation",
+  "story.speaker.source.recorded": "Recorded imprint",
+  "story.speaker.source.letter": "Dated letter",
+  "story.speaker.source.memory": "Remembered conversation",
+  "story.speaker.source.system": "Array status",
+  "story.speaker.source.paper": "Written record"
+}

@@ -32,7 +32,7 @@ Always display the next mandatory requirement separately from optional purchases
 
 ## 3. Techniques and loadouts
 
-Jade Sword Arc and Flowing Ward unlock during the tutorial; Ember Lance unlocks after the guided expedition. Thunder Seal unlocks after Bamboo's first clear. Stone Aegis and Verdant Pulse unlock at Foundation. Mist Step and Orbiting Blades unlock through optional lore encounters with explicit journal directions.
+Jade Sword Arc and Flowing Ward unlock during the tutorial; Ember Lance unlocks after the guided expedition. Thunder Seal unlocks after Bamboo's first clear. Stone Aegis and Verdant Pulse unlock at Foundation. Mist Step and Orbiting Blades become available through the authored SQ04 and SQ05 training-access rewards, with explicit journal directions. Their short sanctuary practice interaction completes the actual technique unlock; neither quest requires the technique beforehand.
 
 Equip up to four techniques, two passives, two talismans, and one relic at a sanctuary or entrance shrine. Swapping is free. Do not allow loadout changes mid-combat or during cooldowns to reset availability. Unequipped techniques retain their progression.
 

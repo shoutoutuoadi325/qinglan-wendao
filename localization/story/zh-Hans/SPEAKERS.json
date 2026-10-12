@@ -1,0 +1,22 @@
+{
+  "story.speaker.apprentice": "弟子",
+  "story.speaker.lan": "岚伯",
+  "story.speaker.yun": "云长老",
+  "story.speaker.shen": "沈衡",
+  "story.speaker.unknown": "未明之声",
+  "story.speaker.document": "文书",
+  "story.speaker.inspection": "查验",
+  "story.speaker.array": "阵法提示",
+  "story.speaker.combat": "战斗预警",
+  "story.speaker.time": "时间",
+  "story.speaker.record": "记录",
+  "story.speaker.ledger": "簿记",
+  "story.speaker.diagram": "图示",
+  "story.speaker.letter": "书信",
+  "story.speaker.source.live": "当下对话",
+  "story.speaker.source.recorded": "留存印记",
+  "story.speaker.source.letter": "署日书信",
+  "story.speaker.source.memory": "回想旧谈",
+  "story.speaker.source.system": "阵法状态",
+  "story.speaker.source.paper": "纸本文书"
+}

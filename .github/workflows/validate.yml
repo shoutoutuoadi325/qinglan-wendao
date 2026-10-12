@@ -21,3 +21,5 @@ jobs:
           python-version: '3.12'
       - name: Validate documents, localization, and data contracts
         run: python3 tools/validate_repository.py
+      - name: Verify generated bilingual story editions
+        run: python3 tools/export_story_reading.py --check

@@ -2,20 +2,23 @@
 
 ## 1. World and narrative
 
-Qinglan Sanctuary stands above a valley where the spiritual veins have fractured. The player is an apprentice maintaining the sanctuary after its senior cultivators depart. Two corrupted spiritual anchors threaten the valley. Restore them, establish a stable foundation, and form a Golden Core to withstand the final storm.
+Qinglan Sanctuary's apprentice is asked to repair a damaged intake and release anchor. The apparent repair gradually exposes an emergency closed cycle that has bound Warden Shen Heng for thirteen years despite his original thirty-day consent. Keeper Lan's undocumented relief bypass helped downstream residents but strained the intake; Elder Yun signed the original design and is now downriver arranging warnings and evacuation. Their responsibility is specific and different, not collapsed into a single secret villain.
 
-The player is not a chosen sovereign of an enormous universe. A focused local problem makes a complete story feasible. All factions, characters, place names, symbols, and dialogue are original. Cultivation, Five Elements, talismans, mountain gates, and tribulations provide cultural inspiration without reproducing a particular novel or commercial game's story.
+The player establishes a Foundation, uncovers the archive's uncompleted handover, and forms a Golden Core to disable the governor's defensive shell. All three final choices release Shen. Open River uses the apprentice's Core as a temporary regulator; Quiet Summit safely retires the mountain intake; Returning Rain reopens through an explicitly agreed shared maintenance network. The last option requires three transparent optional agreements rather than a hidden morality score.
+
+The complete narrative specification begins with the [story bible](story-bible.md) and [chapter/script index](story/README.md). Exact English and Simplified Chinese player text is in paired localization resources and readable bilingual editions linked there. Scene/quest registries define prerequisites, choices, objective changes, completion flags, and safe commits.
 
 ### Main cast
 
-| Character | Role | Delivery |
+| Character | Role and arc | Delivery |
 | --- | --- | --- |
-| The Apprentice | Player; unnamed, customizable profile label | Environmental reaction and minimal text |
-| Elder Yun | Mentor present through letters and shrine inscriptions | Tutorial and breakthrough guidance |
-| Keeper Lan | Sanctuary caretaker | Three short quest exchanges |
-| The Broken Guardian | Final opponent tied to the valley's anchors | Visual storytelling; no voiced dialogue |
+| The Apprentice | Adult former porter; useful obedience becomes informed responsibility; no special lineage | Short authored replies, gameplay observations, choices |
+| Keeper Lan | Caretaker; fear of repeating the flood, admission of his bypass, accountable participation | Hub scenes, contextual lines, practical tasks |
+| Elder Yun | Absent mentor and former surveyor; recorded complicity and concrete evacuation work | Dated letters/archive; explicitly later epilogue correspondence |
+| Shen Heng / The Broken Guardian | Bound living governor; asks for a real end to the emergency and his own release | Reader conversations, shell encounter, final consent scene |
+| Lan Mei | Deceased spillway guide with ordinary unfinished plans | Dated route notes and a limited recorded fragment; no resurrection |
 
-Story progression is a fixed sequence: awaken → train → restore Bamboo Hollow → pass the Foundation trial → restore Ashen Peak → pass the Golden Core trial → ending scene and free replay. Target 15–20 minutes of total reading across the campaign, with skippable dialogue and a journal summary.
+Eight chapters run from The Dry Bell to What the River Keeps. Main dialogue/reading targets 35–50 minutes; optional stories/records add 25–40 minutes. First-clear campaign targets 4–6 hours, or 6–8 hours with all optional stories. These are pacing targets to test, not reasons to add compulsory grinding. Dialogue is skippable, with equivalent journal/objective state updates; consequential choices are never auto-selected.
 
 ## 2. Player experience pillars
 

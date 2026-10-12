@@ -1,0 +1,1970 @@
+{
+  "schema_version": 1,
+  "chapters": [
+    {
+      "id": "CH04",
+      "title_key": "story.ch04.title",
+      "summary_key": "story.ch04.summary",
+      "scene_ids": [
+        "CH04_S01",
+        "CH04_S02",
+        "CH04_S03",
+        "CH04_S04"
+      ]
+    },
+    {
+      "id": "CH05",
+      "title_key": "story.ch05.title",
+      "summary_key": "story.ch05.summary",
+      "scene_ids": [
+        "CH05_S01",
+        "CH05_S02",
+        "CH05_S03",
+        "CH05_S04"
+      ]
+    },
+    {
+      "id": "CH06",
+      "title_key": "story.ch06.title",
+      "summary_key": "story.ch06.summary",
+      "scene_ids": [
+        "CH06_S01",
+        "CH06_S02",
+        "CH06_S03",
+        "CH06_S04"
+      ]
+    },
+    {
+      "id": "CH07",
+      "title_key": "story.ch07.title",
+      "summary_key": "story.ch07.summary",
+      "scene_ids": [
+        "CH07_S01",
+        "CH07_S02",
+        "CH07_S03",
+        "CH07_S04"
+      ]
+    }
+  ],
+  "scenes": [
+    {
+      "id": "CH04_S01",
+      "chapter": "CH04",
+      "location": "Ashen Peak approach, existing rooms 1–2",
+      "title_key": "story.ch04.s01.title",
+      "prerequisites": [
+        "mq_ch03_complete"
+      ],
+      "script": [
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch04.s01.apprentice",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Inspection",
+          "text_key": "story.ch04.s01.scale",
+          "speaker_key": "story.speaker.inspection",
+          "source_kind": "system",
+          "source_kind_key": "story.speaker.source.system"
+        },
+        {
+          "speaker": "Archive Fragment",
+          "text_key": "story.ch04.s01.note",
+          "speaker_key": "story.speaker.record",
+          "source_kind": "paper",
+          "source_kind_key": "story.speaker.source.paper"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch04.s01.reader",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Keeper Lan, remembered conversation",
+          "text_key": "story.ch04.s01.lan",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "memory",
+          "source_kind_key": "story.speaker.source.memory"
+        }
+      ],
+      "choices": [
+        {
+          "id": "s01.ask_water",
+          "label_key": "story.ch04.s01.ask_water",
+          "response_keys": [
+            "story.ch04.s01.response_water"
+          ],
+          "sets_flags": [
+            "mq_question_water"
+          ]
+        },
+        {
+          "id": "s01.ask_heat",
+          "label_key": "story.ch04.s01.ask_heat",
+          "response_keys": [
+            "story.ch04.s01.response_heat"
+          ],
+          "sets_flags": [
+            "mq_question_heat"
+          ]
+        }
+      ],
+      "objectives": [
+        {
+          "id": "s01.objective",
+          "text_key": "story.ch04.s01.objective",
+          "completion": "Both scale interactions read and room encounter cleared."
+        }
+      ],
+      "sets_flags": [
+        "mq_ashen_marks_read"
+      ],
+      "next_scene_ids": [
+        "CH04_S02"
+      ],
+      "player_text_keys": [
+        "story.ch04.title",
+        "story.ch04.summary",
+        "story.ch04.s01.title",
+        "story.ch04.s01.objective",
+        "story.ch04.s01.apprentice",
+        "story.ch04.s01.scale",
+        "story.ch04.s01.note",
+        "story.ch04.s01.reader",
+        "story.ch04.s01.lan",
+        "story.ch04.s01.response_water",
+        "story.ch04.s01.response_heat",
+        "story.ch04.s01.ask_water",
+        "story.ch04.s01.ask_heat",
+        "story.ch04.s01.journal",
+        "story.ch04.s01.retry",
+        "story.speaker.apprentice",
+        "story.speaker.inspection",
+        "story.speaker.lan",
+        "story.speaker.record",
+        "story.speaker.source.live",
+        "story.speaker.source.memory",
+        "story.speaker.source.paper",
+        "story.speaker.source.system"
+      ]
+    },
+    {
+      "id": "CH04_S02",
+      "chapter": "CH04",
+      "location": "Ashen Peak archive, existing room 3",
+      "title_key": "story.ch04.s02.title",
+      "prerequisites": [
+        "mq_ashen_marks_read"
+      ],
+      "script": [
+        {
+          "speaker": "Reader Status",
+          "text_key": "story.ch04.s02.reader",
+          "speaker_key": "story.speaker.array",
+          "source_kind": "system",
+          "source_kind_key": "story.speaker.source.system"
+        },
+        {
+          "speaker": "Original Compact",
+          "text_key": "story.ch04.s02.compact",
+          "speaker_key": "story.speaker.ledger",
+          "source_kind": "paper",
+          "source_kind_key": "story.speaker.source.paper"
+        },
+        {
+          "speaker": "Original Compact",
+          "text_key": "story.ch04.s02.compact2",
+          "speaker_key": "story.speaker.ledger",
+          "source_kind": "paper",
+          "source_kind_key": "story.speaker.source.paper"
+        },
+        {
+          "speaker": "Witness Statement — Yun",
+          "text_key": "story.ch04.s02.witness",
+          "speaker_key": "story.speaker.letter",
+          "source_kind": "paper",
+          "source_kind_key": "story.speaker.source.paper"
+        },
+        {
+          "speaker": "Recorded Fragment — Shen, Flood Year 400",
+          "text_key": "story.ch04.s02.echo",
+          "speaker_key": "story.speaker.shen",
+          "source_kind": "recorded",
+          "source_kind_key": "story.speaker.source.recorded"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch04.s02.apprentice",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Reader Status",
+          "text_key": "story.ch04.s02.note",
+          "speaker_key": "story.speaker.array",
+          "source_kind": "system",
+          "source_kind_key": "story.speaker.source.system"
+        }
+      ],
+      "choices": [
+        {
+          "id": "s02.acknowledge",
+          "label_key": "story.ch04.s02.acknowledge",
+          "response_keys": [
+            "story.ch04.s02.response"
+          ],
+          "sets_flags": []
+        }
+      ],
+      "objectives": [
+        {
+          "id": "s02.objective",
+          "text_key": "story.ch04.s02.objective",
+          "completion": "Three reader contacts aligned; agreement and witness transcript opened; acknowledgment selected."
+        }
+      ],
+      "sets_flags": [
+        "mq_thirty_day_consent_read"
+      ],
+      "next_scene_ids": [
+        "CH04_S03"
+      ],
+      "player_text_keys": [
+        "story.ch04.s02.title",
+        "story.ch04.s02.objective",
+        "story.ch04.s02.reader",
+        "story.ch04.s02.compact",
+        "story.ch04.s02.compact2",
+        "story.ch04.s02.witness",
+        "story.ch04.s02.echo",
+        "story.ch04.s02.apprentice",
+        "story.ch04.s02.note",
+        "story.ch04.s02.response",
+        "story.ch04.s02.acknowledge",
+        "story.ch04.s02.journal",
+        "story.ch04.s02.skip",
+        "story.speaker.apprentice",
+        "story.speaker.array",
+        "story.speaker.ledger",
+        "story.speaker.letter",
+        "story.speaker.shen",
+        "story.speaker.source.live",
+        "story.speaker.source.paper",
+        "story.speaker.source.recorded",
+        "story.speaker.source.system"
+      ]
+    },
+    {
+      "id": "CH04_S03",
+      "chapter": "CH04",
+      "location": "Ashen Peak archive, same room",
+      "title_key": "story.ch04.s03.title",
+      "prerequisites": [
+        "mq_thirty_day_consent_read"
+      ],
+      "script": [
+        {
+          "speaker": "Renewal Ledger — Flood Year 400, Emergency Day 31",
+          "text_key": "story.ch04.s03.renewal1",
+          "speaker_key": "story.speaker.ledger",
+          "source_kind": "paper",
+          "source_kind_key": "story.speaker.source.paper"
+        },
+        {
+          "speaker": "Renewal Ledger — Year 401, Winter Month, Day 9",
+          "text_key": "story.ch04.s03.renewal2",
+          "speaker_key": "story.speaker.ledger",
+          "source_kind": "paper",
+          "source_kind_key": "story.speaker.source.paper"
+        },
+        {
+          "speaker": "Renewal Ledger — Year 407, Rain Month, Day 3",
+          "text_key": "story.ch04.s03.renewal3",
+          "speaker_key": "story.speaker.ledger",
+          "source_kind": "paper",
+          "source_kind_key": "story.speaker.source.paper"
+        },
+        {
+          "speaker": "Renewal Ledger — Year 412, Winter Month, Day 9",
+          "text_key": "story.ch04.s03.renewal4",
+          "speaker_key": "story.speaker.ledger",
+          "source_kind": "paper",
+          "source_kind_key": "story.speaker.source.paper"
+        },
+        {
+          "speaker": "Handover Register",
+          "text_key": "story.ch04.s03.handover",
+          "speaker_key": "story.speaker.ledger",
+          "source_kind": "paper",
+          "source_kind_key": "story.speaker.source.paper"
+        },
+        {
+          "speaker": "Surveyor Note — Yun, Year 407",
+          "text_key": "story.ch04.s03.yun",
+          "speaker_key": "story.speaker.letter",
+          "source_kind": "paper",
+          "source_kind_key": "story.speaker.source.paper"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch04.s03.apprentice",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Calibration Circuit",
+          "speaker_key": "story.speaker.array",
+          "source_kind": "system",
+          "source_kind_key": "story.speaker.source.system",
+          "text_key": "story.ch04.s03.pulse_status",
+          "event": "isolated_test_pulse"
+        },
+        {
+          "speaker": "Apprentice",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live",
+          "text_key": "story.ch04.s03.pulse_observation",
+          "event": "isolated_test_pulse_complete"
+        }
+      ],
+      "choices": [
+        {
+          "id": "s03.ask_signers",
+          "label_key": "story.ch04.s03.ask_signers",
+          "response_keys": [
+            "story.ch04.s03.response_signers"
+          ],
+          "sets_flags": [
+            "mq_record_signers"
+          ]
+        },
+        {
+          "id": "s03.ask_cost",
+          "label_key": "story.ch04.s03.ask_cost",
+          "response_keys": [
+            "story.ch04.s03.response_people"
+          ],
+          "sets_flags": [
+            "mq_record_downstream"
+          ]
+        }
+      ],
+      "objectives": [
+        {
+          "id": "s03.objective",
+          "text_key": "story.ch04.s03.objective",
+          "completion": "Four dated entries plus handover summary opened."
+        }
+      ],
+      "sets_flags": [
+        "mq_renewals_read"
+      ],
+      "next_scene_ids": [
+        "CH04_S04"
+      ],
+      "player_text_keys": [
+        "story.ch04.s03.title",
+        "story.ch04.s03.objective",
+        "story.ch04.s03.renewal1",
+        "story.ch04.s03.renewal2",
+        "story.ch04.s03.renewal3",
+        "story.ch04.s03.renewal4",
+        "story.ch04.s03.handover",
+        "story.ch04.s03.yun",
+        "story.ch04.s03.apprentice",
+        "story.ch04.s03.response_signers",
+        "story.ch04.s03.response_people",
+        "story.ch04.s03.ask_signers",
+        "story.ch04.s03.ask_cost",
+        "story.ch04.s03.journal",
+        "story.speaker.apprentice",
+        "story.speaker.ledger",
+        "story.speaker.letter",
+        "story.speaker.source.live",
+        "story.speaker.source.paper",
+        "story.ch04.s03.pulse_status",
+        "story.ch04.s03.pulse_observation",
+        "story.speaker.array",
+        "story.speaker.source.system"
+      ],
+      "physical_reveal": "After comparing the renewal dates, Interact runs a harmless isolated calibration circuit at the archive bench. Two existing projected dials respond for four seconds: stable mountain gauge, climbing governor gauge. No live load is added to Shen. Observe, then proceed to the forecast. Use material/needle animation, not a new fluid simulation."
+    },
+    {
+      "id": "CH04_S04",
+      "chapter": "CH04",
+      "location": "Ashen Peak release antechamber, existing room 4",
+      "title_key": "story.ch04.s04.title",
+      "prerequisites": [
+        "mq_renewals_read"
+      ],
+      "script": [
+        {
+          "speaker": "Release Drawing",
+          "text_key": "story.ch04.s04.forecast",
+          "speaker_key": "story.speaker.diagram",
+          "source_kind": "paper",
+          "source_kind_key": "story.speaker.source.paper"
+        },
+        {
+          "speaker": "Release Drawing",
+          "text_key": "story.ch04.s04.limit",
+          "speaker_key": "story.speaker.diagram",
+          "source_kind": "paper",
+          "source_kind_key": "story.speaker.source.paper"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch04.s04.apprentice",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Revised Repair Brief",
+          "text_key": "story.ch04.s04.brief",
+          "speaker_key": "story.speaker.letter",
+          "source_kind": "paper",
+          "source_kind_key": "story.speaker.source.paper"
+        }
+      ],
+      "choices": [
+        {
+          "id": "s04.commit",
+          "label_key": "story.ch04.s04.commit",
+          "response_keys": [
+            "story.ch04.s04.response"
+          ],
+          "sets_flags": []
+        }
+      ],
+      "objectives": [
+        {
+          "id": "s04.objective",
+          "text_key": "story.ch04.s04.objective",
+          "completion": "Forecast and repair brief read; shrine activated."
+        }
+      ],
+      "sets_flags": [
+        "mq_ch04_complete",
+        "mq_ashen_plan_understood"
+      ],
+      "next_scene_ids": [
+        "CH05_S01"
+      ],
+      "player_text_keys": [
+        "story.ch04.s04.title",
+        "story.ch04.s04.objective",
+        "story.ch04.s04.forecast",
+        "story.ch04.s04.limit",
+        "story.ch04.s04.apprentice",
+        "story.ch04.s04.brief",
+        "story.ch04.s04.response",
+        "story.ch04.s04.commit",
+        "story.ch04.s04.journal",
+        "story.ch04.s04.checkpoint",
+        "story.ch04.s04.archive_access",
+        "story.speaker.apprentice",
+        "story.speaker.diagram",
+        "story.speaker.letter",
+        "story.speaker.source.live",
+        "story.speaker.source.paper"
+      ]
+    },
+    {
+      "id": "CH05_S01",
+      "chapter": "CH05",
+      "location": "Ashen Peak boss arena",
+      "title_key": "story.ch05.s01.title",
+      "prerequisites": [
+        "mq_ch04_complete"
+      ],
+      "script": [
+        {
+          "speaker": "Regulator Status",
+          "text_key": "story.ch05.s01.scan",
+          "trigger": "arena_entry",
+          "speaker_key": "story.speaker.array",
+          "source_kind": "system",
+          "source_kind_key": "story.speaker.source.system"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch05.s01.apprentice",
+          "trigger": "arena_entry",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Combat Cue — Fire Lance",
+          "text_key": "story.ch05.s01.lance",
+          "trigger": "first_fire_lance_telegraph",
+          "speaker_key": "story.speaker.combat",
+          "source_kind": "system",
+          "source_kind_key": "story.speaker.source.system"
+        },
+        {
+          "speaker": "Combat Cue — Shockwave",
+          "text_key": "story.ch05.s01.wave",
+          "trigger": "first_shockwave_telegraph",
+          "speaker_key": "story.speaker.combat",
+          "source_kind": "system",
+          "source_kind_key": "story.speaker.source.system"
+        },
+        {
+          "speaker": "Combat Cue — Charge",
+          "text_key": "story.ch05.s01.charge",
+          "trigger": "first_charge_telegraph",
+          "speaker_key": "story.speaker.combat",
+          "source_kind": "system",
+          "source_kind_key": "story.speaker.source.system"
+        },
+        {
+          "speaker": "Regulator Status — 50% Health",
+          "text_key": "story.ch05.s01.half",
+          "trigger": "boss_health_at_or_below_50_percent",
+          "speaker_key": "story.speaker.array",
+          "source_kind": "system",
+          "source_kind_key": "story.speaker.source.system"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch05.s01.victory",
+          "trigger": "boss_defeated",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        }
+      ],
+      "choices": [],
+      "objectives": [
+        {
+          "id": "s01.objective",
+          "text_key": "story.ch05.s01.objective",
+          "completion": "Ashen Guardian defeated; first-clear reward recorded as pending. Bank only at the normal sanctuary return, after CH05_S02."
+        }
+      ],
+      "sets_flags": [
+        "mq_ashen_guard_disabled"
+      ],
+      "next_scene_ids": [
+        "CH05_S02"
+      ],
+      "player_text_keys": [
+        "story.ch05.title",
+        "story.ch05.summary",
+        "story.ch05.s01.title",
+        "story.ch05.s01.objective",
+        "story.ch05.s01.scan",
+        "story.ch05.s01.apprentice",
+        "story.ch05.s01.lance",
+        "story.ch05.s01.wave",
+        "story.ch05.s01.charge",
+        "story.ch05.s01.half",
+        "story.ch05.s01.victory",
+        "story.ch05.s01.fail",
+        "story.ch05.s01.journal",
+        "story.speaker.apprentice",
+        "story.speaker.array",
+        "story.speaker.combat",
+        "story.speaker.source.live",
+        "story.speaker.source.system"
+      ]
+    },
+    {
+      "id": "CH05_S02",
+      "chapter": "CH05",
+      "location": "Ashen Peak boss arena, safe state",
+      "title_key": "story.ch05.s02.title",
+      "prerequisites": [
+        "mq_ashen_guard_disabled"
+      ],
+      "script": [
+        {
+          "speaker": "Release Control",
+          "text_key": "story.ch05.s02.control1",
+          "speaker_key": "story.speaker.array",
+          "source_kind": "system",
+          "source_kind_key": "story.speaker.source.system"
+        },
+        {
+          "speaker": "Release Control",
+          "text_key": "story.ch05.s02.control2",
+          "speaker_key": "story.speaker.array",
+          "source_kind": "system",
+          "source_kind_key": "story.speaker.source.system"
+        },
+        {
+          "speaker": "Release Control",
+          "text_key": "story.ch05.s02.control3",
+          "speaker_key": "story.speaker.array",
+          "source_kind": "system",
+          "source_kind_key": "story.speaker.source.system"
+        },
+        {
+          "speaker": "Shen Heng — Live Transmission",
+          "text_key": "story.ch05.s02.shen",
+          "speaker_key": "story.speaker.shen",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch05.s02.apprentice",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Shen Heng — Live Transmission",
+          "text_key": "story.ch05.s02.shen2",
+          "speaker_key": "story.speaker.shen",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch05.s02.storm",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        }
+      ],
+      "choices": [
+        {
+          "id": "s02.return_now",
+          "label_key": "story.ch05.s02.return_now",
+          "response_keys": [],
+          "sets_flags": []
+        }
+      ],
+      "objectives": [
+        {
+          "id": "s02.objective",
+          "text_key": "story.ch05.s02.objective",
+          "completion": "Three ordered controls activated with no timing test."
+        }
+      ],
+      "sets_flags": [
+        "mq_ashen_release_restored",
+        "mq_storm_onset"
+      ],
+      "next_scene_ids": [
+        "CH05_S03"
+      ],
+      "player_text_keys": [
+        "story.ch05.s02.title",
+        "story.ch05.s02.objective",
+        "story.ch05.s02.control1",
+        "story.ch05.s02.control2",
+        "story.ch05.s02.control3",
+        "story.ch05.s02.shen",
+        "story.ch05.s02.apprentice",
+        "story.ch05.s02.shen2",
+        "story.ch05.s02.storm",
+        "story.ch05.s02.return",
+        "story.ch05.s02.return_now",
+        "story.ch05.s02.journal",
+        "story.ch05.s02.skip",
+        "story.speaker.apprentice",
+        "story.speaker.array",
+        "story.speaker.shen",
+        "story.speaker.source.live",
+        "story.speaker.source.system"
+      ]
+    },
+    {
+      "id": "CH05_S03",
+      "chapter": "CH05",
+      "location": "Sanctuary ledger table",
+      "title_key": "story.ch05.s03.title",
+      "prerequisites": [
+        "mq_storm_onset"
+      ],
+      "script": [
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch05.s03.lan",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Sealed Letter — Date",
+          "text_key": "story.ch05.s03.date",
+          "speaker_key": "story.speaker.letter",
+          "source_kind": "paper",
+          "source_kind_key": "story.speaker.source.paper"
+        },
+        {
+          "speaker": "Elder Yun — Sealed Letter",
+          "text_key": "story.ch05.s03.yun1",
+          "speaker_key": "story.speaker.yun",
+          "source_kind": "letter",
+          "source_kind_key": "story.speaker.source.letter"
+        },
+        {
+          "speaker": "Elder Yun — Sealed Letter",
+          "text_key": "story.ch05.s03.yun2",
+          "speaker_key": "story.speaker.yun",
+          "source_kind": "letter",
+          "source_kind_key": "story.speaker.source.letter"
+        },
+        {
+          "speaker": "Elder Yun — Sealed Letter",
+          "text_key": "story.ch05.s03.yun3",
+          "speaker_key": "story.speaker.yun",
+          "source_kind": "letter",
+          "source_kind_key": "story.speaker.source.letter"
+        },
+        {
+          "speaker": "Elder Yun — Sealed Letter",
+          "text_key": "story.ch05.s03.yun4",
+          "speaker_key": "story.speaker.yun",
+          "source_kind": "letter",
+          "source_kind_key": "story.speaker.source.letter"
+        },
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch05.s03.lan2",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        }
+      ],
+      "choices": [
+        {
+          "id": "s03.ask_account",
+          "label_key": "story.ch05.s03.ask_account",
+          "response_keys": [
+            "story.ch05.s03.response_account"
+          ],
+          "sets_flags": [
+            "mq_account_public"
+          ]
+        },
+        {
+          "id": "s03.ask_relief",
+          "label_key": "story.ch05.s03.ask_relief",
+          "response_keys": [
+            "story.ch05.s03.response_relief"
+          ],
+          "sets_flags": [
+            "mq_relief_questioned"
+          ]
+        }
+      ],
+      "objectives": [
+        {
+          "id": "s03.objective",
+          "text_key": "story.ch05.s03.objective",
+          "completion": "All sealed account pages opened; response selected."
+        }
+      ],
+      "sets_flags": [
+        "mq_yun_confession_read"
+      ],
+      "next_scene_ids": [
+        "CH05_S04"
+      ],
+      "player_text_keys": [
+        "story.ch05.s03.title",
+        "story.ch05.s03.objective",
+        "story.ch05.s03.lan",
+        "story.ch05.s03.date",
+        "story.ch05.s03.yun1",
+        "story.ch05.s03.yun2",
+        "story.ch05.s03.yun3",
+        "story.ch05.s03.yun4",
+        "story.ch05.s03.lan2",
+        "story.ch05.s03.response_account",
+        "story.ch05.s03.response_relief",
+        "story.ch05.s03.ask_account",
+        "story.ch05.s03.ask_relief",
+        "story.ch05.s03.journal",
+        "story.speaker.lan",
+        "story.speaker.letter",
+        "story.speaker.source.letter",
+        "story.speaker.source.live",
+        "story.speaker.source.paper",
+        "story.speaker.yun"
+      ]
+    },
+    {
+      "id": "CH05_S04",
+      "chapter": "CH05",
+      "location": "Sanctuary governor edge, existing trial arena threshold",
+      "title_key": "story.ch05.s04.title",
+      "prerequisites": [
+        "mq_yun_confession_read"
+      ],
+      "script": [
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch05.s04.lan",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Shen Heng — Live",
+          "text_key": "story.ch05.s04.shen1",
+          "when_all": [
+            "mq_live_question_answered"
+          ],
+          "speaker_key": "story.speaker.shen",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Shen Heng — Live",
+          "text_key": "story.ch05.s04.shen2",
+          "when_all": [
+            "mq_live_question_answered"
+          ],
+          "speaker_key": "story.speaker.shen",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Shen Heng — Live",
+          "text_key": "story.ch05.s04.shen3",
+          "when_all": [
+            "mq_live_question_answered"
+          ],
+          "speaker_key": "story.speaker.shen",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch05.s04.lan2",
+          "when_all": [
+            "mq_live_question_answered"
+          ],
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Keeper Lan",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live",
+          "text_key": "story.ch05.s04.network_mechanism"
+        }
+      ],
+      "choices": [
+        {
+          "id": "s04.ask_present",
+          "label_key": "story.ch05.s04.ask_present",
+          "response_keys": [
+            "story.ch05.s04.response_present"
+          ],
+          "sets_flags": [
+            "mq_live_question_answered"
+          ],
+          "presentation_group": "live_question",
+          "show_after_text_key": "story.ch05.s04.lan"
+        },
+        {
+          "id": "s04.ask_want",
+          "label_key": "story.ch05.s04.ask_want",
+          "response_keys": [
+            "story.ch05.s04.response_want"
+          ],
+          "sets_flags": [
+            "mq_live_question_answered"
+          ],
+          "presentation_group": "live_question",
+          "show_after_text_key": "story.ch05.s04.lan"
+        },
+        {
+          "id": "s04.ack",
+          "label_key": "story.ch05.s04.ack",
+          "response_keys": [
+            "story.ch05.s04.response_ack"
+          ],
+          "sets_flags": [],
+          "prerequisites": [
+            "mq_live_question_answered"
+          ],
+          "presentation_group": "acknowledgment",
+          "show_after_text_key": "story.ch05.s04.conditions"
+        }
+      ],
+      "objectives": [
+        {
+          "id": "s04.objective",
+          "text_key": "story.ch05.s04.objective",
+          "completion": "Live question answered and replacement proposal acknowledged."
+        }
+      ],
+      "sets_flags": [
+        "mq_shen_present_consent",
+        "mq_ending_proposal_known",
+        "mq_ch05_complete"
+      ],
+      "next_scene_ids": [
+        "CH06_S01"
+      ],
+      "player_text_keys": [
+        "story.ch05.s04.title",
+        "story.ch05.s04.objective",
+        "story.ch05.s04.lan",
+        "story.ch05.s04.response_present",
+        "story.ch05.s04.response_want",
+        "story.ch05.s04.ask_present",
+        "story.ch05.s04.ask_want",
+        "story.ch05.s04.shen1",
+        "story.ch05.s04.shen2",
+        "story.ch05.s04.shen3",
+        "story.ch05.s04.lan2",
+        "story.ch05.s04.conditions",
+        "story.ch05.s04.response_ack",
+        "story.ch05.s04.ack",
+        "story.ch05.s04.journal",
+        "story.speaker.lan",
+        "story.speaker.shen",
+        "story.speaker.source.live",
+        "story.ch05.s04.network_mechanism"
+      ],
+      "interaction_flow": [
+        "intro",
+        "choose_live_question",
+        "selected_response",
+        "present_consent_and_replacement",
+        "acknowledge"
+      ]
+    },
+    {
+      "id": "CH06_S01",
+      "chapter": "CH06",
+      "location": "Sanctuary preparation shrine",
+      "title_key": "story.ch06.s01.title",
+      "prerequisites": [
+        "mq_ch05_complete"
+      ],
+      "script": [
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch06.s01.lan",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch06.s01.apprentice",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch06.s01.lan2",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        }
+      ],
+      "choices": [
+        {
+          "id": "s01.enter",
+          "label_key": "story.ch06.s01.enter",
+          "response_keys": [],
+          "sets_flags": [],
+          "action": {
+            "type": "enter_trial",
+            "requires_progression": "foundation_rank_3_and_ashen_first_clear"
+          }
+        },
+        {
+          "id": "s01.stay",
+          "label_key": "story.ch06.s01.stay",
+          "response_keys": [],
+          "sets_flags": [],
+          "action": {
+            "type": "stay_at_hub",
+            "commits_scene": false
+          }
+        }
+      ],
+      "objectives": [
+        {
+          "id": "s01.objective",
+          "text_key": "story.ch06.s01.objective",
+          "completion": "Established realm requirements met and trial entry selected."
+        }
+      ],
+      "sets_flags": [
+        "mq_core_trial_entered"
+      ],
+      "next_scene_ids": [
+        "CH06_S02"
+      ],
+      "player_text_keys": [
+        "story.ch06.title",
+        "story.ch06.summary",
+        "story.ch06.s01.title",
+        "story.ch06.s01.objective",
+        "story.ch06.s01.lan",
+        "story.ch06.s01.apprentice",
+        "story.ch06.s01.lan2",
+        "story.ch06.s01.requirements",
+        "story.ch06.s01.optional",
+        "story.ch06.s01.enter",
+        "story.ch06.s01.stay",
+        "story.ch06.s01.journal",
+        "story.speaker.apprentice",
+        "story.speaker.lan",
+        "story.speaker.source.live"
+      ]
+    },
+    {
+      "id": "CH06_S02",
+      "chapter": "CH06",
+      "location": "Existing Golden Core trial arena",
+      "title_key": "story.ch06.s02.title",
+      "prerequisites": [
+        "mq_core_trial_entered"
+      ],
+      "script": [
+        {
+          "speaker": "Shen Heng — Live, Phase 1 Start",
+          "text_key": "story.ch06.s02.phase1",
+          "trigger": "storm_time_0",
+          "speaker_key": "story.speaker.shen",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Combat Cue — First Lightning Warning",
+          "text_key": "story.ch06.s02.warn",
+          "trigger": "first_lightning_telegraph",
+          "speaker_key": "story.speaker.combat",
+          "source_kind": "system",
+          "source_kind_key": "story.speaker.source.system"
+        },
+        {
+          "speaker": "Shen Heng — Live, Phase 2 Start",
+          "text_key": "story.ch06.s02.phase2",
+          "trigger": "storm_time_50",
+          "speaker_key": "story.speaker.shen",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Shen Heng — Live, Phase 3 Start",
+          "text_key": "story.ch06.s02.phase3",
+          "trigger": "storm_time_100",
+          "speaker_key": "story.speaker.shen",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Control Shell — Storm Complete",
+          "text_key": "story.ch06.s02.shell",
+          "trigger": "storm_survived_150",
+          "speaker_key": "story.speaker.array",
+          "source_kind": "system",
+          "source_kind_key": "story.speaker.source.system"
+        },
+        {
+          "speaker": "Shen Heng — Live",
+          "text_key": "story.ch06.s02.shen_shell",
+          "trigger": "shell_combat_started",
+          "speaker_key": "story.speaker.shen",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Combat Cue — Shell Recovery",
+          "text_key": "story.ch06.s02.recovery",
+          "trigger": "first_shell_recovery_window",
+          "speaker_key": "story.speaker.combat",
+          "source_kind": "system",
+          "source_kind_key": "story.speaker.source.system"
+        },
+        {
+          "speaker": "Shen Heng — Live",
+          "text_key": "story.ch06.s02.victory",
+          "trigger": "shell_defeated",
+          "speaker_key": "story.speaker.shen",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        }
+      ],
+      "choices": [],
+      "objectives": [
+        {
+          "id": "s02.objective",
+          "text_key": "story.ch06.s02.objective",
+          "completion": "150 seconds survived and Broken Guardian shell defeated in the same successful attempt."
+        }
+      ],
+      "sets_flags": [
+        "mq_core_trial_won",
+        "mq_governor_shell_disabled"
+      ],
+      "next_scene_ids": [
+        "CH06_S03"
+      ],
+      "player_text_keys": [
+        "story.ch06.s02.title",
+        "story.ch06.s02.objective",
+        "story.ch06.s02.phase1",
+        "story.ch06.s02.warn",
+        "story.ch06.s02.phase2",
+        "story.ch06.s02.phase3",
+        "story.ch06.s02.shell",
+        "story.ch06.s02.shen_shell",
+        "story.ch06.s02.recovery",
+        "story.ch06.s02.victory",
+        "story.ch06.s02.failed",
+        "story.ch06.s02.retry",
+        "story.ch06.s02.journal",
+        "story.speaker.array",
+        "story.speaker.combat",
+        "story.speaker.shen",
+        "story.speaker.source.live",
+        "story.speaker.source.system"
+      ]
+    },
+    {
+      "id": "CH06_S03",
+      "chapter": "CH06",
+      "location": "Trial arena, quiet governor platform",
+      "title_key": "story.ch06.s03.title",
+      "prerequisites": [
+        "mq_governor_shell_disabled"
+      ],
+      "script": [
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch06.s03.apprentice",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Shen Heng — Live",
+          "text_key": "story.ch06.s03.shen",
+          "speaker_key": "story.speaker.shen",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Discharge Control",
+          "text_key": "story.ch06.s03.control",
+          "speaker_key": "story.speaker.array",
+          "source_kind": "system",
+          "source_kind_key": "story.speaker.source.system"
+        },
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch06.s03.lan",
+          "when_all": [
+            "mq_shen_release_authorized"
+          ],
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Shen Heng — Live",
+          "text_key": "story.ch06.s03.shen2",
+          "when_all": [
+            "mq_shen_release_authorized"
+          ],
+          "speaker_key": "story.speaker.shen",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch06.s03.apprentice2",
+          "when_all": [
+            "mq_shen_release_authorized"
+          ],
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Shen Heng — Live",
+          "text_key": "story.ch06.s03.farewell",
+          "when_all": [
+            "mq_shen_release_authorized"
+          ],
+          "speaker_key": "story.speaker.shen",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        }
+      ],
+      "choices": [
+        {
+          "id": "s03.release",
+          "label_key": "story.ch06.s03.release",
+          "response_keys": [],
+          "sets_flags": [
+            "mq_shen_release_authorized"
+          ],
+          "action": {
+            "type": "release_guardian",
+            "idempotency_key": "main.release_shen",
+            "required_before_any_ending": true,
+            "completion_sequence": [
+              "unbind_under_core_bridge",
+              "living_farewell",
+              "dissolve_living_pattern",
+              "save_mq_shen_released",
+              "open_ending_ui"
+            ],
+            "sets_only_after_dissolution": [
+              "mq_shen_released"
+            ],
+            "requires_live_consent": true
+          },
+          "show_after_text_key": "story.ch06.s03.control"
+        }
+      ],
+      "objectives": [
+        {
+          "id": "s03.objective",
+          "text_key": "story.ch06.s03.objective",
+          "completion": "Unbinding authorized; living farewell completed or skipped with journal summary; pattern dissolved; final release transaction saved once."
+        }
+      ],
+      "sets_flags": [
+        "mq_shen_released"
+      ],
+      "next_scene_ids": [
+        "CH06_S04"
+      ],
+      "player_text_keys": [
+        "story.ch06.s03.title",
+        "story.ch06.s03.objective",
+        "story.ch06.s03.apprentice",
+        "story.ch06.s03.shen",
+        "story.ch06.s03.control",
+        "story.ch06.s03.release",
+        "story.ch06.s03.lan",
+        "story.ch06.s03.shen2",
+        "story.ch06.s03.apprentice2",
+        "story.ch06.s03.farewell",
+        "story.ch06.s03.status",
+        "story.ch06.s03.journal",
+        "story.ch06.s03.skip",
+        "story.speaker.apprentice",
+        "story.speaker.array",
+        "story.speaker.lan",
+        "story.speaker.shen",
+        "story.speaker.source.live",
+        "story.speaker.source.system"
+      ],
+      "interaction_flow": [
+        "reconfirm_live_consent",
+        "review_discharge_status",
+        "explicit_release_acknowledgment",
+        "idempotent_unbinding_under_core_bridge",
+        "living_farewell",
+        "pattern_dissolution",
+        "save_final_release",
+        "ending_platform"
+      ]
+    },
+    {
+      "id": "CH06_S04",
+      "chapter": "CH06",
+      "location": "Trial arena decision platform / sanctuary return route",
+      "title_key": "story.ch06.s04.title",
+      "prerequisites": [
+        "mq_shen_released"
+      ],
+      "script": [
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch06.s04.lan",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        }
+      ],
+      "choices": [
+        {
+          "id": "s04.preview_open",
+          "label_key": "story.ch06.s04.preview_open",
+          "response_keys": [],
+          "sets_flags": [],
+          "action": {
+            "type": "preview_ending",
+            "ending_id": "END_OPEN",
+            "commits_scene": false
+          }
+        },
+        {
+          "id": "s04.preview_seal",
+          "label_key": "story.ch06.s04.preview_seal",
+          "response_keys": [],
+          "sets_flags": [],
+          "action": {
+            "type": "preview_ending",
+            "ending_id": "END_SEAL",
+            "commits_scene": false
+          }
+        },
+        {
+          "id": "s04.preview_shared",
+          "label_key": "story.ch06.s04.preview_shared",
+          "response_keys": [],
+          "sets_flags": [],
+          "action": {
+            "type": "preview_ending",
+            "ending_id": "END_SHARED",
+            "commits_scene": false
+          },
+          "prerequisites": [
+            "sq_spillway_verified",
+            "sq_allocation_agreed",
+            "sq_handover_accepted"
+          ]
+        },
+        {
+          "id": "s04.confirm_open",
+          "label_key": "story.ch06.s04.confirm_open",
+          "response_keys": [],
+          "sets_flags": [
+            "ending_open",
+            "mq_ch06_complete"
+          ],
+          "action": {
+            "type": "confirm_ending",
+            "ending_id": "END_OPEN",
+            "requires_preview": "s04.preview_open",
+            "requires_warning_acknowledgment": true,
+            "mutually_exclusive_flags": [
+              "ending_open",
+              "ending_seal",
+              "ending_shared"
+            ],
+            "commit_once": true
+          },
+          "prerequisites": [
+            "mq_shen_released"
+          ]
+        },
+        {
+          "id": "s04.confirm_seal",
+          "label_key": "story.ch06.s04.confirm_seal",
+          "response_keys": [],
+          "sets_flags": [
+            "ending_seal",
+            "mq_ch06_complete"
+          ],
+          "action": {
+            "type": "confirm_ending",
+            "ending_id": "END_SEAL",
+            "requires_preview": "s04.preview_seal",
+            "requires_warning_acknowledgment": true,
+            "mutually_exclusive_flags": [
+              "ending_open",
+              "ending_seal",
+              "ending_shared"
+            ],
+            "commit_once": true
+          },
+          "prerequisites": [
+            "mq_shen_released"
+          ]
+        },
+        {
+          "id": "s04.confirm_shared",
+          "label_key": "story.ch06.s04.confirm_shared",
+          "response_keys": [],
+          "sets_flags": [
+            "ending_shared",
+            "mq_ch06_complete"
+          ],
+          "action": {
+            "type": "confirm_ending",
+            "ending_id": "END_SHARED",
+            "requires_preview": "s04.preview_shared",
+            "requires_warning_acknowledgment": true,
+            "mutually_exclusive_flags": [
+              "ending_open",
+              "ending_seal",
+              "ending_shared"
+            ],
+            "commit_once": true
+          },
+          "prerequisites": [
+            "mq_shen_released",
+            "sq_spillway_verified",
+            "sq_allocation_agreed",
+            "sq_handover_accepted"
+          ]
+        },
+        {
+          "id": "s04.cancel",
+          "label_key": "story.ch06.s04.cancel",
+          "response_keys": [],
+          "sets_flags": [],
+          "action": {
+            "type": "cancel_confirmation",
+            "commits_scene": false
+          }
+        },
+        {
+          "id": "s04.return",
+          "label_key": "story.ch06.s04.return",
+          "response_keys": [],
+          "sets_flags": [],
+          "action": {
+            "type": "return_to_hub",
+            "commits_scene": false,
+            "preserve_flags": [
+              "mq_core_trial_won",
+              "mq_governor_shell_disabled",
+              "mq_shen_released"
+            ],
+            "resume_scene_id": "CH06_S04"
+          }
+        }
+      ],
+      "objectives": [
+        {
+          "id": "s04.objective",
+          "text_key": "story.ch06.s04.objective",
+          "completion": "Exactly one available ending confirmed after preview acknowledgment."
+        }
+      ],
+      "sets_flags": [
+        "mq_ch06_complete"
+      ],
+      "next_scene_ids": [
+        "CH07_S01"
+      ],
+      "player_text_keys": [
+        "story.ch06.s04.title",
+        "story.ch06.s04.objective",
+        "story.ch06.s04.lan",
+        "story.ch06.s04.open_title",
+        "story.ch06.s04.open_preview",
+        "story.ch06.s04.seal_title",
+        "story.ch06.s04.seal_preview",
+        "story.ch06.s04.shared_title",
+        "story.ch06.s04.shared_preview",
+        "story.ch06.s04.spillway_ready",
+        "story.ch06.s04.spillway_missing",
+        "story.ch06.s04.allocation_ready",
+        "story.ch06.s04.allocation_missing",
+        "story.ch06.s04.handover_ready",
+        "story.ch06.s04.handover_missing",
+        "story.ch06.s04.confirm_warning",
+        "story.ch06.s04.confirm_open_text",
+        "story.ch06.s04.confirm_seal_text",
+        "story.ch06.s04.confirm_shared_text",
+        "story.ch06.s04.preview_open",
+        "story.ch06.s04.preview_seal",
+        "story.ch06.s04.preview_shared",
+        "story.ch06.s04.confirm_open",
+        "story.ch06.s04.confirm_seal",
+        "story.ch06.s04.confirm_shared",
+        "story.ch06.s04.cancel",
+        "story.ch06.s04.return",
+        "story.ch06.s04.return_notice",
+        "story.ch06.s04.journal",
+        "story.speaker.lan",
+        "story.speaker.source.live"
+      ]
+    },
+    {
+      "id": "CH07_S01",
+      "chapter": "CH07",
+      "location": "Sanctuary bell and ledger",
+      "title_key": "story.ch07.s01.title",
+      "prerequisites": [
+        "mq_ch06_complete"
+      ],
+      "script": [
+        {
+          "speaker": "Time Card",
+          "text_key": "story.ch07.s01.time",
+          "speaker_key": "story.speaker.time",
+          "source_kind": "system",
+          "source_kind_key": "story.speaker.source.system"
+        },
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch07.s01.open",
+          "when_all": [
+            "ending_open"
+          ],
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch07.s01.open_reply",
+          "when_all": [
+            "ending_open"
+          ],
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch07.s01.seal",
+          "when_all": [
+            "ending_seal"
+          ],
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch07.s01.seal_reply",
+          "when_all": [
+            "ending_seal"
+          ],
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch07.s01.shared",
+          "when_all": [
+            "ending_shared"
+          ],
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch07.s01.shared_reply",
+          "when_all": [
+            "ending_shared"
+          ],
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "New Ledger — Entry One",
+          "text_key": "story.ch07.s01.ledger",
+          "speaker_key": "story.speaker.ledger",
+          "source_kind": "paper",
+          "source_kind_key": "story.speaker.source.paper"
+        }
+      ],
+      "choices": [],
+      "objectives": [
+        {
+          "id": "s01.objective",
+          "text_key": "story.ch07.s01.objective",
+          "completion": "Morning outcome and ledger entry read."
+        }
+      ],
+      "sets_flags": [
+        "mq_epilogue_morning_seen"
+      ],
+      "next_scene_ids": [
+        "CH07_S02"
+      ],
+      "player_text_keys": [
+        "story.ch07.title",
+        "story.ch07.summary",
+        "story.ch07.s01.title",
+        "story.ch07.s01.objective",
+        "story.ch07.s01.time",
+        "story.ch07.s01.open",
+        "story.ch07.s01.open_reply",
+        "story.ch07.s01.seal",
+        "story.ch07.s01.seal_reply",
+        "story.ch07.s01.shared",
+        "story.ch07.s01.shared_reply",
+        "story.ch07.s01.ledger",
+        "story.ch07.s01.journal",
+        "story.speaker.apprentice",
+        "story.speaker.lan",
+        "story.speaker.ledger",
+        "story.speaker.source.live",
+        "story.speaker.source.paper",
+        "story.speaker.source.system",
+        "story.speaker.time"
+      ]
+    },
+    {
+      "id": "CH07_S02",
+      "chapter": "CH07",
+      "location": "Sanctuary lower-channel viewing point and correspondence table",
+      "title_key": "story.ch07.s02.title",
+      "prerequisites": [
+        "mq_epilogue_morning_seen"
+      ],
+      "script": [
+        {
+          "speaker": "Time Card",
+          "text_key": "story.ch07.s02.time",
+          "speaker_key": "story.speaker.time",
+          "source_kind": "system",
+          "source_kind_key": "story.speaker.source.system"
+        },
+        {
+          "speaker": "River Report — Open River",
+          "text_key": "story.ch07.s02.open",
+          "when_all": [
+            "ending_open"
+          ],
+          "speaker_key": "story.speaker.ledger",
+          "source_kind": "paper",
+          "source_kind_key": "story.speaker.source.paper"
+        },
+        {
+          "speaker": "River Report — Quiet Summit",
+          "text_key": "story.ch07.s02.seal",
+          "when_all": [
+            "ending_seal"
+          ],
+          "speaker_key": "story.speaker.ledger",
+          "source_kind": "paper",
+          "source_kind_key": "story.speaker.source.paper"
+        },
+        {
+          "speaker": "River Report — Returning Rain",
+          "text_key": "story.ch07.s02.shared",
+          "when_all": [
+            "ending_shared"
+          ],
+          "speaker_key": "story.speaker.ledger",
+          "source_kind": "paper",
+          "source_kind_key": "story.speaker.source.paper"
+        },
+        {
+          "speaker": "Report Addendum — Verified Spillway",
+          "text_key": "story.ch07.s02.route",
+          "when_all": [
+            "sq_spillway_verified"
+          ],
+          "speaker_key": "story.speaker.ledger",
+          "source_kind": "paper",
+          "source_kind_key": "story.speaker.source.paper"
+        },
+        {
+          "speaker": "Report Addendum — Unverified Route",
+          "text_key": "story.ch07.s02.route_missing",
+          "when_none": [
+            "sq_spillway_verified"
+          ],
+          "speaker_key": "story.speaker.ledger",
+          "source_kind": "paper",
+          "source_kind_key": "story.speaker.source.paper"
+        },
+        {
+          "speaker": "Report Addendum — Agreed Allocation",
+          "text_key": "story.ch07.s02.allocation",
+          "when_all": [
+            "sq_allocation_agreed"
+          ],
+          "speaker_key": "story.speaker.ledger",
+          "source_kind": "paper",
+          "source_kind_key": "story.speaker.source.paper"
+        },
+        {
+          "speaker": "Report Addendum — Accepted Handover",
+          "text_key": "story.ch07.s02.handover",
+          "when_all": [
+            "sq_handover_accepted"
+          ],
+          "speaker_key": "story.speaker.ledger",
+          "source_kind": "paper",
+          "source_kind_key": "story.speaker.source.paper"
+        },
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch07.s02.lan",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        }
+      ],
+      "choices": [],
+      "objectives": [
+        {
+          "id": "s02.objective",
+          "text_key": "story.ch07.s02.objective",
+          "completion": "Thirty-day time card and chosen outcome report read."
+        }
+      ],
+      "sets_flags": [
+        "mq_epilogue_thirty_days_seen"
+      ],
+      "next_scene_ids": [
+        "CH07_S03"
+      ],
+      "player_text_keys": [
+        "story.ch07.s02.title",
+        "story.ch07.s02.objective",
+        "story.ch07.s02.time",
+        "story.ch07.s02.open",
+        "story.ch07.s02.seal",
+        "story.ch07.s02.shared",
+        "story.ch07.s02.route",
+        "story.ch07.s02.route_missing",
+        "story.ch07.s02.allocation",
+        "story.ch07.s02.handover",
+        "story.ch07.s02.lan",
+        "story.ch07.s02.journal",
+        "story.speaker.lan",
+        "story.speaker.ledger",
+        "story.speaker.source.live",
+        "story.speaker.source.paper",
+        "story.speaker.source.system",
+        "story.speaker.time"
+      ]
+    },
+    {
+      "id": "CH07_S03",
+      "chapter": "CH07",
+      "location": "Sanctuary correspondence table",
+      "title_key": "story.ch07.s03.title",
+      "prerequisites": [
+        "mq_epilogue_thirty_days_seen"
+      ],
+      "script": [
+        {
+          "speaker": "New Letter — Elder Yun",
+          "text_key": "story.ch07.s03.date",
+          "speaker_key": "story.speaker.letter",
+          "source_kind": "paper",
+          "source_kind_key": "story.speaker.source.paper"
+        },
+        {
+          "speaker": "Elder Yun — New Letter",
+          "text_key": "story.ch07.s03.open",
+          "when_all": [
+            "ending_open"
+          ],
+          "speaker_key": "story.speaker.yun",
+          "source_kind": "letter",
+          "source_kind_key": "story.speaker.source.letter"
+        },
+        {
+          "speaker": "Elder Yun — New Letter",
+          "text_key": "story.ch07.s03.seal",
+          "when_all": [
+            "ending_seal"
+          ],
+          "speaker_key": "story.speaker.yun",
+          "source_kind": "letter",
+          "source_kind_key": "story.speaker.source.letter"
+        },
+        {
+          "speaker": "Elder Yun — New Letter",
+          "text_key": "story.ch07.s03.shared",
+          "when_all": [
+            "ending_shared"
+          ],
+          "speaker_key": "story.speaker.yun",
+          "source_kind": "letter",
+          "source_kind_key": "story.speaker.source.letter"
+        },
+        {
+          "speaker": "Elder Yun — New Letter",
+          "text_key": "story.ch07.s03.common",
+          "speaker_key": "story.speaker.yun",
+          "source_kind": "letter",
+          "source_kind_key": "story.speaker.source.letter"
+        }
+      ],
+      "choices": [
+        {
+          "id": "s03.reply_work",
+          "label_key": "story.ch07.s03.reply_work",
+          "response_keys": [
+            "story.ch07.s03.response_work"
+          ],
+          "sets_flags": [
+            "mq_epilogue_reply_work"
+          ]
+        },
+        {
+          "id": "s03.reply_record",
+          "label_key": "story.ch07.s03.reply_record",
+          "response_keys": [
+            "story.ch07.s03.response_record"
+          ],
+          "sets_flags": [
+            "mq_epilogue_reply_record"
+          ]
+        }
+      ],
+      "objectives": [
+        {
+          "id": "s03.objective",
+          "text_key": "story.ch07.s03.objective",
+          "completion": "New correspondence read and response selected."
+        }
+      ],
+      "sets_flags": [
+        "mq_epilogue_yun_reply_seen"
+      ],
+      "next_scene_ids": [
+        "CH07_S04"
+      ],
+      "player_text_keys": [
+        "story.ch07.s03.title",
+        "story.ch07.s03.objective",
+        "story.ch07.s03.date",
+        "story.ch07.s03.open",
+        "story.ch07.s03.seal",
+        "story.ch07.s03.shared",
+        "story.ch07.s03.common",
+        "story.ch07.s03.response_work",
+        "story.ch07.s03.response_record",
+        "story.ch07.s03.reply_work",
+        "story.ch07.s03.reply_record",
+        "story.ch07.s03.journal",
+        "story.speaker.letter",
+        "story.speaker.source.letter",
+        "story.speaker.source.paper",
+        "story.speaker.yun"
+      ]
+    },
+    {
+      "id": "CH07_S04",
+      "chapter": "CH07",
+      "location": "Sanctuary bell, existing hub winter dressing",
+      "title_key": "story.ch07.s04.title",
+      "prerequisites": [
+        "mq_epilogue_yun_reply_seen"
+      ],
+      "script": [
+        {
+          "speaker": "Time Card",
+          "text_key": "story.ch07.s04.time",
+          "speaker_key": "story.speaker.time",
+          "source_kind": "system",
+          "source_kind_key": "story.speaker.source.system"
+        },
+        {
+          "speaker": "Winter Ledger — Open River",
+          "text_key": "story.ch07.s04.open",
+          "when_all": [
+            "ending_open"
+          ],
+          "speaker_key": "story.speaker.ledger",
+          "source_kind": "paper",
+          "source_kind_key": "story.speaker.source.paper"
+        },
+        {
+          "speaker": "Winter Ledger — Quiet Summit",
+          "text_key": "story.ch07.s04.seal",
+          "when_all": [
+            "ending_seal"
+          ],
+          "speaker_key": "story.speaker.ledger",
+          "source_kind": "paper",
+          "source_kind_key": "story.speaker.source.paper"
+        },
+        {
+          "speaker": "Winter Ledger — Returning Rain",
+          "text_key": "story.ch07.s04.shared",
+          "when_all": [
+            "ending_shared"
+          ],
+          "speaker_key": "story.speaker.ledger",
+          "source_kind": "paper",
+          "source_kind_key": "story.speaker.source.paper"
+        },
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch07.s04.lan",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch07.s04.apprentice",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        }
+      ],
+      "choices": [
+        {
+          "id": "s04.finish",
+          "label_key": "story.ch07.s04.finish",
+          "response_keys": [],
+          "sets_flags": [
+            "mq_ch07_complete"
+          ],
+          "action": {
+            "type": "complete_campaign",
+            "credits_skippable": true,
+            "idempotency_key": "main.campaign_complete"
+          }
+        }
+      ],
+      "objectives": [
+        {
+          "id": "s04.objective",
+          "text_key": "story.ch07.s04.objective",
+          "completion": "Winter outcome and replay explanation acknowledged; Finish selected."
+        }
+      ],
+      "sets_flags": [
+        "mq_ch07_complete"
+      ],
+      "next_scene_ids": [],
+      "player_text_keys": [
+        "story.ch07.s04.title",
+        "story.ch07.s04.objective",
+        "story.ch07.s04.time",
+        "story.ch07.s04.open",
+        "story.ch07.s04.seal",
+        "story.ch07.s04.shared",
+        "story.ch07.s04.lan",
+        "story.ch07.s04.apprentice",
+        "story.ch07.s04.replay",
+        "story.ch07.s04.replay_launch",
+        "story.ch07.s04.journal",
+        "story.ch07.s04.finish",
+        "story.speaker.apprentice",
+        "story.speaker.lan",
+        "story.speaker.ledger",
+        "story.speaker.source.live",
+        "story.speaker.source.paper",
+        "story.speaker.source.system",
+        "story.speaker.time"
+      ],
+      "optional_epilogue_source": "data/story/side-quests.json",
+      "optional_epilogue_quest_ids": [
+        "SQ01",
+        "SQ02",
+        "SQ03",
+        "SQ04",
+        "SQ05",
+        "SQ06",
+        "SQ07",
+        "SQ08"
+      ],
+      "optional_epilogue_rule": "During the first-winter retrospective, show the matching ending-specific epilogue from each completed optional quest once. Keep its seven-day or seasonal context; do not imply all snapshots occurred on the same date. Resolve its keys in that quest locale; incomplete quests show no completed-outcome card."
+    }
+  ]
+}

@@ -93,3 +93,7 @@ Windows and Mac build from the same tagged commit. Record engine patch, SDK/tool
 No login, telemetry network endpoint, ads, anti-cheat driver, or unnecessary OS permission. Logs should not include account names, home-directory paths, raw saves, signing credentials, or store keys. A voluntary support export previews and redacts its contents before the user shares it; there is no automatic upload.
 
 Test third-party default analytics/crash upload settings and disable unsolicited networking in Shipping. Store and OS services have separate data practices; disclose them in the final privacy statement. Keep signing material and GDK package keys outside public Git and public CI artifacts.
+
+## 10. Complete narrative integration
+
+The fully authored [narrative package](story/README.md) supplies 30 main scenes, 24 optional quest stages, records, and all bilingual story copy. Implement its [runtime contract](story/narrative-implementation.md) alongside the component architecture. Save narrative revision, completed scenes/stages, effective versus pending agreements, source records, and one confirmed ending. The example save now illustrates this section; no narrative dispatcher has been implemented.

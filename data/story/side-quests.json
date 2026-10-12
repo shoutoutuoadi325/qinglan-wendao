@@ -1,0 +1,2258 @@
+{
+  "schema_version": 1,
+  "quests": [
+    {
+      "id": "SQ01",
+      "title_key": "story.sq01.title",
+      "summary_key": "story.sq01.summary",
+      "availability": [
+        "mq_ch02_complete"
+      ],
+      "stages": [
+        {
+          "id": "SQ01.S1",
+          "location": "hub/lamp_workbench",
+          "prerequisites": [
+            "mq_ch02_complete"
+          ],
+          "script": [
+            {
+              "speaker": "Keeper Lan",
+              "text_key": "story.sq01.s1.lan",
+              "speaker_key": "story.speaker.lan",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Apprentice",
+              "text_key": "story.sq01.s1.apprentice",
+              "speaker_key": "story.speaker.apprentice",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Record",
+              "text_key": "story.sq01.s1.note",
+              "speaker_key": "story.speaker.record",
+              "source_kind": "paper",
+              "source_kind_key": "story.speaker.source.paper"
+            }
+          ],
+          "choices": [],
+          "objectives": [
+            {
+              "id": "SQ01.O1",
+              "text_key": "story.sq01.s1.objective",
+              "completion": "Inspect note, wick, oil reservoir, and intact glass; repair via workbench interaction."
+            }
+          ],
+          "sets_flags": [
+            "sq01_stage_1_complete"
+          ],
+          "player_text_keys": [
+            "story.sq01.s1.objective",
+            "story.sq01.s1.journal",
+            "story.sq01.s1.lan",
+            "story.sq01.s1.apprentice",
+            "story.sq01.s1.note",
+            "story.speaker.apprentice",
+            "story.speaker.lan",
+            "story.speaker.record",
+            "story.speaker.source.live",
+            "story.speaker.source.paper"
+          ],
+          "checkpoint": "Save each lamp inspection; no consumable cost.",
+          "script_trigger": "enter",
+          "journal_key": "story.sq01.s1.journal"
+        },
+        {
+          "id": "SQ01.S2",
+          "location": "bamboo/spillway_safe",
+          "prerequisites": [
+            "sq01_stage_1_complete"
+          ],
+          "script": [
+            {
+              "speaker": "Keeper Lan",
+              "text_key": "story.sq01.s2.lan",
+              "speaker_key": "story.speaker.lan",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Interaction",
+              "text_key": "story.sq01.s2.clue",
+              "speaker_key": "story.speaker.inspection",
+              "source_kind": "system",
+              "source_kind_key": "story.speaker.source.system"
+            }
+          ],
+          "choices": [
+            {
+              "id": "a",
+              "label_key": "story.sq01.s2.choice_a",
+              "response_keys": [
+                "story.sq01.s2.reply_a"
+              ],
+              "sets_flags": [
+                "sq01_route_north"
+              ]
+            },
+            {
+              "id": "b",
+              "label_key": "story.sq01.s2.choice_b",
+              "response_keys": [
+                "story.sq01.s2.reply_b"
+              ],
+              "sets_flags": [
+                "sq01_route_south"
+              ]
+            }
+          ],
+          "objectives": [
+            {
+              "id": "SQ01.O2",
+              "text_key": "story.sq01.s2.objective",
+              "completion": "Select one exclusive route; interact with its bracket or drain lever; traverse gate/refuge checkpoints in the safe-state room. Both branches preserve the damaged-second-rail detour. Lamp mounts before dangerous turn, not at east-wall gate."
+            }
+          ],
+          "sets_flags": [
+            "sq01_stage_2_complete"
+          ],
+          "player_text_keys": [
+            "story.sq01.s2.objective",
+            "story.sq01.s2.journal",
+            "story.sq01.s2.lan",
+            "story.sq01.s2.clue",
+            "story.sq01.s2.choice_a",
+            "story.sq01.s2.choice_b",
+            "story.sq01.s2.reply_a",
+            "story.sq01.s2.reply_b",
+            "story.speaker.inspection",
+            "story.speaker.lan",
+            "story.speaker.source.live",
+            "story.speaker.source.system"
+          ],
+          "checkpoint": "Save route, device operation, and traversal checkpoints independently.",
+          "script_trigger": "enter",
+          "journal_key": "story.sq01.s2.journal"
+        },
+        {
+          "id": "SQ01.S3",
+          "location": "hub/lamp_workbench",
+          "prerequisites": [
+            "sq01_stage_2_complete"
+          ],
+          "script": [
+            {
+              "speaker": "Keeper Lan",
+              "text_key": "story.sq01.s3.lan",
+              "speaker_key": "story.speaker.lan",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Apprentice",
+              "text_key": "story.sq01.s3.apprentice",
+              "speaker_key": "story.speaker.apprentice",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Record",
+              "text_key": "story.sq01.s3.record",
+              "speaker_key": "story.speaker.record",
+              "source_kind": "paper",
+              "source_kind_key": "story.speaker.source.paper"
+            }
+          ],
+          "choices": [
+            {
+              "id": "confirm",
+              "label_key": "story.sq01.s3.confirm",
+              "response_keys": [
+                "story.sq01.s3.done"
+              ],
+              "sets_flags": [
+                "sq_spillway_verified"
+              ]
+            }
+          ],
+          "objectives": [
+            {
+              "id": "SQ01.O3",
+              "text_key": "story.sq01.s3.objective",
+              "completion": "Route traversal and marker conditions persisted; verify refuge sightline; complete explicit ten-minute burn-test time advance; relight lamp; confirm record."
+            }
+          ],
+          "sets_flags": [
+            "sq01_stage_3_complete"
+          ],
+          "player_text_keys": [
+            "story.sq01.s3.objective",
+            "story.sq01.s3.journal",
+            "story.sq01.s3.lan",
+            "story.sq01.s3.apprentice",
+            "story.sq01.s3.record",
+            "story.sq01.s3.confirm",
+            "story.sq01.s3.retry",
+            "story.sq01.s3.done",
+            "story.speaker.apprentice",
+            "story.speaker.lan",
+            "story.speaker.record",
+            "story.speaker.source.live",
+            "story.speaker.source.paper"
+          ],
+          "checkpoint": "Save burn-test completion; require explicit confirmation.",
+          "script_trigger": "confirmation_checks_ready",
+          "confirmation_guard": "all non-confirmation objective conditions satisfied; courier delivered if applicable; selected branch persisted",
+          "journal_key": "story.sq01.s3.journal",
+          "retry_key": "story.sq01.s3.retry"
+        }
+      ],
+      "completion_flags": [
+        "sq_spillway_verified"
+      ],
+      "rewards": {
+        "journal_record": "verified_spillway",
+        "cosmetic": "inspection_lamp_glow",
+        "grants_once": "SQ01"
+      },
+      "epilogue_keys": [
+        "story.sq01.epilogue.open",
+        "story.sq01.epilogue.seal",
+        "story.sq01.epilogue.shared"
+      ],
+      "player_text_keys": [
+        "story.sq01.title",
+        "story.sq01.summary",
+        "story.sq01.s1.objective",
+        "story.sq01.s1.journal",
+        "story.sq01.s1.lan",
+        "story.sq01.s1.apprentice",
+        "story.sq01.s1.note",
+        "story.sq01.s2.objective",
+        "story.sq01.s2.journal",
+        "story.sq01.s2.lan",
+        "story.sq01.s2.clue",
+        "story.sq01.s2.choice_a",
+        "story.sq01.s2.choice_b",
+        "story.sq01.s2.reply_a",
+        "story.sq01.s2.reply_b",
+        "story.sq01.s3.objective",
+        "story.sq01.s3.journal",
+        "story.sq01.s3.lan",
+        "story.sq01.s3.apprentice",
+        "story.sq01.s3.record",
+        "story.sq01.s3.confirm",
+        "story.sq01.s3.retry",
+        "story.sq01.s3.done",
+        "story.sq01.epilogue.open",
+        "story.sq01.epilogue.seal",
+        "story.sq01.epilogue.shared",
+        "story.speaker.apprentice",
+        "story.speaker.inspection",
+        "story.speaker.lan",
+        "story.speaker.record",
+        "story.speaker.source.live",
+        "story.speaker.source.paper",
+        "story.speaker.source.system"
+      ],
+      "implementation": {
+        "checkpoints": [
+          "Save each lamp inspection; no consumable cost.",
+          "Save route, device operation, and traversal checkpoints independently.",
+          "Save burn-test completion; require explicit confirmation."
+        ],
+        "decision": "North route and south route are equally valid. Choosing again clears only the previous route-selection flag and route-test checkpoints, never lamp repair. Both set sq_spillway_verified only when tested.",
+        "timing": "Burn test advances exactly ten in-game minutes through a labeled interaction; no real-time waiting.",
+        "closure": "Both routes are available until ending confirmation, including return from the ending preview. A closed drain is recoverable with its lever. The north route never requires drain operation.",
+        "epilogue_selection": "Use exactly the selected ending paragraph; route choice adds no morality score.",
+        "geography": "Both route variants reuse the east-wall gate approached via west stair, preserve the crooked safe detour around the hollow second-rail ledge, and position lamp before the turn. L19 is corroborating evidence, never required."
+      }
+    },
+    {
+      "id": "SQ02",
+      "title_key": "story.sq02.title",
+      "summary_key": "story.sq02.summary",
+      "availability": [
+        "mq_ch04_complete"
+      ],
+      "stages": [
+        {
+          "id": "SQ02.S1",
+          "location": "hub/courier_board",
+          "prerequisites": [
+            "mq_ch04_complete"
+          ],
+          "script": [
+            {
+              "speaker": "Keeper Lan",
+              "text_key": "story.sq02.s1.lan",
+              "speaker_key": "story.speaker.lan",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Apprentice",
+              "text_key": "story.sq02.s1.apprentice",
+              "speaker_key": "story.speaker.apprentice",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Record",
+              "text_key": "story.sq02.s1.note",
+              "speaker_key": "story.speaker.record",
+              "source_kind": "paper",
+              "source_kind_key": "story.speaker.source.paper"
+            }
+          ],
+          "choices": [],
+          "objectives": [
+            {
+              "id": "SQ02.O1",
+              "text_key": "story.sq02.s1.objective",
+              "completion": "Inspect both dated requests and gauge marks."
+            }
+          ],
+          "sets_flags": [
+            "sq02_stage_1_complete"
+          ],
+          "player_text_keys": [
+            "story.sq02.s1.objective",
+            "story.sq02.s1.journal",
+            "story.sq02.s1.lan",
+            "story.sq02.s1.apprentice",
+            "story.sq02.s1.note",
+            "story.speaker.apprentice",
+            "story.speaker.lan",
+            "story.speaker.record",
+            "story.speaker.source.live",
+            "story.speaker.source.paper"
+          ],
+          "checkpoint": "Persist read flags for both requests.",
+          "script_trigger": "enter",
+          "journal_key": "story.sq02.s1.journal"
+        },
+        {
+          "id": "SQ02.S2",
+          "location": "hub/water_table",
+          "prerequisites": [
+            "sq02_stage_1_complete"
+          ],
+          "script": [
+            {
+              "speaker": "Keeper Lan",
+              "text_key": "story.sq02.s2.lan",
+              "speaker_key": "story.speaker.lan",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Interaction",
+              "text_key": "story.sq02.s2.clue",
+              "speaker_key": "story.speaker.inspection",
+              "source_kind": "system",
+              "source_kind_key": "story.speaker.source.system"
+            }
+          ],
+          "choices": [
+            {
+              "id": "a",
+              "label_key": "story.sq02.s2.choice_a",
+              "response_keys": [
+                "story.sq02.s2.reply_a"
+              ],
+              "sets_flags": [
+                "sq02_schedule_a"
+              ],
+              "action": {
+                "type": "select_proposal",
+                "replace_choice_flags": [
+                  "sq02_schedule_a",
+                  "sq02_schedule_b"
+                ],
+                "pending_slot": "sq02_pending_version",
+                "commits_effective_version": false,
+                "explicitly_invalidate_old_reply_for_pending_version": true
+              }
+            },
+            {
+              "id": "b",
+              "label_key": "story.sq02.s2.choice_b",
+              "response_keys": [
+                "story.sq02.s2.reply_b"
+              ],
+              "sets_flags": [
+                "sq02_schedule_b"
+              ],
+              "action": {
+                "type": "select_proposal",
+                "replace_choice_flags": [
+                  "sq02_schedule_a",
+                  "sq02_schedule_b"
+                ],
+                "pending_slot": "sq02_pending_version",
+                "commits_effective_version": false,
+                "explicitly_invalidate_old_reply_for_pending_version": true
+              }
+            }
+          ],
+          "objectives": [
+            {
+              "id": "SQ02.O2",
+              "text_key": "story.sq02.s2.objective",
+              "completion": "Select one proposal; interact with courier dispatch board; persist selected version and dispatch game-time."
+            }
+          ],
+          "sets_flags": [
+            "sq02_stage_2_complete"
+          ],
+          "player_text_keys": [
+            "story.sq02.s2.objective",
+            "story.sq02.s2.journal",
+            "story.sq02.s2.lan",
+            "story.sq02.s2.clue",
+            "story.sq02.s2.choice_a",
+            "story.sq02.s2.choice_b",
+            "story.sq02.s2.reply_a",
+            "story.sq02.s2.reply_b",
+            "story.speaker.inspection",
+            "story.speaker.lan",
+            "story.speaker.source.live",
+            "story.speaker.source.system"
+          ],
+          "checkpoint": "Persist schedule version, courier dispatch timestamp, and pending delivery.",
+          "script_trigger": "enter",
+          "journal_key": "story.sq02.s2.journal"
+        },
+        {
+          "id": "SQ02.S3",
+          "location": "hub/courier_board",
+          "prerequisites": [
+            "sq02_stage_2_complete"
+          ],
+          "script": [
+            {
+              "speaker": "Keeper Lan",
+              "text_key": "story.sq02.s3.lan",
+              "speaker_key": "story.speaker.lan",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Apprentice",
+              "text_key": "story.sq02.s3.apprentice",
+              "speaker_key": "story.speaker.apprentice",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Record",
+              "text_key": "story.sq02.s3.record",
+              "speaker_key": "story.speaker.record",
+              "source_kind": "paper",
+              "source_kind_key": "story.speaker.source.paper"
+            }
+          ],
+          "choices": [
+            {
+              "id": "confirm",
+              "label_key": "story.sq02.s3.confirm",
+              "response_keys": [
+                "story.sq02.s3.done"
+              ],
+              "sets_flags": [
+                "sq_allocation_agreed"
+              ],
+              "action": {
+                "type": "accept_verified_proposal",
+                "require_matching_delivered_reply": true,
+                "pending_slot": "sq02_pending_version",
+                "effective_slot": "sq02_effective_version",
+                "copy_pending_to_effective_atomically": true,
+                "rewards_once": "SQ02"
+              }
+            }
+          ],
+          "objectives": [
+            {
+              "id": "SQ02.O3",
+              "text_key": "story.sq02.s3.objective",
+              "completion": "Elapsed game-time >= dispatch + 18 hours; read returned agreement with both signatures; display selected hours; confirm posting."
+            }
+          ],
+          "sets_flags": [
+            "sq02_stage_3_complete"
+          ],
+          "player_text_keys": [
+            "story.sq02.s3.objective",
+            "story.sq02.s3.journal",
+            "story.sq02.s3.lan",
+            "story.sq02.s3.apprentice",
+            "story.sq02.s3.record",
+            "story.sq02.s3.confirm",
+            "story.sq02.s3.retry",
+            "story.sq02.s3.done",
+            "story.speaker.apprentice",
+            "story.speaker.lan",
+            "story.speaker.record",
+            "story.speaker.source.live",
+            "story.speaker.source.paper",
+            "story.sq02.advance_delivery",
+            "story.sq02.delivery_time"
+          ],
+          "checkpoint": "Persist delivered/read signatures and confirmation.",
+          "script_trigger": "confirmation_checks_ready",
+          "confirmation_guard": "all non-confirmation objective conditions satisfied; courier delivered if applicable; selected branch persisted",
+          "journal_key": "story.sq02.s3.journal",
+          "retry_key": "story.sq02.s3.retry",
+          "advance_delivery_key": "story.sq02.advance_delivery",
+          "delivery_time_key": "story.sq02.delivery_time",
+          "delivery_transition": {
+            "type": "safe_hub_time_advance",
+            "elapsed_game_hours": 18,
+            "real_time_wait_seconds": 0,
+            "requires_selected_proposal": true,
+            "delivers_matching_reply": true
+          }
+        }
+      ],
+      "completion_flags": [
+        "sq_allocation_agreed"
+      ],
+      "rewards": {
+        "journal_record": "water_allocation_schedule",
+        "grants_once": "SQ02"
+      },
+      "epilogue_keys": [
+        "story.sq02.epilogue.open",
+        "story.sq02.epilogue.seal",
+        "story.sq02.epilogue.shared"
+      ],
+      "player_text_keys": [
+        "story.sq02.title",
+        "story.sq02.summary",
+        "story.sq02.s1.objective",
+        "story.sq02.s1.journal",
+        "story.sq02.s1.lan",
+        "story.sq02.s1.apprentice",
+        "story.sq02.s1.note",
+        "story.sq02.s2.objective",
+        "story.sq02.s2.journal",
+        "story.sq02.s2.lan",
+        "story.sq02.s2.clue",
+        "story.sq02.s2.choice_a",
+        "story.sq02.s2.choice_b",
+        "story.sq02.s2.reply_a",
+        "story.sq02.s2.reply_b",
+        "story.sq02.s3.objective",
+        "story.sq02.s3.journal",
+        "story.sq02.s3.lan",
+        "story.sq02.s3.apprentice",
+        "story.sq02.s3.record",
+        "story.sq02.s3.confirm",
+        "story.sq02.s3.retry",
+        "story.sq02.s3.done",
+        "story.sq02.epilogue.open",
+        "story.sq02.epilogue.seal",
+        "story.sq02.epilogue.shared",
+        "story.speaker.apprentice",
+        "story.speaker.inspection",
+        "story.speaker.lan",
+        "story.speaker.record",
+        "story.speaker.source.live",
+        "story.speaker.source.paper",
+        "story.speaker.source.system",
+        "story.sq02.pending_status",
+        "story.sq02.advance_delivery",
+        "story.sq02.delivery_time"
+      ],
+      "implementation": {
+        "checkpoints": [
+          "Persist read flags for both requests.",
+          "Persist schedule version, courier dispatch timestamp, and pending delivery.",
+          "Persist delivered/read signatures and confirmation."
+        ],
+        "decision": "Both schedules meet identical reserve/minimum-hour conditions and qualify equally. No moral score. Selected timetable appears verbatim from s2.journal on the returned board; generic returned agreement explicitly refers to that enclosed selected timetable.",
+        "timing": "Courier round trip is eighteen in-game hours from dispatch, never real-time. Rest can advance to delivery in one labeled step and all other quest clocks advance by the same elapsed time. Letters display generated dispatch/arrival dates as localized date fields.",
+        "closure": "Never require external service or randomness. Pending dispatch can be canceled and replaced; restart the timestamp and retain old accepted agreement until a new agreement is confirmed. Final ending preview remains returnable.",
+        "epilogue_selection": "Insert the selected schedule board as an accessible retained record; use the chosen ending paragraph.",
+        "supply_scope": "Schedules describe downstream workshop withdrawal from buffered cistern supply; mountain intake recharge intervals can remain separate. No promise of nonstop intake or nightly work duty."
+      },
+      "proposal_state": {
+        "pending_slot": "sq02_pending_version",
+        "effective_slot": "sq02_effective_version",
+        "effective_version_changes_only_on_verified_confirmation": true,
+        "previous_effective_version_remains_valid_during_revision": true,
+        "ending_reads_effective_not_pending": true
+      },
+      "pending_status_key": "story.sq02.pending_status"
+    },
+    {
+      "id": "SQ03",
+      "title_key": "story.sq03.title",
+      "summary_key": "story.sq03.summary",
+      "availability": [
+        "mq_ch04_complete"
+      ],
+      "stages": [
+        {
+          "id": "SQ03.S1",
+          "location": "ashen/archive_safe",
+          "prerequisites": [
+            "mq_ch04_complete"
+          ],
+          "script": [
+            {
+              "speaker": "Keeper Lan",
+              "text_key": "story.sq03.s1.lan",
+              "speaker_key": "story.speaker.lan",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Apprentice",
+              "text_key": "story.sq03.s1.apprentice",
+              "speaker_key": "story.speaker.apprentice",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Record",
+              "text_key": "story.sq03.s1.note",
+              "speaker_key": "story.speaker.record",
+              "source_kind": "paper",
+              "source_kind_key": "story.speaker.source.paper"
+            }
+          ],
+          "choices": [],
+          "objectives": [
+            {
+              "id": "SQ03.O1",
+              "text_key": "story.sq03.s1.objective",
+              "completion": "Read archive term and each of four present duty offers."
+            }
+          ],
+          "sets_flags": [
+            "sq03_stage_1_complete"
+          ],
+          "player_text_keys": [
+            "story.sq03.s1.objective",
+            "story.sq03.s1.journal",
+            "story.sq03.s1.lan",
+            "story.sq03.s1.apprentice",
+            "story.sq03.s1.note",
+            "story.speaker.apprentice",
+            "story.speaker.lan",
+            "story.speaker.record",
+            "story.speaker.source.live",
+            "story.speaker.source.paper"
+          ],
+          "checkpoint": "Persist original-field and four-offer reads.",
+          "script_trigger": "enter",
+          "journal_key": "story.sq03.s1.journal"
+        },
+        {
+          "id": "SQ03.S2",
+          "location": "hub/handover_table",
+          "prerequisites": [
+            "sq03_stage_1_complete"
+          ],
+          "script": [
+            {
+              "speaker": "Keeper Lan",
+              "text_key": "story.sq03.s2.lan",
+              "speaker_key": "story.speaker.lan",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Interaction",
+              "text_key": "story.sq03.s2.clue",
+              "speaker_key": "story.speaker.inspection",
+              "source_kind": "system",
+              "source_kind_key": "story.speaker.source.system"
+            }
+          ],
+          "choices": [
+            {
+              "id": "a",
+              "label_key": "story.sq03.s2.choice_a",
+              "response_keys": [
+                "story.sq03.s2.reply_a"
+              ],
+              "sets_flags": [
+                "sq03_rota_hub"
+              ],
+              "action": {
+                "type": "select_proposal",
+                "replace_choice_flags": [
+                  "sq03_rota_hub",
+                  "sq03_rota_duplicate"
+                ],
+                "pending_slot": "sq03_pending_version",
+                "commits_effective_version": false,
+                "explicitly_invalidate_old_reply_for_pending_version": true
+              }
+            },
+            {
+              "id": "b",
+              "label_key": "story.sq03.s2.choice_b",
+              "response_keys": [
+                "story.sq03.s2.reply_b"
+              ],
+              "sets_flags": [
+                "sq03_rota_duplicate"
+              ],
+              "action": {
+                "type": "select_proposal",
+                "replace_choice_flags": [
+                  "sq03_rota_hub",
+                  "sq03_rota_duplicate"
+                ],
+                "pending_slot": "sq03_pending_version",
+                "commits_effective_version": false,
+                "explicitly_invalidate_old_reply_for_pending_version": true
+              }
+            }
+          ],
+          "objectives": [
+            {
+              "id": "SQ03.O2",
+              "text_key": "story.sq03.s2.objective",
+              "completion": "Select rota and dispatch exact charter with named duties, terms, relief, no-Shen obligation, and apprentice limit."
+            }
+          ],
+          "sets_flags": [
+            "sq03_stage_2_complete"
+          ],
+          "player_text_keys": [
+            "story.sq03.s2.objective",
+            "story.sq03.s2.journal",
+            "story.sq03.s2.lan",
+            "story.sq03.s2.clue",
+            "story.sq03.s2.choice_a",
+            "story.sq03.s2.choice_b",
+            "story.sq03.s2.reply_a",
+            "story.sq03.s2.reply_b",
+            "story.speaker.inspection",
+            "story.speaker.lan",
+            "story.speaker.source.live",
+            "story.speaker.source.system"
+          ],
+          "checkpoint": "Persist rota version and twelve-hour courier timestamp.",
+          "script_trigger": "enter",
+          "journal_key": "story.sq03.s2.journal"
+        },
+        {
+          "id": "SQ03.S3",
+          "location": "hub/courier_board",
+          "prerequisites": [
+            "sq03_stage_2_complete"
+          ],
+          "script": [
+            {
+              "speaker": "Keeper Lan",
+              "text_key": "story.sq03.s3.lan",
+              "speaker_key": "story.speaker.lan",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Apprentice",
+              "text_key": "story.sq03.s3.apprentice",
+              "speaker_key": "story.speaker.apprentice",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Record",
+              "text_key": "story.sq03.s3.record",
+              "speaker_key": "story.speaker.record",
+              "source_kind": "paper",
+              "source_kind_key": "story.speaker.source.paper"
+            }
+          ],
+          "choices": [
+            {
+              "id": "confirm",
+              "label_key": "story.sq03.s3.confirm",
+              "response_keys": [
+                "story.sq03.s3.done"
+              ],
+              "sets_flags": [
+                "sq_handover_accepted"
+              ],
+              "action": {
+                "type": "accept_verified_proposal",
+                "require_matching_delivered_reply": true,
+                "pending_slot": "sq03_pending_version",
+                "effective_slot": "sq03_effective_version",
+                "copy_pending_to_effective_atomically": true,
+                "rewards_once": "SQ03"
+              }
+            }
+          ],
+          "objectives": [
+            {
+              "id": "SQ03.O3",
+              "text_key": "story.sq03.s3.objective",
+              "completion": "Elapsed game-time >= dispatch + 12 hours; inspect four signatures and apprentice/guardian clauses; operate existing training handle neutral, work release closed, reservoir relief open; verify settled indicator; player confirms own limited duty."
+            }
+          ],
+          "sets_flags": [
+            "sq03_stage_3_complete"
+          ],
+          "player_text_keys": [
+            "story.sq03.s3.objective",
+            "story.sq03.s3.journal",
+            "story.sq03.s3.lan",
+            "story.sq03.s3.apprentice",
+            "story.sq03.s3.record",
+            "story.sq03.s3.confirm",
+            "story.sq03.s3.retry",
+            "story.sq03.s3.done",
+            "story.speaker.apprentice",
+            "story.speaker.lan",
+            "story.speaker.record",
+            "story.speaker.source.live",
+            "story.speaker.source.paper",
+            "story.sq03.advance_delivery",
+            "story.sq03.delivery_time"
+          ],
+          "checkpoint": "Persist each verification; do not grant consent flag until player confirmation.",
+          "script_trigger": "confirmation_checks_ready",
+          "confirmation_guard": "all non-confirmation objective conditions satisfied; courier delivered if applicable; selected branch persisted",
+          "journal_key": "story.sq03.s3.journal",
+          "retry_key": "story.sq03.s3.retry",
+          "advance_delivery_key": "story.sq03.advance_delivery",
+          "delivery_time_key": "story.sq03.delivery_time",
+          "delivery_transition": {
+            "type": "safe_hub_time_advance",
+            "elapsed_game_hours": 12,
+            "real_time_wait_seconds": 0,
+            "requires_selected_proposal": true,
+            "delivers_matching_reply": true
+          }
+        }
+      ],
+      "completion_flags": [
+        "sq_handover_accepted"
+      ],
+      "rewards": {
+        "journal_record": "consenting_handover_charter",
+        "grants_once": "SQ03"
+      },
+      "epilogue_keys": [
+        "story.sq03.epilogue.open",
+        "story.sq03.epilogue.seal",
+        "story.sq03.epilogue.shared"
+      ],
+      "player_text_keys": [
+        "story.sq03.title",
+        "story.sq03.summary",
+        "story.sq03.s1.objective",
+        "story.sq03.s1.journal",
+        "story.sq03.s1.lan",
+        "story.sq03.s1.apprentice",
+        "story.sq03.s1.note",
+        "story.sq03.s2.objective",
+        "story.sq03.s2.journal",
+        "story.sq03.s2.lan",
+        "story.sq03.s2.clue",
+        "story.sq03.s2.choice_a",
+        "story.sq03.s2.choice_b",
+        "story.sq03.s2.reply_a",
+        "story.sq03.s2.reply_b",
+        "story.sq03.s3.objective",
+        "story.sq03.s3.journal",
+        "story.sq03.s3.lan",
+        "story.sq03.s3.apprentice",
+        "story.sq03.s3.record",
+        "story.sq03.s3.confirm",
+        "story.sq03.s3.retry",
+        "story.sq03.s3.done",
+        "story.sq03.epilogue.open",
+        "story.sq03.epilogue.seal",
+        "story.sq03.epilogue.shared",
+        "story.speaker.apprentice",
+        "story.speaker.inspection",
+        "story.speaker.lan",
+        "story.speaker.record",
+        "story.speaker.source.live",
+        "story.speaker.source.paper",
+        "story.speaker.source.system",
+        "story.sq03.pending_status",
+        "story.sq03.advance_delivery",
+        "story.sq03.delivery_time"
+      ],
+      "implementation": {
+        "checkpoints": [
+          "Persist original-field and four-offer reads.",
+          "Persist rota version and twelve-hour courier timestamp.",
+          "Persist each verification; do not grant consent flag until player confirmation."
+        ],
+        "decision": "Rota changes where transparent review occurs, not who is compelled. All signatories accept either exact proposal after explicit travel time. The selected rota text is attached to every returned copy.",
+        "timing": "Twelve in-game hours, one labeled rest/continue action available. Independent from SQ02 but can run concurrently under the same world clock.",
+        "closure": "No dependency on SQ02 completion; consent to duties does not falsely assert water allocations already agreed. Before final confirmation, players can revise rota by a new twelve-hour consent round; an already accepted version stays valid until replacement.",
+        "epilogue_selection": "Terms adapt to the ending infrastructure; never assign indefinite duty to apprentice, absent Yun, dead Mei, or released Shen.",
+        "shutdown_drill": "Safe-state existing hub control prop; no real fluid simulation. Return handle to neutral, leave reservoir relief open, check settled indicator, restart training loop. A mistaken order resets harmlessly and displays s3.record instructions.",
+        "night_scope": "No community every-night promise. Daily checks use named daytime shifts; any later night duty needs its own named consent and relief. L14 remains a valid constraint."
+      },
+      "proposal_state": {
+        "pending_slot": "sq03_pending_version",
+        "effective_slot": "sq03_effective_version",
+        "effective_version_changes_only_on_verified_confirmation": true,
+        "previous_effective_version_remains_valid_during_revision": true,
+        "ending_reads_effective_not_pending": true
+      },
+      "pending_status_key": "story.sq03.pending_status"
+    },
+    {
+      "id": "SQ04",
+      "title_key": "story.sq04.title",
+      "summary_key": "story.sq04.summary",
+      "availability": [
+        "mq_ch01_complete"
+      ],
+      "stages": [
+        {
+          "id": "SQ04.S1",
+          "location": "bamboo/old_bell_safe",
+          "prerequisites": [
+            "mq_ch01_complete"
+          ],
+          "script": [
+            {
+              "speaker": "Keeper Lan",
+              "text_key": "story.sq04.s1.lan",
+              "speaker_key": "story.speaker.lan",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Apprentice",
+              "text_key": "story.sq04.s1.apprentice",
+              "speaker_key": "story.speaker.apprentice",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Record",
+              "text_key": "story.sq04.s1.note",
+              "speaker_key": "story.speaker.record",
+              "source_kind": "paper",
+              "source_kind_key": "story.speaker.source.paper"
+            }
+          ],
+          "choices": [],
+          "objectives": [
+            {
+              "id": "SQ04.O1",
+              "text_key": "story.sq04.s1.objective",
+              "completion": "Read bell ledger and Miao testimony."
+            }
+          ],
+          "sets_flags": [
+            "sq04_stage_1_complete"
+          ],
+          "player_text_keys": [
+            "story.sq04.s1.objective",
+            "story.sq04.s1.journal",
+            "story.sq04.s1.lan",
+            "story.sq04.s1.apprentice",
+            "story.sq04.s1.note",
+            "story.speaker.apprentice",
+            "story.speaker.lan",
+            "story.speaker.record",
+            "story.speaker.source.live",
+            "story.speaker.source.paper"
+          ],
+          "checkpoint": "Persist both read flags.",
+          "script_trigger": "enter",
+          "journal_key": "story.sq04.s1.journal"
+        },
+        {
+          "id": "SQ04.S2",
+          "location": "hub/courier_board",
+          "prerequisites": [
+            "sq04_stage_1_complete"
+          ],
+          "script": [
+            {
+              "speaker": "Keeper Lan",
+              "text_key": "story.sq04.s2.lan",
+              "speaker_key": "story.speaker.lan",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Interaction",
+              "text_key": "story.sq04.s2.clue",
+              "speaker_key": "story.speaker.inspection",
+              "source_kind": "system",
+              "source_kind_key": "story.speaker.source.system"
+            }
+          ],
+          "choices": [
+            {
+              "id": "a",
+              "label_key": "story.sq04.s2.choice_a",
+              "response_keys": [
+                "story.sq04.s2.reply_a"
+              ],
+              "sets_flags": [
+                "sq04_record_joined"
+              ]
+            },
+            {
+              "id": "b",
+              "label_key": "story.sq04.s2.choice_b",
+              "response_keys": [
+                "story.sq04.s2.reply_b"
+              ],
+              "sets_flags": [
+                "sq04_record_linked"
+              ]
+            }
+          ],
+          "objectives": [
+            {
+              "id": "SQ04.O2",
+              "text_key": "story.sq04.s2.objective",
+              "completion": "Place three pre-existing record tabs in their dated order using footbridge mark; choose annotation format."
+            }
+          ],
+          "sets_flags": [
+            "sq04_stage_2_complete"
+          ],
+          "player_text_keys": [
+            "story.sq04.s2.objective",
+            "story.sq04.s2.journal",
+            "story.sq04.s2.lan",
+            "story.sq04.s2.clue",
+            "story.sq04.s2.choice_a",
+            "story.sq04.s2.choice_b",
+            "story.sq04.s2.reply_a",
+            "story.sq04.s2.reply_b",
+            "story.speaker.inspection",
+            "story.speaker.lan",
+            "story.speaker.source.live",
+            "story.speaker.source.system"
+          ],
+          "checkpoint": "Persist correct tab order and annotation mode.",
+          "script_trigger": "enter",
+          "journal_key": "story.sq04.s2.journal"
+        },
+        {
+          "id": "SQ04.S3",
+          "location": "hub/training_mat",
+          "prerequisites": [
+            "sq04_stage_2_complete"
+          ],
+          "script": [
+            {
+              "speaker": "Keeper Lan",
+              "text_key": "story.sq04.s3.lan",
+              "speaker_key": "story.speaker.lan",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Apprentice",
+              "text_key": "story.sq04.s3.apprentice",
+              "speaker_key": "story.speaker.apprentice",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Record",
+              "text_key": "story.sq04.s3.record",
+              "speaker_key": "story.speaker.record",
+              "source_kind": "paper",
+              "source_kind_key": "story.speaker.source.paper"
+            }
+          ],
+          "choices": [
+            {
+              "id": "confirm",
+              "label_key": "story.sq04.s3.confirm",
+              "response_keys": [
+                "story.sq04.s3.done"
+              ],
+              "sets_flags": [
+                "sq_warning_record_filed"
+              ]
+            }
+          ],
+          "objectives": [
+            {
+              "id": "SQ04.O3",
+              "text_key": "story.sq04.s3.objective",
+              "completion": "Place signed annotation beside both originals; visit training mat to inspect dry-edge sketch; confirmation grants optional training access, never requires equipped Mist Step."
+            }
+          ],
+          "sets_flags": [
+            "sq04_stage_3_complete"
+          ],
+          "player_text_keys": [
+            "story.sq04.s3.objective",
+            "story.sq04.s3.journal",
+            "story.sq04.s3.lan",
+            "story.sq04.s3.apprentice",
+            "story.sq04.s3.record",
+            "story.sq04.s3.confirm",
+            "story.sq04.s3.retry",
+            "story.sq04.s3.done",
+            "story.speaker.apprentice",
+            "story.speaker.lan",
+            "story.speaker.record",
+            "story.speaker.source.live",
+            "story.speaker.source.paper"
+          ],
+          "checkpoint": "Persist filing and training-sketch inspection; actual optional ability purchase/training remains governed by progression system.",
+          "script_trigger": "confirmation_checks_ready",
+          "confirmation_guard": "all non-confirmation objective conditions satisfied; courier delivered if applicable; selected branch persisted",
+          "journal_key": "story.sq04.s3.journal",
+          "retry_key": "story.sq04.s3.retry"
+        }
+      ],
+      "completion_flags": [
+        "sq_warning_record_filed"
+      ],
+      "rewards": {
+        "technique_access": "mist_step",
+        "grant_mode": "unlock_training_access_once",
+        "grants_once": "SQ04"
+      },
+      "epilogue_keys": [
+        "story.sq04.epilogue.open",
+        "story.sq04.epilogue.seal",
+        "story.sq04.epilogue.shared"
+      ],
+      "player_text_keys": [
+        "story.sq04.title",
+        "story.sq04.summary",
+        "story.sq04.s1.objective",
+        "story.sq04.s1.journal",
+        "story.sq04.s1.lan",
+        "story.sq04.s1.apprentice",
+        "story.sq04.s1.note",
+        "story.sq04.s2.objective",
+        "story.sq04.s2.journal",
+        "story.sq04.s2.lan",
+        "story.sq04.s2.clue",
+        "story.sq04.s2.choice_a",
+        "story.sq04.s2.choice_b",
+        "story.sq04.s2.reply_a",
+        "story.sq04.s2.reply_b",
+        "story.sq04.s3.objective",
+        "story.sq04.s3.journal",
+        "story.sq04.s3.lan",
+        "story.sq04.s3.apprentice",
+        "story.sq04.s3.record",
+        "story.sq04.s3.confirm",
+        "story.sq04.s3.retry",
+        "story.sq04.s3.done",
+        "story.sq04.epilogue.open",
+        "story.sq04.epilogue.seal",
+        "story.sq04.epilogue.shared",
+        "story.speaker.apprentice",
+        "story.speaker.inspection",
+        "story.speaker.lan",
+        "story.speaker.record",
+        "story.speaker.source.live",
+        "story.speaker.source.paper",
+        "story.speaker.source.system"
+      ],
+      "implementation": {
+        "checkpoints": [
+          "Persist both read flags.",
+          "Persist correct tab order and annotation mode.",
+          "Persist filing and training-sketch inspection; actual optional ability purchase/training remains governed by progression system."
+        ],
+        "decision": "Joined timeline versus cross-linked originals changes archive presentation only; both preserve uncertainty and credit. Original records cannot be destroyed.",
+        "timing": "No new courier reply is required; Miao testimony is dated last winter and already held at the hub.",
+        "closure": "Wrong tab orders show the existing watermark clue and can be retried without cost. Training uses ordinary steps on existing mat, not the ability it unlocks. If Mist Step already unlocked, no duplicate currency or additional ability stack.",
+        "epilogue_selection": "The selected annotation format remains on the archive shelf; ending paragraph applies once."
+      }
+    },
+    {
+      "id": "SQ05",
+      "title_key": "story.sq05.title",
+      "summary_key": "story.sq05.summary",
+      "availability": [
+        "mq_ch02_complete"
+      ],
+      "stages": [
+        {
+          "id": "SQ05.S1",
+          "location": "hub/stonewright_crate",
+          "prerequisites": [
+            "mq_ch02_complete"
+          ],
+          "script": [
+            {
+              "speaker": "Keeper Lan",
+              "text_key": "story.sq05.s1.lan",
+              "speaker_key": "story.speaker.lan",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Apprentice",
+              "text_key": "story.sq05.s1.apprentice",
+              "speaker_key": "story.speaker.apprentice",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Record",
+              "text_key": "story.sq05.s1.note",
+              "speaker_key": "story.speaker.record",
+              "source_kind": "paper",
+              "source_kind_key": "story.speaker.source.paper"
+            }
+          ],
+          "choices": [],
+          "objectives": [
+            {
+              "id": "SQ05.O1",
+              "text_key": "story.sq05.s1.objective",
+              "completion": "Read crate list and loan/return note."
+            }
+          ],
+          "sets_flags": [
+            "sq05_stage_1_complete"
+          ],
+          "player_text_keys": [
+            "story.sq05.s1.objective",
+            "story.sq05.s1.journal",
+            "story.sq05.s1.lan",
+            "story.sq05.s1.apprentice",
+            "story.sq05.s1.note",
+            "story.speaker.apprentice",
+            "story.speaker.lan",
+            "story.speaker.record",
+            "story.speaker.source.live",
+            "story.speaker.source.paper"
+          ],
+          "checkpoint": "Persist loan inspection.",
+          "script_trigger": "enter",
+          "journal_key": "story.sq05.s1.journal"
+        },
+        {
+          "id": "SQ05.S2",
+          "location": "bamboo/wheel_safe",
+          "prerequisites": [
+            "sq05_stage_1_complete"
+          ],
+          "script": [
+            {
+              "speaker": "Keeper Lan",
+              "text_key": "story.sq05.s2.lan",
+              "speaker_key": "story.speaker.lan",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Interaction",
+              "text_key": "story.sq05.s2.clue",
+              "speaker_key": "story.speaker.inspection",
+              "source_kind": "system",
+              "source_kind_key": "story.speaker.source.system"
+            }
+          ],
+          "choices": [
+            {
+              "id": "a",
+              "label_key": "story.sq05.s2.choice_a",
+              "response_keys": [
+                "story.sq05.s2.reply_a"
+              ],
+              "sets_flags": [
+                "sq05_brace_wheel"
+              ]
+            },
+            {
+              "id": "b",
+              "label_key": "story.sq05.s2.choice_b",
+              "response_keys": [
+                "story.sq05.s2.reply_b"
+              ],
+              "sets_flags": [
+                "sq05_brace_board"
+              ]
+            }
+          ],
+          "objectives": [
+            {
+              "id": "SQ05.O2",
+              "text_key": "story.sq05.s2.objective",
+              "completion": "Seat wedge with aligned arrow/plumb marker; release brace latch; choose valid fitting location."
+            }
+          ],
+          "sets_flags": [
+            "sq05_stage_2_complete"
+          ],
+          "player_text_keys": [
+            "story.sq05.s2.objective",
+            "story.sq05.s2.journal",
+            "story.sq05.s2.lan",
+            "story.sq05.s2.clue",
+            "story.sq05.s2.choice_a",
+            "story.sq05.s2.choice_b",
+            "story.sq05.s2.reply_a",
+            "story.sq05.s2.reply_b",
+            "story.speaker.inspection",
+            "story.speaker.lan",
+            "story.speaker.source.live",
+            "story.speaker.source.system"
+          ],
+          "checkpoint": "Persist wedge seating before latch; branch selection switches only after old selected placement is safely undone in safe-state.",
+          "script_trigger": "enter",
+          "journal_key": "story.sq05.s2.journal"
+        },
+        {
+          "id": "SQ05.S3",
+          "location": "hub/stonewright_crate",
+          "prerequisites": [
+            "sq05_stage_2_complete"
+          ],
+          "script": [
+            {
+              "speaker": "Keeper Lan",
+              "text_key": "story.sq05.s3.lan",
+              "speaker_key": "story.speaker.lan",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Apprentice",
+              "text_key": "story.sq05.s3.apprentice",
+              "speaker_key": "story.speaker.apprentice",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Record",
+              "text_key": "story.sq05.s3.record",
+              "speaker_key": "story.speaker.record",
+              "source_kind": "paper",
+              "source_kind_key": "story.speaker.source.paper"
+            }
+          ],
+          "choices": [
+            {
+              "id": "confirm",
+              "label_key": "story.sq05.s3.confirm",
+              "response_keys": [
+                "story.sq05.s3.done"
+              ],
+              "sets_flags": [
+                "sq_iron_reconciled"
+              ]
+            }
+          ],
+          "objectives": [
+            {
+              "id": "SQ05.O3",
+              "text_key": "story.sq05.s3.objective",
+              "completion": "Inspect selected installed fitting; file new loan location; inspect balance sketch; confirm."
+            }
+          ],
+          "sets_flags": [
+            "sq05_stage_3_complete"
+          ],
+          "player_text_keys": [
+            "story.sq05.s3.objective",
+            "story.sq05.s3.journal",
+            "story.sq05.s3.lan",
+            "story.sq05.s3.apprentice",
+            "story.sq05.s3.record",
+            "story.sq05.s3.confirm",
+            "story.sq05.s3.retry",
+            "story.sq05.s3.done",
+            "story.speaker.apprentice",
+            "story.speaker.lan",
+            "story.speaker.record",
+            "story.speaker.source.live",
+            "story.speaker.source.paper"
+          ],
+          "checkpoint": "Persist new-placement inspection and filing.",
+          "script_trigger": "confirmation_checks_ready",
+          "confirmation_guard": "all non-confirmation objective conditions satisfied; courier delivered if applicable; selected branch persisted",
+          "journal_key": "story.sq05.s3.journal",
+          "retry_key": "story.sq05.s3.retry"
+        }
+      ],
+      "completion_flags": [
+        "sq_iron_reconciled"
+      ],
+      "rewards": {
+        "technique_access": "orbiting_blades",
+        "grant_mode": "unlock_training_access_once",
+        "grants_once": "SQ05"
+      },
+      "epilogue_keys": [
+        "story.sq05.epilogue.open",
+        "story.sq05.epilogue.seal",
+        "story.sq05.epilogue.shared"
+      ],
+      "player_text_keys": [
+        "story.sq05.title",
+        "story.sq05.summary",
+        "story.sq05.s1.objective",
+        "story.sq05.s1.journal",
+        "story.sq05.s1.lan",
+        "story.sq05.s1.apprentice",
+        "story.sq05.s1.note",
+        "story.sq05.s2.objective",
+        "story.sq05.s2.journal",
+        "story.sq05.s2.lan",
+        "story.sq05.s2.clue",
+        "story.sq05.s2.choice_a",
+        "story.sq05.s2.choice_b",
+        "story.sq05.s2.reply_a",
+        "story.sq05.s2.reply_b",
+        "story.sq05.s3.objective",
+        "story.sq05.s3.journal",
+        "story.sq05.s3.lan",
+        "story.sq05.s3.apprentice",
+        "story.sq05.s3.record",
+        "story.sq05.s3.confirm",
+        "story.sq05.s3.retry",
+        "story.sq05.s3.done",
+        "story.sq05.epilogue.open",
+        "story.sq05.epilogue.seal",
+        "story.sq05.epilogue.shared",
+        "story.speaker.apprentice",
+        "story.speaker.inspection",
+        "story.speaker.lan",
+        "story.speaker.record",
+        "story.speaker.source.live",
+        "story.speaker.source.paper",
+        "story.speaker.source.system"
+      ],
+      "implementation": {
+        "checkpoints": [
+          "Persist loan inspection.",
+          "Persist wedge seating before latch; branch selection switches only after old selected placement is safely undone in safe-state.",
+          "Persist new-placement inspection and filing."
+        ],
+        "decision": "Wheel housing versus plaque stand changes visible existing prop and one journal record. Grain axle safety is guaranteed first in both choices; memorial inscription is never destroyed.",
+        "timing": "All correspondence is an already-written note; no fabricated live Qiao reply.",
+        "closure": "All interactions use existing props/basic interact. No inventory dependency, sale, combat, or lifting ability. Repeated completion cannot duplicate technique access or grant fallback currency.",
+        "epilogue_selection": "The selected prop placement remains visible in hub/post-ending reconstructed visit; ending paragraph respects infrastructure retirement."
+      }
+    },
+    {
+      "id": "SQ06",
+      "title_key": "story.sq06.title",
+      "summary_key": "story.sq06.summary",
+      "availability": [
+        "mq_ch04_complete"
+      ],
+      "stages": [
+        {
+          "id": "SQ06.S1",
+          "location": "ashen/orchard_safe",
+          "prerequisites": [
+            "mq_ch04_complete"
+          ],
+          "script": [
+            {
+              "speaker": "Keeper Lan",
+              "text_key": "story.sq06.s1.lan",
+              "speaker_key": "story.speaker.lan",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Apprentice",
+              "text_key": "story.sq06.s1.apprentice",
+              "speaker_key": "story.speaker.apprentice",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Record",
+              "text_key": "story.sq06.s1.note",
+              "speaker_key": "story.speaker.record",
+              "source_kind": "paper",
+              "source_kind_key": "story.speaker.source.paper"
+            }
+          ],
+          "choices": [],
+          "objectives": [
+            {
+              "id": "SQ06.O1",
+              "text_key": "story.sq06.s1.objective",
+              "completion": "Inspect burned/frozen branches and read the complete dated trial card."
+            }
+          ],
+          "sets_flags": [
+            "sq06_stage_1_complete"
+          ],
+          "player_text_keys": [
+            "story.sq06.s1.objective",
+            "story.sq06.s1.journal",
+            "story.sq06.s1.lan",
+            "story.sq06.s1.apprentice",
+            "story.sq06.s1.note",
+            "story.speaker.apprentice",
+            "story.speaker.lan",
+            "story.speaker.record",
+            "story.speaker.source.live",
+            "story.speaker.source.paper"
+          ],
+          "checkpoint": "Persist inspected samples and card read.",
+          "script_trigger": "enter",
+          "journal_key": "story.sq06.s1.journal"
+        },
+        {
+          "id": "SQ06.S2",
+          "location": "ashen/vent_room_safe",
+          "prerequisites": [
+            "sq06_stage_1_complete"
+          ],
+          "script": [
+            {
+              "speaker": "Keeper Lan",
+              "text_key": "story.sq06.s2.lan",
+              "speaker_key": "story.speaker.lan",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Interaction",
+              "text_key": "story.sq06.s2.clue",
+              "speaker_key": "story.speaker.inspection",
+              "source_kind": "system",
+              "source_kind_key": "story.speaker.source.system"
+            }
+          ],
+          "choices": [
+            {
+              "id": "a",
+              "label_key": "story.sq06.s2.choice_a",
+              "response_keys": [
+                "story.sq06.s2.reply_a"
+              ],
+              "sets_flags": [
+                "sq06_fitting_sleeve"
+              ]
+            },
+            {
+              "id": "b",
+              "label_key": "story.sq06.s2.choice_b",
+              "response_keys": [
+                "story.sq06.s2.reply_b"
+              ],
+              "sets_flags": [
+                "sq06_fitting_guard"
+              ]
+            }
+          ],
+          "objectives": [
+            {
+              "id": "SQ06.O2",
+              "text_key": "story.sq06.s2.objective",
+              "completion": "Operate four manual sequence states with open outlet invariant; choose fitting after successful cooling."
+            }
+          ],
+          "sets_flags": [
+            "sq06_stage_2_complete"
+          ],
+          "player_text_keys": [
+            "story.sq06.s2.objective",
+            "story.sq06.s2.journal",
+            "story.sq06.s2.lan",
+            "story.sq06.s2.clue",
+            "story.sq06.s2.choice_a",
+            "story.sq06.s2.choice_b",
+            "story.sq06.s2.reply_a",
+            "story.sq06.s2.reply_b",
+            "story.speaker.inspection",
+            "story.speaker.lan",
+            "story.speaker.source.live",
+            "story.speaker.source.system"
+          ],
+          "checkpoint": "Persist each safe sequence step; incorrect input resets sequence only, never damages resources or characters.",
+          "script_trigger": "enter",
+          "journal_key": "story.sq06.s2.journal"
+        },
+        {
+          "id": "SQ06.S3",
+          "location": "hub/inspection_board",
+          "prerequisites": [
+            "sq06_stage_2_complete"
+          ],
+          "script": [
+            {
+              "speaker": "Keeper Lan",
+              "text_key": "story.sq06.s3.lan",
+              "speaker_key": "story.speaker.lan",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Apprentice",
+              "text_key": "story.sq06.s3.apprentice",
+              "speaker_key": "story.speaker.apprentice",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Record",
+              "text_key": "story.sq06.s3.record",
+              "speaker_key": "story.speaker.record",
+              "source_kind": "paper",
+              "source_kind_key": "story.speaker.source.paper"
+            }
+          ],
+          "choices": [
+            {
+              "id": "confirm",
+              "label_key": "story.sq06.s3.confirm",
+              "response_keys": [
+                "story.sq06.s3.done"
+              ],
+              "sets_flags": [
+                "sq_orchard_calibrated"
+              ]
+            }
+          ],
+          "objectives": [
+            {
+              "id": "SQ06.O3",
+              "text_key": "story.sq06.s3.objective",
+              "completion": "Inspect installed fitting; post tested result with scope limitation; confirm."
+            }
+          ],
+          "sets_flags": [
+            "sq06_stage_3_complete"
+          ],
+          "player_text_keys": [
+            "story.sq06.s3.objective",
+            "story.sq06.s3.journal",
+            "story.sq06.s3.lan",
+            "story.sq06.s3.apprentice",
+            "story.sq06.s3.record",
+            "story.sq06.s3.confirm",
+            "story.sq06.s3.retry",
+            "story.sq06.s3.done",
+            "story.speaker.apprentice",
+            "story.speaker.lan",
+            "story.speaker.record",
+            "story.speaker.source.live",
+            "story.speaker.source.paper"
+          ],
+          "checkpoint": "Persist fitting installation and record posting.",
+          "script_trigger": "confirmation_checks_ready",
+          "confirmation_guard": "all non-confirmation objective conditions satisfied; courier delivered if applicable; selected branch persisted",
+          "journal_key": "story.sq06.s3.journal",
+          "retry_key": "story.sq06.s3.retry"
+        }
+      ],
+      "completion_flags": [
+        "sq_orchard_calibrated"
+      ],
+      "rewards": {
+        "training_hint": "ashen_local_vent_pulse_preview",
+        "default_enabled": false,
+        "grants_once": "SQ06"
+      },
+      "epilogue_keys": [
+        "story.sq06.epilogue.open",
+        "story.sq06.epilogue.seal",
+        "story.sq06.epilogue.shared"
+      ],
+      "player_text_keys": [
+        "story.sq06.title",
+        "story.sq06.summary",
+        "story.sq06.s1.objective",
+        "story.sq06.s1.journal",
+        "story.sq06.s1.lan",
+        "story.sq06.s1.apprentice",
+        "story.sq06.s1.note",
+        "story.sq06.s2.objective",
+        "story.sq06.s2.journal",
+        "story.sq06.s2.lan",
+        "story.sq06.s2.clue",
+        "story.sq06.s2.choice_a",
+        "story.sq06.s2.choice_b",
+        "story.sq06.s2.reply_a",
+        "story.sq06.s2.reply_b",
+        "story.sq06.s3.objective",
+        "story.sq06.s3.journal",
+        "story.sq06.s3.lan",
+        "story.sq06.s3.apprentice",
+        "story.sq06.s3.record",
+        "story.sq06.s3.confirm",
+        "story.sq06.s3.retry",
+        "story.sq06.s3.done",
+        "story.sq06.epilogue.open",
+        "story.sq06.epilogue.seal",
+        "story.sq06.epilogue.shared",
+        "story.speaker.apprentice",
+        "story.speaker.inspection",
+        "story.speaker.lan",
+        "story.speaker.record",
+        "story.speaker.source.live",
+        "story.speaker.source.paper",
+        "story.speaker.source.system"
+      ],
+      "implementation": {
+        "checkpoints": [
+          "Persist inspected samples and card read.",
+          "Persist each safe sequence step; incorrect input resets sequence only, never damages resources or characters.",
+          "Persist fitting installation and record posting."
+        ],
+        "decision": "Service-handle safety versus ash prevention yields a different existing prop fitting and maintenance emphasis. Both remain safe and neither cures the whole valley.",
+        "timing": "Two visible cooling counts are deterministic animation beats; text mode offers an immediate labeled Complete Two Cooling Counts interaction. No real-time waiting.",
+        "closure": "Empty calibration bed prevents irreversible punitive failure. Manual controls use basic interact; no Fire technique or repeat boss fight. Training hint is explicitly local and optional, with no competitive/stat advantage.",
+        "epilogue_selection": "No miraculous instant regrowth; growth is shown only after one-season epilogue elapsed time."
+      }
+    },
+    {
+      "id": "SQ07",
+      "title_key": "story.sq07.title",
+      "summary_key": "story.sq07.summary",
+      "availability": [
+        "mq_ch04_complete"
+      ],
+      "stages": [
+        {
+          "id": "SQ07.S1",
+          "location": "ashen/archive_safe",
+          "prerequisites": [
+            "mq_ch04_complete"
+          ],
+          "script": [
+            {
+              "speaker": "Keeper Lan",
+              "text_key": "story.sq07.s1.lan",
+              "speaker_key": "story.speaker.lan",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Apprentice",
+              "text_key": "story.sq07.s1.apprentice",
+              "speaker_key": "story.speaker.apprentice",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Record",
+              "text_key": "story.sq07.s1.note",
+              "speaker_key": "story.speaker.record",
+              "source_kind": "paper",
+              "source_kind_key": "story.speaker.source.paper"
+            }
+          ],
+          "choices": [],
+          "objectives": [
+            {
+              "id": "SQ07.O1",
+              "text_key": "story.sq07.s1.objective",
+              "completion": "Read three representative renewals and inspect blank consent/handover fields."
+            }
+          ],
+          "sets_flags": [
+            "sq07_stage_1_complete"
+          ],
+          "player_text_keys": [
+            "story.sq07.s1.objective",
+            "story.sq07.s1.journal",
+            "story.sq07.s1.lan",
+            "story.sq07.s1.apprentice",
+            "story.sq07.s1.note",
+            "story.speaker.apprentice",
+            "story.speaker.lan",
+            "story.speaker.record",
+            "story.speaker.source.live",
+            "story.speaker.source.paper"
+          ],
+          "checkpoint": "Persist three reads and consent-field inspections.",
+          "script_trigger": "enter",
+          "journal_key": "story.sq07.s1.journal"
+        },
+        {
+          "id": "SQ07.S2",
+          "location": "hub/archive_table",
+          "prerequisites": [
+            "sq07_stage_1_complete"
+          ],
+          "script": [
+            {
+              "speaker": "Keeper Lan",
+              "text_key": "story.sq07.s2.lan",
+              "speaker_key": "story.speaker.lan",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Interaction",
+              "text_key": "story.sq07.s2.clue",
+              "speaker_key": "story.speaker.inspection",
+              "source_kind": "system",
+              "source_kind_key": "story.speaker.source.system"
+            }
+          ],
+          "choices": [
+            {
+              "id": "a",
+              "label_key": "story.sq07.s2.choice_a",
+              "response_keys": [
+                "story.sq07.s2.reply_a"
+              ],
+              "sets_flags": [
+                "sq07_access_summary"
+              ]
+            },
+            {
+              "id": "b",
+              "label_key": "story.sq07.s2.choice_b",
+              "response_keys": [
+                "story.sq07.s2.reply_b"
+              ],
+              "sets_flags": [
+                "sq07_access_supervised"
+              ]
+            }
+          ],
+          "objectives": [
+            {
+              "id": "SQ07.O2",
+              "text_key": "story.sq07.s2.objective",
+              "completion": "Order dated documents and mark blank consent boxes; choose access format without discarding originals."
+            }
+          ],
+          "sets_flags": [
+            "sq07_stage_2_complete"
+          ],
+          "player_text_keys": [
+            "story.sq07.s2.objective",
+            "story.sq07.s2.journal",
+            "story.sq07.s2.lan",
+            "story.sq07.s2.clue",
+            "story.sq07.s2.choice_a",
+            "story.sq07.s2.choice_b",
+            "story.sq07.s2.reply_a",
+            "story.sq07.s2.reply_b",
+            "story.speaker.inspection",
+            "story.speaker.lan",
+            "story.speaker.source.live",
+            "story.speaker.source.system"
+          ],
+          "checkpoint": "Persist chronology and access mode.",
+          "script_trigger": "enter",
+          "journal_key": "story.sq07.s2.journal"
+        },
+        {
+          "id": "SQ07.S3",
+          "location": "hub/archive_shelf",
+          "prerequisites": [
+            "sq07_stage_2_complete"
+          ],
+          "script": [
+            {
+              "speaker": "Keeper Lan",
+              "text_key": "story.sq07.s3.lan",
+              "speaker_key": "story.speaker.lan",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Apprentice",
+              "text_key": "story.sq07.s3.apprentice",
+              "speaker_key": "story.speaker.apprentice",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Record",
+              "text_key": "story.sq07.s3.record",
+              "speaker_key": "story.speaker.record",
+              "source_kind": "paper",
+              "source_kind_key": "story.speaker.source.paper"
+            }
+          ],
+          "choices": [
+            {
+              "id": "confirm",
+              "label_key": "story.sq07.s3.confirm",
+              "response_keys": [
+                "story.sq07.s3.done"
+              ],
+              "sets_flags": [
+                "sq_archive_access_established"
+              ]
+            }
+          ],
+          "objectives": [
+            {
+              "id": "SQ07.O3",
+              "text_key": "story.sq07.s3.objective",
+              "completion": "Verify term, dates, consent distinction, four archive sources, protected addresses, and append-only correction notice; confirm."
+            }
+          ],
+          "sets_flags": [
+            "sq07_stage_3_complete"
+          ],
+          "player_text_keys": [
+            "story.sq07.s3.objective",
+            "story.sq07.s3.journal",
+            "story.sq07.s3.lan",
+            "story.sq07.s3.apprentice",
+            "story.sq07.s3.record",
+            "story.sq07.s3.confirm",
+            "story.sq07.s3.retry",
+            "story.sq07.s3.done",
+            "story.speaker.apprentice",
+            "story.speaker.lan",
+            "story.speaker.record",
+            "story.speaker.source.live",
+            "story.speaker.source.paper"
+          ],
+          "checkpoint": "Persist notice checklist; confirmation makes access notice visible on existing shelf.",
+          "script_trigger": "confirmation_checks_ready",
+          "confirmation_guard": "all non-confirmation objective conditions satisfied; courier delivered if applicable; selected branch persisted",
+          "journal_key": "story.sq07.s3.journal",
+          "retry_key": "story.sq07.s3.retry"
+        }
+      ],
+      "completion_flags": [
+        "sq_archive_access_established"
+      ],
+      "rewards": {
+        "codex_record": "renewal_chain_and_access_notice",
+        "grants_once": "SQ07"
+      },
+      "epilogue_keys": [
+        "story.sq07.epilogue.open",
+        "story.sq07.epilogue.seal",
+        "story.sq07.epilogue.shared"
+      ],
+      "player_text_keys": [
+        "story.sq07.title",
+        "story.sq07.summary",
+        "story.sq07.s1.objective",
+        "story.sq07.s1.journal",
+        "story.sq07.s1.lan",
+        "story.sq07.s1.apprentice",
+        "story.sq07.s1.note",
+        "story.sq07.s2.objective",
+        "story.sq07.s2.journal",
+        "story.sq07.s2.lan",
+        "story.sq07.s2.clue",
+        "story.sq07.s2.choice_a",
+        "story.sq07.s2.choice_b",
+        "story.sq07.s2.reply_a",
+        "story.sq07.s2.reply_b",
+        "story.sq07.s3.objective",
+        "story.sq07.s3.journal",
+        "story.sq07.s3.lan",
+        "story.sq07.s3.apprentice",
+        "story.sq07.s3.record",
+        "story.sq07.s3.confirm",
+        "story.sq07.s3.retry",
+        "story.sq07.s3.done",
+        "story.sq07.epilogue.open",
+        "story.sq07.epilogue.seal",
+        "story.sq07.epilogue.shared",
+        "story.speaker.apprentice",
+        "story.speaker.inspection",
+        "story.speaker.lan",
+        "story.speaker.record",
+        "story.speaker.source.live",
+        "story.speaker.source.paper",
+        "story.speaker.source.system"
+      ],
+      "implementation": {
+        "checkpoints": [
+          "Persist three reads and consent-field inspections.",
+          "Persist chronology and access mode.",
+          "Persist notice checklist; confirmation makes access notice visible on existing shelf."
+        ],
+        "decision": "Public summaries with index favor reach; supervised full decision facsimiles favor detailed inspection. Both disclose institutional decisions and protect unrelated household addresses. No criminal verdict, new faction, or public shame statistic.",
+        "timing": "Years are relative to the thirteen-year emergency; documents are historical records, not new courier messages.",
+        "closure": "Source ordering can be retried free. All key revelations remain available in main story without SQ07. Original signed pages are immutable and always recoverable in archive UI.",
+        "epilogue_selection": "Selected access format persists; no epilogue falsely claims institutions cannot repeat the mistake."
+      }
+    },
+    {
+      "id": "SQ08",
+      "title_key": "story.sq08.title",
+      "summary_key": "story.sq08.summary",
+      "availability": [
+        "mq_ch02_complete"
+      ],
+      "stages": [
+        {
+          "id": "SQ08.S1",
+          "location": "hub/old_table",
+          "prerequisites": [
+            "mq_ch02_complete"
+          ],
+          "script": [
+            {
+              "speaker": "Keeper Lan",
+              "text_key": "story.sq08.s1.lan",
+              "speaker_key": "story.speaker.lan",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Apprentice",
+              "text_key": "story.sq08.s1.apprentice",
+              "speaker_key": "story.speaker.apprentice",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Record",
+              "text_key": "story.sq08.s1.note",
+              "speaker_key": "story.speaker.record",
+              "source_kind": "paper",
+              "source_kind_key": "story.speaker.source.paper"
+            }
+          ],
+          "choices": [],
+          "objectives": [
+            {
+              "id": "SQ08.O1",
+              "text_key": "story.sq08.s1.objective",
+              "completion": "Read recipe and inspect waiting bowl."
+            }
+          ],
+          "sets_flags": [
+            "sq08_stage_1_complete"
+          ],
+          "player_text_keys": [
+            "story.sq08.s1.objective",
+            "story.sq08.s1.journal",
+            "story.sq08.s1.lan",
+            "story.sq08.s1.apprentice",
+            "story.sq08.s1.note",
+            "story.speaker.apprentice",
+            "story.speaker.lan",
+            "story.speaker.record",
+            "story.speaker.source.live",
+            "story.speaker.source.paper"
+          ],
+          "checkpoint": "Persist page and bowl inspection.",
+          "script_trigger": "enter",
+          "journal_key": "story.sq08.s1.journal"
+        },
+        {
+          "id": "SQ08.S2",
+          "location": "bamboo/picnic_shelf_safe",
+          "prerequisites": [
+            "sq08_stage_1_complete"
+          ],
+          "script": [
+            {
+              "speaker": "Keeper Lan",
+              "text_key": "story.sq08.s2.lan",
+              "speaker_key": "story.speaker.lan",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Interaction",
+              "text_key": "story.sq08.s2.clue",
+              "speaker_key": "story.speaker.inspection",
+              "source_kind": "system",
+              "source_kind_key": "story.speaker.source.system"
+            }
+          ],
+          "choices": [
+            {
+              "id": "a",
+              "label_key": "story.sq08.s2.choice_a",
+              "response_keys": [
+                "story.sq08.s2.reply_a"
+              ],
+              "sets_flags": [
+                "sq08_recipe_communal"
+              ]
+            },
+            {
+              "id": "b",
+              "label_key": "story.sq08.s2.choice_b",
+              "response_keys": [
+                "story.sq08.s2.reply_b"
+              ],
+              "sets_flags": [
+                "sq08_recipe_field"
+              ]
+            }
+          ],
+          "objectives": [
+            {
+              "id": "SQ08.O2",
+              "text_key": "story.sq08.s2.objective",
+              "completion": "Inspect safe-state shelf rail and dated margin; choose copy location."
+            }
+          ],
+          "sets_flags": [
+            "sq08_stage_2_complete"
+          ],
+          "player_text_keys": [
+            "story.sq08.s2.objective",
+            "story.sq08.s2.journal",
+            "story.sq08.s2.lan",
+            "story.sq08.s2.clue",
+            "story.sq08.s2.choice_a",
+            "story.sq08.s2.choice_b",
+            "story.sq08.s2.reply_a",
+            "story.sq08.s2.reply_b",
+            "story.speaker.inspection",
+            "story.speaker.lan",
+            "story.speaker.source.live",
+            "story.speaker.source.system"
+          ],
+          "checkpoint": "Persist rail/margin and recipe-copy placement choice.",
+          "script_trigger": "enter",
+          "journal_key": "story.sq08.s2.journal"
+        },
+        {
+          "id": "SQ08.S3",
+          "location": "hub/old_table",
+          "prerequisites": [
+            "sq08_stage_2_complete"
+          ],
+          "script": [
+            {
+              "speaker": "Keeper Lan",
+              "text_key": "story.sq08.s3.lan",
+              "speaker_key": "story.speaker.lan",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Apprentice",
+              "text_key": "story.sq08.s3.apprentice",
+              "speaker_key": "story.speaker.apprentice",
+              "source_kind": "live",
+              "source_kind_key": "story.speaker.source.live"
+            },
+            {
+              "speaker": "Record",
+              "text_key": "story.sq08.s3.record",
+              "speaker_key": "story.speaker.record",
+              "source_kind": "paper",
+              "source_kind_key": "story.speaker.source.paper"
+            }
+          ],
+          "choices": [
+            {
+              "id": "confirm",
+              "label_key": "story.sq08.s3.confirm",
+              "response_keys": [
+                "story.sq08.s3.done"
+              ],
+              "sets_flags": [
+                "sq_meal_shared"
+              ]
+            }
+          ],
+          "objectives": [
+            {
+              "id": "SQ08.O3",
+              "text_key": "story.sq08.s3.objective",
+              "completion": "Place selected copy; return original; inspect prepared table; explicit meal confirmation."
+            }
+          ],
+          "sets_flags": [
+            "sq08_stage_3_complete"
+          ],
+          "player_text_keys": [
+            "story.sq08.s3.objective",
+            "story.sq08.s3.journal",
+            "story.sq08.s3.lan",
+            "story.sq08.s3.apprentice",
+            "story.sq08.s3.record",
+            "story.sq08.s3.confirm",
+            "story.sq08.s3.retry",
+            "story.sq08.s3.done",
+            "story.speaker.apprentice",
+            "story.speaker.lan",
+            "story.speaker.record",
+            "story.speaker.source.live",
+            "story.speaker.source.paper"
+          ],
+          "checkpoint": "Persist copy placement and original return; meal completion only on confirm.",
+          "script_trigger": "confirmation_checks_ready",
+          "confirmation_guard": "all non-confirmation objective conditions satisfied; courier delivered if applicable; selected branch persisted",
+          "journal_key": "story.sq08.s3.journal",
+          "retry_key": "story.sq08.s3.retry"
+        }
+      ],
+      "completion_flags": [
+        "sq_meal_shared"
+      ],
+      "rewards": {
+        "codex_record": "meis_ordinary_recipe",
+        "hub_prop": "wide_meal_bowl",
+        "grants_once": "SQ08"
+      },
+      "epilogue_keys": [
+        "story.sq08.epilogue.open",
+        "story.sq08.epilogue.seal",
+        "story.sq08.epilogue.shared"
+      ],
+      "player_text_keys": [
+        "story.sq08.title",
+        "story.sq08.summary",
+        "story.sq08.s1.objective",
+        "story.sq08.s1.journal",
+        "story.sq08.s1.lan",
+        "story.sq08.s1.apprentice",
+        "story.sq08.s1.note",
+        "story.sq08.s2.objective",
+        "story.sq08.s2.journal",
+        "story.sq08.s2.lan",
+        "story.sq08.s2.clue",
+        "story.sq08.s2.choice_a",
+        "story.sq08.s2.choice_b",
+        "story.sq08.s2.reply_a",
+        "story.sq08.s2.reply_b",
+        "story.sq08.s3.objective",
+        "story.sq08.s3.journal",
+        "story.sq08.s3.lan",
+        "story.sq08.s3.apprentice",
+        "story.sq08.s3.record",
+        "story.sq08.s3.confirm",
+        "story.sq08.s3.retry",
+        "story.sq08.s3.done",
+        "story.sq08.epilogue.open",
+        "story.sq08.epilogue.seal",
+        "story.sq08.epilogue.shared",
+        "story.speaker.apprentice",
+        "story.speaker.inspection",
+        "story.speaker.lan",
+        "story.speaker.record",
+        "story.speaker.source.live",
+        "story.speaker.source.paper",
+        "story.speaker.source.system"
+      ],
+      "implementation": {
+        "checkpoints": [
+          "Persist page and bowl inspection.",
+          "Persist rail/margin and recipe-copy placement choice.",
+          "Persist copy placement and original return; meal completion only on confirm."
+        ],
+        "decision": "Communal recipe versus field meal book changes where an existing note appears and who uses it. Original always retained; functioning SQ01 lamp never moved or extinguished.",
+        "timing": "A labeled meal interaction advances twenty in-game minutes, updating pending courier timers by the same amount. No real-time delay.",
+        "closure": "No ingredient gathering, new cooking system, grief metric, forced forgiveness, or resurrection. Meal can be skipped visually while completing the same consensual interaction. Return available until ending confirmation.",
+        "epilogue_selection": "Each ending shows Lan still grieving; all record continuity with deceased Mei without implying survival or interactive ghost."
+      }
+    }
+  ]
+}

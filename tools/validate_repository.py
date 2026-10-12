@@ -8,6 +8,7 @@ import re
 import sys
 import xml.etree.ElementTree as ET
 from urllib.parse import unquote
+from validate_story import validate_story
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -141,6 +142,8 @@ def main():
     strings = validate_localization()
     validate_examples(strings)
     validate_packaging_and_manifest()
+    story_errors, story_stats = validate_story()
+    ERRORS.extend(story_errors)
     if ERRORS:
         print("Planning validation failed:")
         for error in ERRORS:
@@ -149,6 +152,7 @@ def main():
     print(f"Planning validation passed: {count} text files, {len(strings)} keys per locale, "
           "8 techniques, 7 rooms, save example, asset ledger, and packaging template.")
     print("This does not validate Unreal gameplay, GPU performance, or Store certification.")
+    print("Narrative contracts: " + json.dumps(story_stats, sort_keys=True))
     return 0
 
 

@@ -1,0 +1,1293 @@
+{
+  "schema_version": 1,
+  "chapters": [
+    {
+      "id": "CH00",
+      "title_key": "story.ch00.title",
+      "summary_key": "story.ch00.summary",
+      "scene_ids": [
+        "CH00_S01",
+        "CH00_S02",
+        "CH00_S03",
+        "CH00_S04"
+      ]
+    },
+    {
+      "id": "CH01",
+      "title_key": "story.ch01.title",
+      "summary_key": "story.ch01.summary",
+      "scene_ids": [
+        "CH01_S01",
+        "CH01_S02",
+        "CH01_S03"
+      ]
+    },
+    {
+      "id": "CH02",
+      "title_key": "story.ch02.title",
+      "summary_key": "story.ch02.summary",
+      "scene_ids": [
+        "CH02_S01",
+        "CH02_S02",
+        "CH02_S03",
+        "CH02_S04"
+      ]
+    },
+    {
+      "id": "CH03",
+      "title_key": "story.ch03.title",
+      "summary_key": "story.ch03.summary",
+      "scene_ids": [
+        "CH03_S01",
+        "CH03_S02",
+        "CH03_S03"
+      ]
+    }
+  ],
+  "scenes": [
+    {
+      "id": "CH00_S01",
+      "chapter": "CH00",
+      "location": "hub.courtyard",
+      "title_key": "story.ch00.s01.title",
+      "prerequisites": [],
+      "script": [
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch00.s01.line_01",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch00.s01.line_02",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch00.s01.line_03",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch00.s01.line_04",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch00.s01.line_05",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch00.s01.line_06",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        }
+      ],
+      "choices": [
+        {
+          "id": "CH00_S01_LOOK",
+          "label_key": "story.ch00.s01.choice_LOOK",
+          "response_keys": [
+            "story.ch00.s01.response_LOOK"
+          ],
+          "sets_flags": [
+            "mq_ch00_observe_first"
+          ]
+        },
+        {
+          "id": "CH00_S01_HELP",
+          "label_key": "story.ch00.s01.choice_HELP",
+          "response_keys": [
+            "story.ch00.s01.response_HELP"
+          ],
+          "sets_flags": [
+            "mq_ch00_downstream_concern"
+          ]
+        }
+      ],
+      "objectives": [
+        {
+          "id": "CH00_S01_OBJECTIVE",
+          "text_key": "story.ch00.s01.objective",
+          "completion": "Bell pulled; mandatory exchange completed or skipped; one response explicitly selected; safe courtyard checkpoint saved"
+        }
+      ],
+      "sets_flags": [
+        "mq_ch00_bell_examined"
+      ],
+      "next_scene_ids": [
+        "CH00_S02"
+      ],
+      "player_text_keys": [
+        "story.ch00.s01.title",
+        "story.ch00.s01.line_01",
+        "story.ch00.s01.line_02",
+        "story.ch00.s01.line_03",
+        "story.ch00.s01.line_04",
+        "story.ch00.s01.line_05",
+        "story.ch00.s01.line_06",
+        "story.ch00.s01.objective",
+        "story.ch00.s01.journal",
+        "story.ch00.s01.choice_LOOK",
+        "story.ch00.s01.response_LOOK",
+        "story.ch00.s01.choice_HELP",
+        "story.ch00.s01.response_HELP",
+        "story.speaker.apprentice",
+        "story.speaker.lan",
+        "story.speaker.source.live"
+      ]
+    },
+    {
+      "id": "CH00_S02",
+      "chapter": "CH00",
+      "location": "hub.training_yard",
+      "title_key": "story.ch00.s02.title",
+      "prerequisites": [
+        "mq_ch00_bell_examined"
+      ],
+      "script": [
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch00.s02.line_01",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch00.s02.line_02",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch00.s02.line_03",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch00.s02.line_04",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch00.s02.line_05",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch00.s02.line_06",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        }
+      ],
+      "choices": [],
+      "objectives": [
+        {
+          "id": "CH00_S02_OBJECTIVE",
+          "text_key": "story.ch00.s02.objective",
+          "completion": "Training sword hits, one telegraphed dodge, Jade Sword Arc cast, Flowing Ward cast, and shrine recovery registered; safe shrine checkpoint saved"
+        }
+      ],
+      "sets_flags": [
+        "mq_ch00_training_complete"
+      ],
+      "next_scene_ids": [
+        "CH00_S03"
+      ],
+      "player_text_keys": [
+        "story.ch00.s02.title",
+        "story.ch00.s02.line_01",
+        "story.ch00.s02.line_02",
+        "story.ch00.s02.line_03",
+        "story.ch00.s02.line_04",
+        "story.ch00.s02.line_05",
+        "story.ch00.s02.line_06",
+        "story.ch00.s02.objective",
+        "story.ch00.s02.journal",
+        "story.ch00.s02.prompt_sword",
+        "story.ch00.s02.prompt_dodge",
+        "story.ch00.s02.prompt_cast",
+        "story.ch00.s02.retry",
+        "story.speaker.apprentice",
+        "story.speaker.lan",
+        "story.speaker.source.live"
+      ]
+    },
+    {
+      "id": "CH00_S03",
+      "chapter": "CH00",
+      "location": "hub.shrine",
+      "title_key": "story.ch00.s03.title",
+      "prerequisites": [
+        "mq_ch00_training_complete"
+      ],
+      "script": [
+        {
+          "speaker": "Document Header",
+          "text_key": "story.ch00.s03.line_01",
+          "speaker_key": "story.speaker.document",
+          "source_kind": "paper",
+          "source_kind_key": "story.speaker.source.paper"
+        },
+        {
+          "speaker": "Elder Yun — Letter",
+          "text_key": "story.ch00.s03.line_02",
+          "speaker_key": "story.speaker.yun",
+          "source_kind": "letter",
+          "source_kind_key": "story.speaker.source.letter"
+        },
+        {
+          "speaker": "Elder Yun — Letter",
+          "text_key": "story.ch00.s03.line_03",
+          "speaker_key": "story.speaker.yun",
+          "source_kind": "letter",
+          "source_kind_key": "story.speaker.source.letter"
+        },
+        {
+          "speaker": "Elder Yun — Letter",
+          "text_key": "story.ch00.s03.line_04",
+          "speaker_key": "story.speaker.yun",
+          "source_kind": "letter",
+          "source_kind_key": "story.speaker.source.letter"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch00.s03.line_05",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch00.s03.line_06",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        }
+      ],
+      "choices": [],
+      "objectives": [
+        {
+          "id": "CH00_S03_OBJECTIVE",
+          "text_key": "story.ch00.s03.objective",
+          "completion": "Dated route letter opened or mandatory text skipped into journal; Lan exchange completed; safe shrine checkpoint saved"
+        }
+      ],
+      "sets_flags": [
+        "mq_ch00_route_read"
+      ],
+      "next_scene_ids": [
+        "CH00_S04"
+      ],
+      "player_text_keys": [
+        "story.ch00.s03.title",
+        "story.ch00.s03.line_01",
+        "story.ch00.s03.line_02",
+        "story.ch00.s03.line_03",
+        "story.ch00.s03.line_04",
+        "story.ch00.s03.line_05",
+        "story.ch00.s03.line_06",
+        "story.ch00.s03.objective",
+        "story.ch00.s03.journal",
+        "story.ch00.s03.sealed_packet",
+        "story.speaker.apprentice",
+        "story.speaker.lan",
+        "story.speaker.record",
+        "story.speaker.source.letter",
+        "story.speaker.source.live",
+        "story.speaker.source.paper",
+        "story.speaker.yun",
+        "story.speaker.document"
+      ]
+    },
+    {
+      "id": "CH00_S04",
+      "chapter": "CH00",
+      "location": "hub.bamboo_gate",
+      "title_key": "story.ch00.s04.title",
+      "prerequisites": [
+        "mq_ch00_route_read"
+      ],
+      "script": [
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch00.s04.line_01",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch00.s04.line_02",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch00.s04.line_03",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch00.s04.line_04",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch00.s04.line_05",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        }
+      ],
+      "choices": [],
+      "objectives": [
+        {
+          "id": "CH00_S04_OBJECTIVE",
+          "text_key": "story.ch00.s04.objective",
+          "completion": "Gate conversation completed or skipped; player confirms guided route; Bamboo entrance safe checkpoint saved"
+        }
+      ],
+      "sets_flags": [
+        "mq_ch00_complete"
+      ],
+      "next_scene_ids": [
+        "CH01_S01"
+      ],
+      "player_text_keys": [
+        "story.ch00.s04.title",
+        "story.ch00.s04.line_01",
+        "story.ch00.s04.line_02",
+        "story.ch00.s04.line_03",
+        "story.ch00.s04.line_04",
+        "story.ch00.s04.line_05",
+        "story.ch00.s04.objective",
+        "story.ch00.s04.journal",
+        "story.ch00.s04.enter",
+        "story.speaker.apprentice",
+        "story.speaker.lan",
+        "story.speaker.source.live"
+      ]
+    },
+    {
+      "id": "CH01_S01",
+      "chapter": "CH01",
+      "location": "bamboo.room_0",
+      "title_key": "story.ch01.s01.title",
+      "prerequisites": [
+        "mq_ch00_complete"
+      ],
+      "script": [
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch01.s01.line_01",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Supply Note — Current Season",
+          "text_key": "story.ch01.s01.line_02",
+          "speaker_key": "story.speaker.letter",
+          "source_kind": "paper",
+          "source_kind_key": "story.speaker.source.paper"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch01.s01.line_03",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch01.s01.line_04",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch01.s01.line_05",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        }
+      ],
+      "choices": [],
+      "objectives": [
+        {
+          "id": "CH01_S01_OBJECTIVE",
+          "text_key": "story.ch01.s01.objective",
+          "completion": "Water marks and current-season delivery note examined; mandatory dialogue completed or skipped; entrance checkpoint saved"
+        }
+      ],
+      "sets_flags": [
+        "mq_ch01_watermarks_read"
+      ],
+      "next_scene_ids": [
+        "CH01_S02"
+      ],
+      "player_text_keys": [
+        "story.ch01.s01.title",
+        "story.ch01.s01.line_01",
+        "story.ch01.s01.line_02",
+        "story.ch01.s01.line_03",
+        "story.ch01.s01.line_04",
+        "story.ch01.s01.line_05",
+        "story.ch01.s01.objective",
+        "story.ch01.s01.journal",
+        "story.ch01.s01.rope",
+        "story.speaker.apprentice",
+        "story.speaker.letter",
+        "story.speaker.source.live",
+        "story.speaker.source.paper"
+      ]
+    },
+    {
+      "id": "CH01_S02",
+      "chapter": "CH01",
+      "location": "bamboo.room_1_2_guided",
+      "title_key": "story.ch01.s02.title",
+      "prerequisites": [
+        "mq_ch01_watermarks_read"
+      ],
+      "script": [
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch01.s02.line_01",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch01.s02.line_02",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Inspection Plate",
+          "text_key": "story.ch01.s02.line_03",
+          "speaker_key": "story.speaker.array",
+          "source_kind": "system",
+          "source_kind_key": "story.speaker.source.system"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch01.s02.line_04",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch01.s02.line_05",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        }
+      ],
+      "choices": [],
+      "objectives": [
+        {
+          "id": "CH01_S02_OBJECTIVE",
+          "text_key": "story.ch01.s02.objective",
+          "completion": "Guided encounters cleared; blessing selected; inspection shutter tested; safe room-3 shrine reached"
+        }
+      ],
+      "sets_flags": [
+        "mq_ch01_short_route_clear"
+      ],
+      "next_scene_ids": [
+        "CH01_S03"
+      ],
+      "player_text_keys": [
+        "story.ch01.s02.title",
+        "story.ch01.s02.line_01",
+        "story.ch01.s02.line_02",
+        "story.ch01.s02.line_03",
+        "story.ch01.s02.line_04",
+        "story.ch01.s02.line_05",
+        "story.ch01.s02.objective",
+        "story.ch01.s02.journal",
+        "story.ch01.s02.blessing",
+        "story.ch01.s02.failure",
+        "story.ch01.s02.shutter_closed",
+        "story.speaker.apprentice",
+        "story.speaker.array",
+        "story.speaker.source.live",
+        "story.speaker.source.system"
+      ]
+    },
+    {
+      "id": "CH01_S03",
+      "chapter": "CH01",
+      "location": "hub.shrine",
+      "title_key": "story.ch01.s03.title",
+      "prerequisites": [
+        "mq_ch01_short_route_clear"
+      ],
+      "script": [
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch01.s03.line_01",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch01.s03.line_02",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch01.s03.line_03",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch01.s03.line_04",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch01.s03.line_05",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch01.s03.line_06",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        }
+      ],
+      "choices": [
+        {
+          "id": "CH01_S03_READINGS",
+          "label_key": "story.ch01.s03.choice_READINGS",
+          "response_keys": [
+            "story.ch01.s03.response_READINGS"
+          ],
+          "sets_flags": [
+            "mq_ch01_measure_commitment"
+          ]
+        },
+        {
+          "id": "CH01_S03_PEOPLE",
+          "label_key": "story.ch01.s03.choice_PEOPLE",
+          "response_keys": [
+            "story.ch01.s03.response_PEOPLE"
+          ],
+          "sets_flags": [
+            "mq_ch01_people_commitment"
+          ]
+        }
+      ],
+      "objectives": [
+        {
+          "id": "CH01_S03_OBJECTIVE",
+          "text_key": "story.ch01.s03.objective",
+          "completion": "Guided rewards banked; mandatory ledger exchange completed or skipped; response chosen; hub checkpoint saved"
+        }
+      ],
+      "sets_flags": [
+        "mq_ch01_complete"
+      ],
+      "next_scene_ids": [
+        "CH02_S01"
+      ],
+      "player_text_keys": [
+        "story.ch01.s03.title",
+        "story.ch01.s03.line_01",
+        "story.ch01.s03.line_02",
+        "story.ch01.s03.line_03",
+        "story.ch01.s03.line_04",
+        "story.ch01.s03.line_05",
+        "story.ch01.s03.line_06",
+        "story.ch01.s03.objective",
+        "story.ch01.s03.journal",
+        "story.ch01.s03.choice_READINGS",
+        "story.ch01.s03.response_READINGS",
+        "story.ch01.s03.choice_PEOPLE",
+        "story.ch01.s03.response_PEOPLE",
+        "story.speaker.apprentice",
+        "story.speaker.lan",
+        "story.speaker.source.live"
+      ]
+    },
+    {
+      "id": "CH02_S01",
+      "chapter": "CH02",
+      "location": "bamboo.room_0",
+      "title_key": "story.ch02.s01.title",
+      "prerequisites": [
+        "mq_ch01_complete"
+      ],
+      "script": [
+        {
+          "speaker": "Tool Label — Keeper Lan",
+          "text_key": "story.ch02.s01.line_01",
+          "speaker_key": "story.speaker.inspection",
+          "source_kind": "system",
+          "source_kind_key": "story.speaker.source.system"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch02.s01.line_02",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch02.s01.line_03",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch02.s01.line_04",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        }
+      ],
+      "choices": [],
+      "objectives": [
+        {
+          "id": "CH02_S01_OBJECTIVE",
+          "text_key": "story.ch02.s01.objective",
+          "completion": "Loadout confirmed; pressure dial inspected; expedition entrance checkpoint saved"
+        }
+      ],
+      "sets_flags": [
+        "mq_ch02_pressure_baseline"
+      ],
+      "next_scene_ids": [
+        "CH02_S02"
+      ],
+      "player_text_keys": [
+        "story.ch02.s01.title",
+        "story.ch02.s01.line_01",
+        "story.ch02.s01.line_02",
+        "story.ch02.s01.line_03",
+        "story.ch02.s01.line_04",
+        "story.ch02.s01.objective",
+        "story.ch02.s01.journal",
+        "story.ch02.s01.repeat_entry",
+        "story.ch02.s01.retreat",
+        "story.ch02.s01.dial",
+        "story.speaker.apprentice",
+        "story.speaker.inspection",
+        "story.speaker.source.live",
+        "story.speaker.source.system"
+      ]
+    },
+    {
+      "id": "CH02_S02",
+      "chapter": "CH02",
+      "location": "bamboo.rooms_1_to_5",
+      "title_key": "story.ch02.s02.title",
+      "prerequisites": [
+        "mq_ch02_pressure_baseline"
+      ],
+      "script": [
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch02.s02.line_01",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch02.s02.line_02",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Intake Plate",
+          "text_key": "story.ch02.s02.line_03",
+          "speaker_key": "story.speaker.array",
+          "source_kind": "system",
+          "source_kind_key": "story.speaker.source.system"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch02.s02.line_04",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch02.s02.line_05",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        }
+      ],
+      "choices": [],
+      "objectives": [
+        {
+          "id": "CH02_S02_OBJECTIVE",
+          "text_key": "story.ch02.s02.objective",
+          "completion": "Bamboo Guardian defeated; boss clear/proof and pending reward transaction committed at safe reward screen; currency/materials bank only on sanctuary return"
+        }
+      ],
+      "sets_flags": [
+        "mq_ch02_bamboo_defeated"
+      ],
+      "next_scene_ids": [
+        "CH02_S03"
+      ],
+      "player_text_keys": [
+        "story.ch02.s02.title",
+        "story.ch02.s02.line_01",
+        "story.ch02.s02.line_02",
+        "story.ch02.s02.line_03",
+        "story.ch02.s02.line_04",
+        "story.ch02.s02.line_05",
+        "story.ch02.s02.objective",
+        "story.ch02.s02.journal",
+        "story.ch02.s02.boss_retry",
+        "story.ch02.s02.defeat",
+        "story.ch02.s02.repeat_clear",
+        "story.speaker.apprentice",
+        "story.speaker.array",
+        "story.speaker.source.live",
+        "story.speaker.source.system"
+      ]
+    },
+    {
+      "id": "CH02_S03",
+      "chapter": "CH02",
+      "location": "bamboo.room_5_safe",
+      "title_key": "story.ch02.s03.title",
+      "prerequisites": [
+        "mq_ch02_bamboo_defeated"
+      ],
+      "script": [
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch02.s03.line_01",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Array Caption",
+          "text_key": "story.ch02.s03.line_02",
+          "speaker_key": "story.speaker.array",
+          "source_kind": "system",
+          "source_kind_key": "story.speaker.source.system"
+        },
+        {
+          "speaker": "Unknown Voice",
+          "text_key": "story.ch02.s03.line_03",
+          "speaker_key": "story.speaker.unknown",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch02.s03.line_04",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Unknown Voice",
+          "text_key": "story.ch02.s03.line_05",
+          "speaker_key": "story.speaker.unknown",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Array Caption",
+          "text_key": "story.ch02.s03.line_06",
+          "speaker_key": "story.speaker.array",
+          "source_kind": "system",
+          "source_kind_key": "story.speaker.source.system"
+        },
+        {
+          "speaker": "Unknown Voice",
+          "text_key": "story.ch02.s03.line_07",
+          "speaker_key": "story.speaker.unknown",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch02.s03.line_08",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        }
+      ],
+      "choices": [],
+      "objectives": [
+        {
+          "id": "CH02_S03_OBJECTIVE",
+          "text_key": "story.ch02.s03.objective",
+          "completion": "Single reconnection animation and mandatory living-voice exchange completed or skipped; anchor state and story flag atomically saved at safe controls"
+        }
+      ],
+      "sets_flags": [
+        "mq_ch02_intake_reconnected"
+      ],
+      "next_scene_ids": [
+        "CH02_S04"
+      ],
+      "player_text_keys": [
+        "story.ch02.s03.title",
+        "story.ch02.s03.line_01",
+        "story.ch02.s03.line_02",
+        "story.ch02.s03.line_03",
+        "story.ch02.s03.line_04",
+        "story.ch02.s03.line_05",
+        "story.ch02.s03.line_06",
+        "story.ch02.s03.line_07",
+        "story.ch02.s03.line_08",
+        "story.ch02.s03.objective",
+        "story.ch02.s03.journal",
+        "story.ch02.s03.exit",
+        "story.ch02.s03.control_revisit",
+        "story.speaker.apprentice",
+        "story.speaker.array",
+        "story.speaker.source.live",
+        "story.speaker.source.system",
+        "story.speaker.unknown"
+      ]
+    },
+    {
+      "id": "CH02_S04",
+      "chapter": "CH02",
+      "location": "hub.workbench",
+      "title_key": "story.ch02.s04.title",
+      "prerequisites": [
+        "mq_ch02_intake_reconnected"
+      ],
+      "script": [
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch02.s04.line_01",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch02.s04.line_02",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch02.s04.line_03",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch02.s04.line_04",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch02.s04.line_05",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch02.s04.line_06",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        }
+      ],
+      "choices": [
+        {
+          "id": "CH02_S04_ANGER",
+          "label_key": "story.ch02.s04.choice_ANGER",
+          "response_keys": [
+            "story.ch02.s04.response_ANGER"
+          ],
+          "sets_flags": [
+            "mq_ch02_lan_confronted"
+          ]
+        },
+        {
+          "id": "CH02_S04_PLAN",
+          "label_key": "story.ch02.s04.choice_PLAN",
+          "response_keys": [
+            "story.ch02.s04.response_PLAN"
+          ],
+          "sets_flags": [
+            "mq_ch02_lan_plan_requested"
+          ]
+        }
+      ],
+      "objectives": [
+        {
+          "id": "CH02_S04_OBJECTIVE",
+          "text_key": "story.ch02.s04.objective",
+          "completion": "Mandatory bypass confession completed or skipped; response chosen; hub checkpoint saved"
+        }
+      ],
+      "sets_flags": [
+        "mq_ch02_complete"
+      ],
+      "next_scene_ids": [
+        "CH03_S01"
+      ],
+      "player_text_keys": [
+        "story.ch02.s04.title",
+        "story.ch02.s04.line_01",
+        "story.ch02.s04.line_02",
+        "story.ch02.s04.line_03",
+        "story.ch02.s04.line_04",
+        "story.ch02.s04.line_05",
+        "story.ch02.s04.line_06",
+        "story.ch02.s04.objective",
+        "story.ch02.s04.journal",
+        "story.ch02.s04.tool_marks",
+        "story.ch02.s04.choice_ANGER",
+        "story.ch02.s04.response_ANGER",
+        "story.ch02.s04.choice_PLAN",
+        "story.ch02.s04.response_PLAN",
+        "story.speaker.apprentice",
+        "story.speaker.lan",
+        "story.speaker.source.live"
+      ]
+    },
+    {
+      "id": "CH03_S01",
+      "chapter": "CH03",
+      "location": "hub.cultivation_shrine",
+      "title_key": "story.ch03.s01.title",
+      "prerequisites": [
+        "mq_ch02_complete"
+      ],
+      "script": [
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch03.s01.line_01",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch03.s01.line_02",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch03.s01.line_03",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch03.s01.line_04",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch03.s01.line_05",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch03.s01.line_06",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        }
+      ],
+      "choices": [],
+      "objectives": [
+        {
+          "id": "CH03_S01_OBJECTIVE",
+          "text_key": "story.ch03.s01.objective",
+          "completion": "Mandatory preparation exchange complete; profile has all three Qi Refining ranks and Bamboo first-clear proof; trial admission confirmed at shrine checkpoint"
+        }
+      ],
+      "sets_flags": [
+        "mq_ch03_prepared"
+      ],
+      "next_scene_ids": [
+        "CH03_S02"
+      ],
+      "player_text_keys": [
+        "story.ch03.s01.title",
+        "story.ch03.s01.line_01",
+        "story.ch03.s01.line_02",
+        "story.ch03.s01.line_03",
+        "story.ch03.s01.line_04",
+        "story.ch03.s01.line_05",
+        "story.ch03.s01.line_06",
+        "story.ch03.s01.objective",
+        "story.ch03.s01.journal",
+        "story.ch03.s01.requirements",
+        "story.ch03.s01.bowl",
+        "story.speaker.apprentice",
+        "story.speaker.lan",
+        "story.speaker.source.live"
+      ]
+    },
+    {
+      "id": "CH03_S02",
+      "chapter": "CH03",
+      "location": "trial.foundation_arena",
+      "title_key": "story.ch03.s02.title",
+      "prerequisites": [
+        "mq_ch03_prepared"
+      ],
+      "script": [
+        {
+          "speaker": "Trial Plate",
+          "text_key": "story.ch03.s02.line_01",
+          "speaker_key": "story.speaker.array",
+          "source_kind": "system",
+          "source_kind_key": "story.speaker.source.system"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch03.s02.line_02",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch03.s02.line_03",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch03.s02.line_04",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch03.s02.line_05",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch03.s02.line_06",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch03.s02.line_07",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        }
+      ],
+      "choices": [],
+      "objectives": [
+        {
+          "id": "CH03_S02_OBJECTIVE",
+          "text_key": "story.ch03.s02.objective",
+          "completion": "All three lightning waves survived and final elite construct defeated; Foundation unlock and normal stat/technique rewards atomically banked at safe reward checkpoint"
+        }
+      ],
+      "sets_flags": [
+        "mq_ch03_trial_passed"
+      ],
+      "next_scene_ids": [
+        "CH03_S03"
+      ],
+      "player_text_keys": [
+        "story.ch03.s02.title",
+        "story.ch03.s02.line_01",
+        "story.ch03.s02.line_02",
+        "story.ch03.s02.line_03",
+        "story.ch03.s02.line_04",
+        "story.ch03.s02.line_05",
+        "story.ch03.s02.line_06",
+        "story.ch03.s02.line_07",
+        "story.ch03.s02.objective",
+        "story.ch03.s02.journal",
+        "story.ch03.s02.failure",
+        "story.ch03.s02.retry",
+        "story.ch03.s02.repeat",
+        "story.speaker.apprentice",
+        "story.speaker.array",
+        "story.speaker.source.live",
+        "story.speaker.source.system"
+      ]
+    },
+    {
+      "id": "CH03_S03",
+      "chapter": "CH03",
+      "location": "hub.courtyard",
+      "title_key": "story.ch03.s03.title",
+      "prerequisites": [
+        "mq_ch03_trial_passed"
+      ],
+      "script": [
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch03.s03.line_01",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch03.s03.line_02",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch03.s03.line_03",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch03.s03.line_04",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Keeper Lan",
+          "text_key": "story.ch03.s03.line_05",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        },
+        {
+          "speaker": "Apprentice",
+          "text_key": "story.ch03.s03.line_06",
+          "speaker_key": "story.speaker.apprentice",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live"
+        }
+      ],
+      "choices": [
+        {
+          "id": "CH03_S03_VOICE",
+          "label_key": "story.ch03.s03.choice_VOICE",
+          "response_keys": [
+            "story.ch03.s03.response_VOICE"
+          ],
+          "sets_flags": [
+            "mq_ch03_voice_inquiry"
+          ]
+        },
+        {
+          "id": "CH03_S03_SYSTEM",
+          "label_key": "story.ch03.s03.choice_SYSTEM",
+          "response_keys": [
+            "story.ch03.s03.response_SYSTEM"
+          ],
+          "sets_flags": [
+            "mq_ch03_system_inquiry"
+          ]
+        }
+      ],
+      "objectives": [
+        {
+          "id": "CH03_S03_OBJECTIVE",
+          "text_key": "story.ch03.s03.objective",
+          "completion": "Post-Foundation exchange completed or skipped; response explicitly selected; Ashen approach access and chapter completion saved at hub checkpoint"
+        }
+      ],
+      "sets_flags": [
+        "mq_ch03_complete"
+      ],
+      "next_scene_ids": [
+        "CH04_S01"
+      ],
+      "player_text_keys": [
+        "story.ch03.s03.title",
+        "story.ch03.s03.line_01",
+        "story.ch03.s03.line_02",
+        "story.ch03.s03.line_03",
+        "story.ch03.s03.line_04",
+        "story.ch03.s03.line_05",
+        "story.ch03.s03.line_06",
+        "story.ch03.s03.objective",
+        "story.ch03.s03.journal",
+        "story.ch03.s03.choice_VOICE",
+        "story.ch03.s03.response_VOICE",
+        "story.ch03.s03.choice_SYSTEM",
+        "story.ch03.s03.response_SYSTEM",
+        "story.speaker.apprentice",
+        "story.speaker.lan",
+        "story.speaker.source.live"
+      ]
+    }
+  ]
+}

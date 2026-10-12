@@ -22,9 +22,10 @@ A completely free, offline, single-player **3D xianxia action game** for Windows
 | Perspective | Third-person action camera, optional target lock |
 | Setting | An original Chinese-inspired mountain cultivation world |
 | Core loop | Prepare at the sanctuary → explore a realm → fight and collect → return → cultivate → attempt a tribulation |
-| Campaign | Qi Refining → Foundation Establishment → Golden Core |
+| Campaign | Eight chapters: Qi Refining → Foundation Establishment → Golden Core; three endings |
 | Content | One hub, two compact realms, one tribulation arena, one playable character |
 | Combat | Sword combo, dodge, four equipped techniques, two talisman slots |
+| Story | Eight side quests, 24 environmental records, complete English/Simplified Chinese text |
 | Replay | Seeded encounter selection and temporary blessings in authored 3D rooms |
 | Distribution | Windows: Microsoft Store; Mac: signed and notarized direct download |
 
@@ -43,6 +44,10 @@ A completely free, offline, single-player **3D xianxia action game** for Windows
 11. [Asset and tool licensing policy](docs/10-licensing-and-assets.md)
 12. [Development language and bilingual UI](docs/11-english-style-and-ui.md)
 13. [Decision log](docs/decisions.md) and [verified external references](docs/references.md)
+
+## Complete narrative package
+
+Read the [narrative index](docs/story/README.md) for the complete chapter scripts, side stories, three endings, bilingual reading editions, and implementation/QA contracts. The [story bible](docs/story-bible.md) defines characters, chronology, world rules, and the central mystery. These are authored production specifications; no playable scene has been implemented yet.
 
 ## Repository usage
 

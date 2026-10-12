@@ -18,7 +18,7 @@ Windows Microsoft Store remains the required storefront. Microsoft Store does no
 
 ## 3. Audience and sessions
 
-Target players enjoy action RPGs and cultivation fantasy but may have no prior knowledge of xianxia. Explain specialized terms through concise contextual tooltips. Intended campaign length: 2–4 hours for a first clear, subject to playtesting. Realm expeditions target 12–18 minutes. Normal room encounters target 45–90 seconds. The player can pause and suspend at safe room boundaries.
+Target players enjoy action RPGs and cultivation fantasy but may have no prior knowledge of xianxia. Explain specialized terms through concise contextual tooltips. Intended campaign length: 4–6 hours for a first clear and 6–8 hours including all optional stories, subject to playtesting. The expanded authored narrative uses eight main chapters, eight side quests, and three informed ending choices. Realm expeditions target 12–18 minutes. Normal room encounters target 45–90 seconds. The player can pause and suspend at safe room boundaries.
 
 No daily rewards, energy timers, required grinding, random paid rewards, or online retention incentives. Repetition should support experimentation rather than gate the ending.
 
@@ -36,9 +36,10 @@ No daily rewards, energy timers, required grinding, random paid rewards, or onli
 | Passives / talismans / relics | 3 / 2 / 2 | 8 / 6 / 6 |
 | Temporary blessings | Four | Twelve |
 | Settings / saving | Essential | Full controls, accessibility, three profile slots |
+| Narrative | CH00–CH03 slice, one optional story | Eight main chapters, eight side quests, three endings, 24 records |
 | Builds | Windows and native Mac feasibility | Both release builds with the same gameplay version |
 
-The seven-room expedition count includes the entrance and exit shrine. It does not mean seven full combat encounters. Cosmetic variants, optional notes, and the second realm may be removed before reducing responsiveness, dual-platform support, save integrity, or spell readability.
+The seven-room expedition count includes the entrance and exit shrine. It does not mean seven full combat encounters. Cosmetic variants and optional notes may be removed before reducing responsiveness, dual-platform support, save integrity, or spell readability. The two realms now carry distinct mandatory story revelations; removing either requires redesigning the complete narrative and must not silently strand the ending.
 
 ## 5. Out of scope for first release
 

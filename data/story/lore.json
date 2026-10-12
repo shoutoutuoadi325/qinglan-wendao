@@ -1,0 +1,485 @@
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "id": "L01",
+      "location": "Hub / dry bell",
+      "required_flags": [
+        "mq_ch00_complete"
+      ],
+      "date_label": "Six days before opening",
+      "clue": "The bell is a diagnostic prop, not a spell that summons rain; the red notch foreshadows overload.",
+      "title_key": "story.lore.l01.title",
+      "body_key": "story.lore.l01.body",
+      "date_key": "story.lore.l01.date",
+      "inspect_key": "story.lore.l01.inspect",
+      "collection_flag": "lore_l01_read",
+      "player_text_keys": [
+        "story.lore.l01.title",
+        "story.lore.l01.body",
+        "story.lore.l01.date",
+        "story.lore.l01.inspect"
+      ]
+    },
+    {
+      "id": "L02",
+      "location": "Hub / workshop",
+      "required_flags": [
+        "mq_ch00_complete"
+      ],
+      "date_label": "Two years before opening",
+      "clue": "Establishes ordinary entry into cultivation and Lan's practical affection; no secret lineage.",
+      "title_key": "story.lore.l02.title",
+      "body_key": "story.lore.l02.body",
+      "date_key": "story.lore.l02.date",
+      "inspect_key": "story.lore.l02.inspect",
+      "collection_flag": "lore_l02_read",
+      "player_text_keys": [
+        "story.lore.l02.title",
+        "story.lore.l02.body",
+        "story.lore.l02.date",
+        "story.lore.l02.inspect"
+      ]
+    },
+    {
+      "id": "L03",
+      "location": "Bamboo / room 2 alcove",
+      "required_flags": [
+        "mq_ch01_complete"
+      ],
+      "date_label": "Current winter, before evacuation",
+      "clue": "Concrete downstream consequence and usable route clue; villagers are active observers.",
+      "title_key": "story.lore.l03.title",
+      "body_key": "story.lore.l03.body",
+      "date_key": "story.lore.l03.date",
+      "inspect_key": "story.lore.l03.inspect",
+      "collection_flag": "lore_l03_read",
+      "player_text_keys": [
+        "story.lore.l03.title",
+        "story.lore.l03.body",
+        "story.lore.l03.date",
+        "story.lore.l03.inspect"
+      ]
+    },
+    {
+      "id": "L04",
+      "location": "Bamboo / lower stair",
+      "required_flags": [
+        "mq_ch01_complete"
+      ],
+      "date_label": "Current winter",
+      "clue": "Foreshadows distributed maintenance without stating an ending solution early.",
+      "title_key": "story.lore.l04.title",
+      "body_key": "story.lore.l04.body",
+      "date_key": "story.lore.l04.date",
+      "inspect_key": "story.lore.l04.inspect",
+      "collection_flag": "lore_l04_read",
+      "player_text_keys": [
+        "story.lore.l04.title",
+        "story.lore.l04.body",
+        "story.lore.l04.date",
+        "story.lore.l04.inspect"
+      ]
+    },
+    {
+      "id": "L05",
+      "location": "Bamboo / disused spillway shelter",
+      "required_flags": [
+        "mq_ch02_complete"
+      ],
+      "date_label": "Morning of the White Tide",
+      "clue": "Mei has ordinary plans and impatience; her death does not erase her personality.",
+      "title_key": "story.lore.l05.title",
+      "body_key": "story.lore.l05.body",
+      "date_key": "story.lore.l05.date",
+      "inspect_key": "story.lore.l05.inspect",
+      "collection_flag": "lore_l05_read",
+      "player_text_keys": [
+        "story.lore.l05.title",
+        "story.lore.l05.body",
+        "story.lore.l05.date",
+        "story.lore.l05.inspect"
+      ]
+    },
+    {
+      "id": "L06",
+      "location": "Bamboo / anchor maintenance panel",
+      "required_flags": [
+        "mq_ch02_complete"
+      ],
+      "date_label": "One season before opening",
+      "clue": "Admits contribution without assigning him all institutional responsibility; available after confession.",
+      "title_key": "story.lore.l06.title",
+      "body_key": "story.lore.l06.body",
+      "date_key": "story.lore.l06.date",
+      "inspect_key": "story.lore.l06.inspect",
+      "collection_flag": "lore_l06_read",
+      "player_text_keys": [
+        "story.lore.l06.title",
+        "story.lore.l06.body",
+        "story.lore.l06.date",
+        "story.lore.l06.inspect"
+      ]
+    },
+    {
+      "id": "L07",
+      "location": "Bamboo / reader archive",
+      "required_flags": [
+        "mq_ch04_complete"
+      ],
+      "date_label": "White Tide emergency, day 1",
+      "clue": "Optional corroboration of a mandatory later revelation; exact consent cannot be vague.",
+      "title_key": "story.lore.l07.title",
+      "body_key": "story.lore.l07.body",
+      "date_key": "story.lore.l07.date",
+      "inspect_key": "story.lore.l07.inspect",
+      "collection_flag": "lore_l07_read",
+      "player_text_keys": [
+        "story.lore.l07.title",
+        "story.lore.l07.body",
+        "story.lore.l07.date",
+        "story.lore.l07.inspect"
+      ]
+    },
+    {
+      "id": "L08",
+      "location": "Ashen / outer archive",
+      "required_flags": [
+        "mq_ch04_complete"
+      ],
+      "date_label": "Fourth year after the White Tide",
+      "clue": "Institutional evasion; not a speech by an omniscient antagonist.",
+      "title_key": "story.lore.l08.title",
+      "body_key": "story.lore.l08.body",
+      "date_key": "story.lore.l08.date",
+      "inspect_key": "story.lore.l08.inspect",
+      "collection_flag": "lore_l08_read",
+      "player_text_keys": [
+        "story.lore.l08.title",
+        "story.lore.l08.body",
+        "story.lore.l08.date",
+        "story.lore.l08.inspect"
+      ]
+    },
+    {
+      "id": "L09",
+      "location": "Ashen / cooled forge station",
+      "required_flags": [
+        "mq_ch04_complete"
+      ],
+      "date_label": "Original construction, amended year 2",
+      "clue": "Offers a fair operational puzzle grounded in the world's established rules.",
+      "title_key": "story.lore.l09.title",
+      "body_key": "story.lore.l09.body",
+      "date_key": "story.lore.l09.date",
+      "inspect_key": "story.lore.l09.inspect",
+      "collection_flag": "lore_l09_read",
+      "player_text_keys": [
+        "story.lore.l09.title",
+        "story.lore.l09.body",
+        "story.lore.l09.date",
+        "story.lore.l09.inspect"
+      ]
+    },
+    {
+      "id": "L10",
+      "location": "Ashen / archive drawer",
+      "required_flags": [
+        "mq_ch04_complete"
+      ],
+      "date_label": "Three years before opening",
+      "clue": "Yun's self-accounting precedes his current evacuation journey; no excuse as redemption.",
+      "title_key": "story.lore.l10.title",
+      "body_key": "story.lore.l10.body",
+      "date_key": "story.lore.l10.date",
+      "inspect_key": "story.lore.l10.inspect",
+      "collection_flag": "lore_l10_read",
+      "player_text_keys": [
+        "story.lore.l10.title",
+        "story.lore.l10.body",
+        "story.lore.l10.date",
+        "story.lore.l10.inspect"
+      ]
+    },
+    {
+      "id": "L11",
+      "location": "Ashen / governor reader",
+      "required_flags": [
+        "mq_ch05_complete"
+      ],
+      "date_label": "Second year after the White Tide",
+      "clue": "Shen protected others and sought release; safety shell attacks are not consent.",
+      "title_key": "story.lore.l11.title",
+      "body_key": "story.lore.l11.body",
+      "date_key": "story.lore.l11.date",
+      "inspect_key": "story.lore.l11.inspect",
+      "collection_flag": "lore_l11_read",
+      "player_text_keys": [
+        "story.lore.l11.title",
+        "story.lore.l11.body",
+        "story.lore.l11.date",
+        "story.lore.l11.inspect"
+      ]
+    },
+    {
+      "id": "L12",
+      "location": "Hub / sealed dispatch packet",
+      "required_flags": [
+        "mq_ch05_complete"
+      ],
+      "date_label": "Six days before opening",
+      "clue": "Makes END_SEAL a prepared viable alternative with concrete costs, not a hidden bad ending.",
+      "title_key": "story.lore.l12.title",
+      "body_key": "story.lore.l12.body",
+      "date_key": "story.lore.l12.date",
+      "inspect_key": "story.lore.l12.inspect",
+      "collection_flag": "lore_l12_read",
+      "player_text_keys": [
+        "story.lore.l12.title",
+        "story.lore.l12.body",
+        "story.lore.l12.date",
+        "story.lore.l12.inspect"
+      ]
+    },
+    {
+      "id": "L13",
+      "location": "Hub / apprentice quarters",
+      "required_flags": [
+        "mq_ch03_complete"
+      ],
+      "date_label": "Present, after Foundation trial",
+      "clue": "Lan's care grants belonging without demanding obedience.",
+      "title_key": "story.lore.l13.title",
+      "body_key": "story.lore.l13.body",
+      "date_key": "story.lore.l13.date",
+      "inspect_key": "story.lore.l13.inspect",
+      "collection_flag": "lore_l13_read",
+      "player_text_keys": [
+        "story.lore.l13.title",
+        "story.lore.l13.body",
+        "story.lore.l13.date",
+        "story.lore.l13.inspect"
+      ]
+    },
+    {
+      "id": "L14",
+      "location": "Hub / courier shelf",
+      "required_flags": [
+        "mq_ch04_complete"
+      ],
+      "date_label": "Present, provisional correspondence",
+      "clue": "Consent requires bounded duties; this is a proposal, not the SQ02 completed charter.",
+      "title_key": "story.lore.l14.title",
+      "body_key": "story.lore.l14.body",
+      "date_key": "story.lore.l14.date",
+      "inspect_key": "story.lore.l14.inspect",
+      "collection_flag": "lore_l14_read",
+      "player_text_keys": [
+        "story.lore.l14.title",
+        "story.lore.l14.body",
+        "story.lore.l14.date",
+        "story.lore.l14.inspect"
+      ]
+    },
+    {
+      "id": "L15",
+      "location": "Ashen / shelter wall",
+      "required_flags": [
+        "mq_ch04_complete"
+      ],
+      "date_label": "White Tide emergency, day 9",
+      "clue": "Environmental evidence of recordkeeping failures; no extra dead-person ghost quest required.",
+      "title_key": "story.lore.l15.title",
+      "body_key": "story.lore.l15.body",
+      "date_key": "story.lore.l15.date",
+      "inspect_key": "story.lore.l15.inspect",
+      "collection_flag": "lore_l15_read",
+      "player_text_keys": [
+        "story.lore.l15.title",
+        "story.lore.l15.body",
+        "story.lore.l15.date",
+        "story.lore.l15.inspect"
+      ]
+    },
+    {
+      "id": "L16",
+      "location": "Hub / practice rack",
+      "required_flags": [
+        "mq_ch03_complete"
+      ],
+      "date_label": "Original keeper annotation, undated",
+      "clue": "Physical evidence of care and a practical combat reminder without forcing a new mechanic.",
+      "title_key": "story.lore.l16.title",
+      "body_key": "story.lore.l16.body",
+      "date_key": "story.lore.l16.date",
+      "inspect_key": "story.lore.l16.inspect",
+      "collection_flag": "lore_l16_read",
+      "player_text_keys": [
+        "story.lore.l16.title",
+        "story.lore.l16.body",
+        "story.lore.l16.date",
+        "story.lore.l16.inspect"
+      ]
+    },
+    {
+      "id": "L17",
+      "location": "Bamboo / abandoned supply chest",
+      "required_flags": [
+        "mq_ch02_complete"
+      ],
+      "date_label": "Week before the White Tide",
+      "clue": "Connects floodplain residents to lived culture and the lamp's practical role.",
+      "title_key": "story.lore.l17.title",
+      "body_key": "story.lore.l17.body",
+      "date_key": "story.lore.l17.date",
+      "inspect_key": "story.lore.l17.inspect",
+      "collection_flag": "lore_l17_read",
+      "player_text_keys": [
+        "story.lore.l17.title",
+        "story.lore.l17.body",
+        "story.lore.l17.date",
+        "story.lore.l17.inspect"
+      ]
+    },
+    {
+      "id": "L18",
+      "location": "Hub / governor reader",
+      "required_flags": [
+        "mq_ch05_complete"
+      ],
+      "date_label": "Present, transcribed after living conversation",
+      "clue": "Present living testimony with bounded consent; release is common to every ending.",
+      "title_key": "story.lore.l18.title",
+      "body_key": "story.lore.l18.body",
+      "date_key": "story.lore.l18.date",
+      "inspect_key": "story.lore.l18.inspect",
+      "collection_flag": "lore_l18_read",
+      "player_text_keys": [
+        "story.lore.l18.title",
+        "story.lore.l18.body",
+        "story.lore.l18.date",
+        "story.lore.l18.inspect"
+      ]
+    },
+    {
+      "id": "L19",
+      "location": "Bamboo / spillway map board",
+      "required_flags": [
+        "mq_ch02_complete"
+      ],
+      "date_label": "Morning of the White Tide",
+      "clue": "Fair clue for SQ01; route must be physically tested, not just a sentimental collectible.",
+      "title_key": "story.lore.l19.title",
+      "body_key": "story.lore.l19.body",
+      "date_key": "story.lore.l19.date",
+      "inspect_key": "story.lore.l19.inspect",
+      "collection_flag": "lore_l19_read",
+      "player_text_keys": [
+        "story.lore.l19.title",
+        "story.lore.l19.body",
+        "story.lore.l19.date",
+        "story.lore.l19.inspect"
+      ]
+    },
+    {
+      "id": "L20",
+      "location": "Ashen / archive table",
+      "required_flags": [
+        "mq_ch04_complete"
+      ],
+      "date_label": "Original construction",
+      "clue": "Practical alternative to merely nominating the player as a new permanent battery.",
+      "title_key": "story.lore.l20.title",
+      "body_key": "story.lore.l20.body",
+      "date_key": "story.lore.l20.date",
+      "inspect_key": "story.lore.l20.inspect",
+      "collection_flag": "lore_l20_read",
+      "player_text_keys": [
+        "story.lore.l20.title",
+        "story.lore.l20.body",
+        "story.lore.l20.date",
+        "story.lore.l20.inspect"
+      ]
+    },
+    {
+      "id": "L21",
+      "location": "Hub / post-ending noticeboard",
+      "required_flags": [
+        "ending_open"
+      ],
+      "date_label": "Seven days after the ending",
+      "clue": "END_OPEN benefit and concentrated workload remain visible; optional charters can continue as future work.",
+      "title_key": "story.lore.l21.title",
+      "body_key": "story.lore.l21.body",
+      "date_key": "story.lore.l21.date",
+      "inspect_key": "story.lore.l21.inspect",
+      "collection_flag": "lore_l21_read",
+      "player_text_keys": [
+        "story.lore.l21.title",
+        "story.lore.l21.body",
+        "story.lore.l21.date",
+        "story.lore.l21.inspect"
+      ]
+    },
+    {
+      "id": "L22",
+      "location": "Hub / post-ending noticeboard",
+      "required_flags": [
+        "ending_seal"
+      ],
+      "date_label": "Seven days after the ending",
+      "clue": "END_SEAL sacrifices sanctuary abundance while preserving a dignified future.",
+      "title_key": "story.lore.l22.title",
+      "body_key": "story.lore.l22.body",
+      "date_key": "story.lore.l22.date",
+      "inspect_key": "story.lore.l22.inspect",
+      "collection_flag": "lore_l22_read",
+      "player_text_keys": [
+        "story.lore.l22.title",
+        "story.lore.l22.body",
+        "story.lore.l22.date",
+        "story.lore.l22.inspect"
+      ]
+    },
+    {
+      "id": "L23",
+      "location": "Hub / post-ending noticeboard",
+      "required_flags": [
+        "ending_shared"
+      ],
+      "date_label": "Seven days after the ending",
+      "clue": "END_SHARED demonstrates accountability in a specific mundane dispute, not perfect harmony.",
+      "title_key": "story.lore.l23.title",
+      "body_key": "story.lore.l23.body",
+      "date_key": "story.lore.l23.date",
+      "inspect_key": "story.lore.l23.inspect",
+      "collection_flag": "lore_l23_read",
+      "player_text_keys": [
+        "story.lore.l23.title",
+        "story.lore.l23.body",
+        "story.lore.l23.date",
+        "story.lore.l23.inspect"
+      ]
+    },
+    {
+      "id": "L24",
+      "location": "Hub / post-ending workshop",
+      "required_flags": [
+        "mq_ch07_complete"
+      ],
+      "date_label": "Thirty days after the ending",
+      "clue": "Closes the ordinary-apprentice motif without lineage, resurrection, or institutional perfection.",
+      "title_key": "story.lore.l24.title",
+      "body_key": "story.lore.l24.body",
+      "date_key": "story.lore.l24.date",
+      "inspect_key": "story.lore.l24.inspect",
+      "collection_flag": "lore_l24_read",
+      "player_text_keys": [
+        "story.lore.l24.title",
+        "story.lore.l24.body",
+        "story.lore.l24.date",
+        "story.lore.l24.inspect"
+      ]
+    }
+  ]
+}

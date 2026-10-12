@@ -21,4 +21,9 @@ Baseline: 2026-10-12. Status is either Confirmed Requirement, Accepted Design, o
 | ADR-015 | Pending Validation | Free Unreal license eligibility and asset permissions | Verify accepted terms and applicable personal/indie exception |
 | ADR-016 | Pending Validation | Store name, identity, Mac signing, support contact | Must come from owner-controlled release configuration |
 
+| ADR-017 | Confirmed Requirement | Fully authored detailed narrative, not only a plot outline | Owner requested complete scenes, text, and narrative details; parallel writing authorized |
+| ADR-018 | Accepted Design | Eight chapters, eight side quests, three informed endings | Central mystery connects repairs, emergency consent, and practical replacement |
+| ADR-019 | Accepted Design | Authoritative bilingual text resources plus scene/quest registries | Production notes remain English; player wording is fully paired |
+| ADR-020 | Accepted Design | No real-time letter waits or missable shared-ending agreements | Safe hub narrative time transitions preserve pacing and explicit consent |
+
 Changes update the affected design tables, sample data, acceptance cases, and README in the same commit. Requirements may change through an explicit owner instruction; implementation preferences may change through documented evidence. Neither an example file nor a public issue silently overrides a confirmed requirement.

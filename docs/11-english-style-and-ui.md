@@ -54,3 +54,7 @@ Store listings and important screenshot captions must be reviewed in both langua
 ## 7. Localization acceptance
 
 Validate key parity, placeholder parity, non-empty values, glossary consistency, fallback behavior, and font coverage. Review all user-visible strings in context in both builds. English documents can describe the Chinese locale using keys and transliteration; dedicated resource values contain the actual Chinese copy.
+
+## 8. Complete narrative copy
+
+The story resources now contain the complete authored dialogue, branches, documents, objectives, retries, and three endings, rather than only example prose. Use [the story index](story/README.md) and generated bilingual reading editions for review. Import remains future implementation work. Keep a single source of exact text in the locale JSON files; deterministic reading exports prevent drift.

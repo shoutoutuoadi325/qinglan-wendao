@@ -23,6 +23,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Persistence/QinglanSaveGame.h"
 #include "Persistence/QinglanSaveSubsystem.h"
+#include "Progression/QinglanProfileSubsystem.h"
 #include "Progression/QinglanRunSubsystem.h"
 #include "QinglanAscension.h"
 
@@ -109,6 +110,14 @@ void AQinglanHubGameMode::BeginPlay()
 		{
 			UE_LOG(LogQinglan, Warning, TEXT("Hub entered while an expedition is still open; loot stays unbanked until EndExpedition"));
 		}
+	}
+
+	// Talisman charges refill for free at the sanctuary (docs/03 section 5);
+	// the refill lands before the hub autosave below so it persists at this
+	// safe boundary.
+	if (UQinglanProfileSubsystem* Profile = Instance ? Instance->GetSubsystem<UQinglanProfileSubsystem>() : nullptr)
+	{
+		Profile->RefillTalismans();
 	}
 
 	// Hub arrival is a safe checkpoint boundary (blueprint section 1.6

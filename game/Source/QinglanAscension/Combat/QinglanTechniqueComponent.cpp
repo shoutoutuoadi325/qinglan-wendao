@@ -15,6 +15,7 @@
 #include "Combat/QinglanCombatState.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
+#include "Progression/QinglanEconomyLibrary.h"
 #include "Progression/QinglanProfileSubsystem.h"
 #include "Progression/QinglanRunSubsystem.h"
 #include "QinglanAscension.h"
@@ -182,6 +183,10 @@ bool UQinglanTechniqueComponent::TryCast(int32 Slot)
 		TArray<FName> Owned;
 		UQinglanBlessingLibrary::GetOwnedBlessings(this, Owned);
 		UQinglanBlessingLibrary::ComputeModifiers(Owned, Blessings);
+		// Permanent equipment (equipped relic + passives) folds onto the same
+		// surface (docs/03 sections 4-5): the cost/cooldown maths below applies
+		// the combined category totals exactly once.
+		UQinglanEconomyLibrary::AppendPermanentModifiers(this, Blessings);
 	}
 	const int32 EnergyCost = ComputeEnergyCost(Technique, Blessings);
 	if (Combat->GetAttributes().SpiritualEnergy + KINDA_SMALL_NUMBER < static_cast<float>(EnergyCost))
@@ -379,6 +384,9 @@ void UQinglanTechniqueComponent::ReleaseCurrentCast()
 		TArray<FName> Owned;
 		UQinglanBlessingLibrary::GetOwnedBlessings(this, Owned);
 		UQinglanBlessingLibrary::ComputeModifiers(Owned, Blessings);
+		// Same fold as the validation site: permanent equipment joins the
+		// blessing totals so the release commit and the pre-check agree.
+		UQinglanEconomyLibrary::AppendPermanentModifiers(this, Blessings);
 	}
 
 	// Commit energy exactly once; if energy dropped below cost during

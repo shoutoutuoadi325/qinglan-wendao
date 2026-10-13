@@ -2,7 +2,13 @@
 // (no RNG anywhere; the only randomness in expeditions lives in the
 // FRandomStream instances owned by UQinglanRunSubsystem).
 #include "Progression/QinglanEconomyLibrary.h"
+#include "Abilities/QinglanBlessingLibrary.h" // FQinglanBlessingModifiers (relic modifier surface)
+#include "Progression/QinglanProfileSubsystem.h"
 #include "Progression/QinglanProgressionTables.h"
+#include "Engine/Engine.h" // GEngine->GetWorldFromContextObject (UE 5.8)
+#include "Engine/GameInstance.h"
+#include "Engine/World.h"
+#include "QinglanAscension.h" // LogQinglan
 
 namespace
 {
@@ -253,4 +259,178 @@ bool UQinglanEconomyLibrary::FindTalisman(FName TalismanId, FQinglanTalismanCata
 TArray<FName> UQinglanEconomyLibrary::GetRelicCatalog()
 {
 	return GetRelicCatalogImpl();
+}
+
+namespace
+{
+	/**
+	 * Six permanent relics, docs/03 section 5: "each grants one modest
+	 * element-related bonus and a clear tradeoff or cooldown". Bonuses and
+	 * tradeoffs are authored here (no doc numbers); every magnitude keeps to
+	 * the blessing scale so stacking stays readable.
+	 */
+	const TArray<FQinglanRelicDef>& GetRelicDefsImpl()
+	{
+		static const TArray<FQinglanRelicDef> Table = []()
+		{
+			TArray<FQinglanRelicDef> T;
+			T.Reserve(6);
+			auto Make = [&T](const TCHAR* Id, int32 Cost,
+				float BonusBarrier, float BonusHealth, float BonusConductPct, float BonusBurn, float BonusWet, float BonusHealPct, float BonusSwordPct,
+				float TradeoffTakenPct, float TradeoffCostPct, float TradeoffCooldownPct, float TradeoffSwordPct)
+			{
+				FQinglanRelicDef Def;
+				Def.RelicId = FName(Id);
+				Def.NameTextKey = FName(*FString::Printf(TEXT("relic.%s.name"), Id));
+				Def.DescriptionTextKey = FName(*FString::Printf(TEXT("relic.%s.desc"), Id));
+				Def.VeinCrystalCost = Cost;
+				Def.BonusBarrierPoints = BonusBarrier;
+				Def.BonusMaxHealth = BonusHealth;
+				Def.BonusConductDamagePercent = BonusConductPct;
+				Def.BonusBurnDuration = BonusBurn;
+				Def.BonusWetDuration = BonusWet;
+				Def.BonusHealingPercent = BonusHealPct;
+				Def.BonusSwordDamagePercent = BonusSwordPct;
+				Def.TradeoffDamageTakenPercent = TradeoffTakenPct;
+				Def.TradeoffTechniqueCostPercent = TradeoffCostPct;
+				Def.TradeoffTechniqueCooldownPercent = TradeoffCooldownPct;
+				Def.TradeoffSwordDamagePercent = TradeoffSwordPct;
+				T.Add(MoveTemp(Def));
+			};
+			// Jade Pendant (jade/wood): sturdier wards, chipping hazard.
+			Make(TEXT("jade_pendant"), 2, 8.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 5.f, 0.f, 0.f, 0.f);
+			// Ember Bead (fire): longer burns, the flame nibbles its bearer.
+			Make(TEXT("ember_bead"), 2, 0.f, 0.f, 0.f, 2.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f);
+			// River Pearl (water): soaked foes conduct better; the current drags casting.
+			Make(TEXT("river_pearl"), 2, 0.f, 0.f, 0.f, 0.f, 2.f, 0.f, 0.f, 0.f, 5.f, 0.f, 0.f);
+			// Thunder Charm (lightning): sharper conduct strikes, thinner skin.
+			Make(TEXT("thunder_charm"), 3, 0.f, 0.f, 20.f, 0.f, 0.f, 0.f, 0.f, 5.f, 0.f, 0.f, 0.f);
+			// Mountain Token (earth): standing health, heavy hand.
+			Make(TEXT("mountain_token"), 3, 0.f, 20.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 8.f);
+			// Verdant Seed (wood): verdant recovery, demanding growth (costlier arts).
+			Make(TEXT("verdant_seed"), 3, 0.f, 0.f, 0.f, 0.f, 0.f, 15.f, 0.f, 0.f, 5.f, 0.f, 0.f);
+			return T;
+		}();
+		return Table;
+	}
+
+	/**
+	 * Adds one relic's bonuses/tradeoffs onto an existing modifier bundle
+	 * (bonuses 1:1 onto the blessing surface; tradeoffs as penalties). The
+	 * public ComputeRelicModifiers resets the bundle first; the permanent-
+	 * equipment fold uses this accumulate form so blessings already in the
+	 * bundle survive.
+	 */
+	void AccumulateRelicModifiers(FName RelicId, FQinglanBlessingModifiers& InOutModifiers)
+	{
+		FQinglanRelicDef Def;
+		if (RelicId.IsNone() || !UQinglanEconomyLibrary::FindRelic(RelicId, Def))
+		{
+			return;
+		}
+		InOutModifiers.BarrierPointsBonus += Def.BonusBarrierPoints;
+		InOutModifiers.MaxHealthBonus += Def.BonusMaxHealth;
+		InOutModifiers.ConductDamagePercent += Def.BonusConductDamagePercent;
+		InOutModifiers.BurnDurationBonus += Def.BonusBurnDuration;
+		InOutModifiers.WetDurationBonus += Def.BonusWetDuration;
+		InOutModifiers.SwordDamagePercent += Def.BonusSwordDamagePercent;
+		InOutModifiers.SwordDamagePercent -= Def.TradeoffSwordDamagePercent;
+		InOutModifiers.DamageTakenPercent += Def.TradeoffDamageTakenPercent;
+		InOutModifiers.TechniqueCostPercent += Def.TradeoffTechniqueCostPercent;
+		InOutModifiers.TechniqueCooldownPercent += Def.TradeoffTechniqueCooldownPercent;
+	}
+} // namespace
+
+TArray<FQinglanRelicDef> UQinglanEconomyLibrary::GetRelicDefs()
+{
+	return GetRelicDefsImpl();
+}
+
+bool UQinglanEconomyLibrary::FindRelic(FName RelicId, FQinglanRelicDef& OutEntry)
+{
+	for (const FQinglanRelicDef& Entry : GetRelicDefsImpl())
+	{
+		if (Entry.RelicId == RelicId)
+		{
+			OutEntry = Entry;
+			return true;
+		}
+	}
+	return false;
+}
+
+void UQinglanEconomyLibrary::ComputeRelicModifiers(FName EquippedRelicId, FQinglanBlessingModifiers& OutModifiers)
+{
+	OutModifiers = FQinglanBlessingModifiers();
+	AccumulateRelicModifiers(EquippedRelicId, OutModifiers);
+}
+
+void UQinglanEconomyLibrary::AppendPermanentModifiers(UObject* WorldContext, FQinglanBlessingModifiers& InOutModifiers)
+{
+	// Resolve world -> game instance -> profile exactly like the blessing
+	// library resolves the run subsystem (Abilities/QinglanBlessingLibrary.cpp
+	// GetOwnedBlessings); headless contexts keep the input untouched.
+	UWorld* World = WorldContext ? GEngine->GetWorldFromContextObject(WorldContext, EGetWorldErrorMode::LogAndReturnNull) : nullptr;
+	UGameInstance* GameInstance = World ? World->GetGameInstance() : nullptr;
+	const UQinglanProfileSubsystem* Profile = GameInstance ? GameInstance->GetSubsystem<UQinglanProfileSubsystem>() : nullptr;
+	if (Profile == nullptr)
+	{
+		return;
+	}
+
+	// Equipped relic (docs/03 section 5): bonuses and tradeoffs fold onto the
+	// same surface the blessings already populated.
+	AccumulateRelicModifiers(Profile->GetEquippedRelic(), InOutModifiers);
+
+	// Equipped passives (docs/03 section 4): Quiet Mind reduces cost, so its
+	// reduction folds as a negative TechniqueCostPercent; everything else maps
+	// additively within its category ("add within category, apply once").
+	for (const FName PassiveId : Profile->GetEquippedPassives())
+	{
+		FQinglanPassiveCatalogEntry Entry;
+		if (!FindPassive(PassiveId, Entry))
+		{
+			UE_LOG(LogQinglan, Warning, TEXT("AppendPermanentModifiers: unknown passive id '%s' ignored"), *PassiveId.ToString());
+			continue;
+		}
+		InOutModifiers.SwordDamagePercent += Entry.SwordDamagePercent;
+		InOutModifiers.TechniqueCostPercent -= Entry.TechniqueCostReductionPercent;
+		InOutModifiers.MaxHealthBonus += Entry.MaxHealthBonus;
+		InOutModifiers.ConductDamagePercent += Entry.ConductDamagePercent;
+	}
+}
+
+void UQinglanEconomyLibrary::AppendPermanentRegen(UObject* WorldContext, float& EnergyRegen, float& StaminaRegen, float& HealingPercent)
+{
+	UWorld* World = WorldContext ? GEngine->GetWorldFromContextObject(WorldContext, EGetWorldErrorMode::LogAndReturnNull) : nullptr;
+	UGameInstance* GameInstance = World ? World->GetGameInstance() : nullptr;
+	const UQinglanProfileSubsystem* Profile = GameInstance ? GameInstance->GetSubsystem<UQinglanProfileSubsystem>() : nullptr;
+	if (Profile == nullptr)
+	{
+		return;
+	}
+
+	// Energy Recovery: +1 energy per second, a flat add (docs/03 section 4).
+	// Measured Breath: +10% stamina recovery, a percent on the base rate passed
+	// in by the caller (the authored UQinglanCombatComponent constants).
+	float StaminaRegenPercent = 0.f;
+	for (const FName PassiveId : Profile->GetEquippedPassives())
+	{
+		FQinglanPassiveCatalogEntry Entry;
+		if (!FindPassive(PassiveId, Entry))
+		{
+			continue; // AppendPermanentModifiers already warned for this id
+		}
+		EnergyRegen += Entry.EnergyRegenPerSecond;
+		StaminaRegenPercent += Entry.StaminaRegenPercent;
+	}
+	StaminaRegen *= (1.f + StaminaRegenPercent / 100.f);
+
+	// Relic healing percent (Verdant Seed) rides the heal paths, not the
+	// blessing surface (which has no healing category).
+	FQinglanRelicDef Relic;
+	if (FindRelic(Profile->GetEquippedRelic(), Relic))
+	{
+		HealingPercent += Relic.BonusHealingPercent;
+	}
 }

@@ -58,6 +58,37 @@ struct FQinglanTalismanCatalogEntry
 };
 
 /**
+ * One permanent relic from the fixed catalog of six. Each grants one modest
+ * element-related bonus plus one clear tradeoff (docs/03 section 5: "one
+ * modest element-related bonus and a clear tradeoff or cooldown"). Modifiers
+ * fold into combat maths through the same surfaces as blessing modifiers.
+ */
+USTRUCT(BlueprintType)
+struct FQinglanRelicDef
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly) FName RelicId = NAME_None;
+	UPROPERTY(BlueprintReadOnly) FName NameTextKey = NAME_None;
+	UPROPERTY(BlueprintReadOnly) FName DescriptionTextKey = NAME_None;
+	/** Purchase price in Vein Crystal at the sanctuary keeper. */
+	UPROPERTY(BlueprintReadOnly) int32 VeinCrystalCost = 0;
+	/** Positive effect folded into combat maths while equipped. */
+	UPROPERTY(BlueprintReadOnly) float BonusBarrierPoints = 0.f;
+	UPROPERTY(BlueprintReadOnly) float BonusMaxHealth = 0.f;
+	UPROPERTY(BlueprintReadOnly) float BonusConductDamagePercent = 0.f;
+	UPROPERTY(BlueprintReadOnly) float BonusBurnDuration = 0.f;
+	UPROPERTY(BlueprintReadOnly) float BonusWetDuration = 0.f;
+	UPROPERTY(BlueprintReadOnly) float BonusHealingPercent = 0.f;
+	UPROPERTY(BlueprintReadOnly) float BonusSwordDamagePercent = 0.f;
+	/** Tradeoff folded the same way (positive number = the penalty magnitude). */
+	UPROPERTY(BlueprintReadOnly) float TradeoffDamageTakenPercent = 0.f;
+	UPROPERTY(BlueprintReadOnly) float TradeoffTechniqueCostPercent = 0.f;
+	UPROPERTY(BlueprintReadOnly) float TradeoffTechniqueCooldownPercent = 0.f;
+	UPROPERTY(BlueprintReadOnly) float TradeoffSwordDamagePercent = 0.f;
+};
+
+/**
  * Static economy helpers. Nothing here mutates profile state; payouts reach the
  * inventory only through UQinglanProfileSubsystem::TryGrant so every award stays
  * atomic and idempotent (docs/03 section 6).
@@ -174,4 +205,41 @@ public:
 	/** Six permanent relics, names only (Jade Pendant, Ember Bead, River Pearl, Thunder Charm, Mountain Token, Verdant Seed). */
 	UFUNCTION(BlueprintPure, Category = "Qinglan|Economy")
 	static TArray<FName> GetRelicCatalog();
+
+	// --- Permanent relics (docs/03 section 5; blueprint section 2.6) ---
+	/** Full definitions with bonuses/tradeoffs; ids mirror GetRelicCatalog. */
+	UFUNCTION(BlueprintPure, Category = "Qinglan|Economy")
+	static TArray<FQinglanRelicDef> GetRelicDefs();
+
+	UFUNCTION(BlueprintPure, Category = "Qinglan|Economy")
+	static bool FindRelic(FName RelicId, FQinglanRelicDef& OutEntry);
+
+	/**
+	 * Modifiers granted by one equipped relic, expressed on the blessing
+	 * modifier surface so call sites fold them with the same maths. Tradeoffs
+	 * apply as positive penalty percents/durations. No relic (NAME_None): zero.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Qinglan|Economy")
+	static void ComputeRelicModifiers(FName EquippedRelicId, struct FQinglanBlessingModifiers& OutModifiers);
+
+	// --- Permanent-equipment folding (docs/03 sections 4-5) ---
+	/**
+	 * Adds the equipped relic (bonuses + tradeoffs) and the equipped passives
+	 * onto an existing modifier bundle in place. Callers pass the bundle that
+	 * already carries the expedition blessings, then apply the combined totals
+	 * exactly once ("add within category, apply once", docs/03 section 4).
+	 * No profile subsystem (headless tests): no-op.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Qinglan|Economy")
+	static void AppendPermanentModifiers(UObject* WorldContext, struct FQinglanBlessingModifiers& InOutModifiers);
+
+	/**
+	 * Folds permanent-equipment regen/healing modifiers onto base rates in
+	 * place: EnergyRegen += Energy Recovery's flat per-second bonus;
+	 * StaminaRegen *= (1 + Measured Breath's recovery percent / 100);
+	 * HealingPercent += the equipped relic's healing percent (Verdant Seed).
+	 * Pass the authored base constants in; no profile subsystem: no-op.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Qinglan|Economy")
+	static void AppendPermanentRegen(UObject* WorldContext, float& EnergyRegen, float& StaminaRegen, float& HealingPercent);
 };

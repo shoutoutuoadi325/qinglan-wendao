@@ -6,6 +6,7 @@
 // offline and single-profile-active, so no locking is required.
 #include "Progression/QinglanProfileSubsystem.h"
 
+#include "Progression/QinglanEconomyLibrary.h"
 #include "Progression/QinglanProgressionTables.h"
 #include "Progression/QinglanRunSubsystem.h"
 #include "Narrative/QinglanStorySubsystem.h"
@@ -82,6 +83,11 @@ void UQinglanProfileSubsystem::ResetToFreshProfile()
 	CampaignFlags.Reset();
 	UnlockedTechniques.Reset();
 	EquippedTechniques.Reset();
+	OwnedRelics.Reset();
+	EquippedRelic = NAME_None;
+	OwnedPassives.Reset();
+	EquippedPassives.Reset();
+	TalismanCharges.Reset();
 	CommittedTransactionIds.Reset();
 	ReadRecords.Reset();
 	CompletedSideStages.Reset();
@@ -125,6 +131,26 @@ bool UQinglanProfileSubsystem::IsTechniqueUnlocked(FName TechniqueId) const
 TArray<FName> UQinglanProfileSubsystem::GetEquippedTechniques() const
 {
 	return EquippedTechniques;
+}
+
+TArray<FName> UQinglanProfileSubsystem::GetOwnedRelics() const
+{
+	return OwnedRelics.Array();
+}
+
+FName UQinglanProfileSubsystem::GetEquippedRelic() const
+{
+	return EquippedRelic;
+}
+
+TArray<FName> UQinglanProfileSubsystem::GetOwnedPassives() const
+{
+	return OwnedPassives.Array();
+}
+
+TArray<FName> UQinglanProfileSubsystem::GetEquippedPassives() const
+{
+	return EquippedPassives;
 }
 
 bool UQinglanProfileSubsystem::IsSideQuestStageComplete(FName StageId) const
@@ -428,6 +454,225 @@ bool UQinglanProfileSubsystem::TrySetEquippedTechniques(const TArray<FName>& Tec
 	return true;
 }
 
+bool UQinglanProfileSubsystem::IsLoadoutLockedByExpedition() const
+{
+	// Shared gate for every loadout swap (techniques, relic, passives):
+	// swapping is free but only at a sanctuary/entrance shrine, never
+	// mid-expedition (docs/03 sections 3-5).
+	const UGameInstance* GameInstance = GetGameInstance();
+	const UQinglanRunSubsystem* RunSubsystem = GameInstance ? GameInstance->GetSubsystem<UQinglanRunSubsystem>() : nullptr;
+	return RunSubsystem != nullptr && RunSubsystem->IsInExpedition();
+}
+
+// ---------------------------------------------------------------------------
+// Permanent equipment mutations (docs/03 sections 4-5)
+// ---------------------------------------------------------------------------
+
+bool UQinglanProfileSubsystem::TryPurchaseRelic(FName TransactionId, FName RelicId)
+{
+	if (TransactionId == NAME_None)
+	{
+		UE_LOG(LogQinglan, Warning, TEXT("TryPurchaseRelic rejected: empty transaction id"));
+		return false;
+	}
+	if (WasTransactionCommitted(TransactionId))
+	{
+		return true; // idempotent replay of this purchase
+	}
+	FQinglanRelicDef Def;
+	if (!UQinglanEconomyLibrary::FindRelic(RelicId, Def))
+	{
+		UE_LOG(LogQinglan, Warning, TEXT("TryPurchaseRelic rejected: unknown relic id"));
+		return false;
+	}
+	if (OwnedRelics.Contains(RelicId))
+	{
+		// Already owned (e.g. granted by a different transaction): commit the
+		// transaction id so replays stay no-ops, but do not double-charge.
+		CommittedTransactionIds.Add(TransactionId);
+		OnProfileCommitted.Broadcast();
+		return true;
+	}
+
+	FQinglanInventory Cost;
+	Cost.VeinCrystal = Def.VeinCrystalCost; // sanctuary keeper prices in Vein Crystal (docs/03 section 5)
+	if (!IsAffordable(Inventory, Cost))
+	{
+		// Insufficient banked crystals: atomic rejection, no partial state
+		// (docs/03 section 6 "insufficient resources change nothing").
+		return false;
+	}
+
+	Inventory.VeinCrystal -= Cost.VeinCrystal;
+	OwnedRelics.Add(RelicId);
+	CommittedTransactionIds.Add(TransactionId);
+	OnInventoryChanged.Broadcast(Inventory);
+	OnProfileCommitted.Broadcast();
+	return true;
+}
+
+bool UQinglanProfileSubsystem::TryEquipRelic(FName RelicId)
+{
+	// docs/03 section 5: at most one equipped relic (EquippedRelicLimit);
+	// equip changes happen at the sanctuary like every other loadout swap.
+	if (IsLoadoutLockedByExpedition())
+	{
+		return false;
+	}
+	if (RelicId == NAME_None)
+	{
+		// Unequip is always legal (an empty loadout is a valid loadout).
+		if (EquippedRelic == NAME_None)
+		{
+			return true; // already empty: no broadcast, no journal entry needed
+		}
+		EquippedRelic = NAME_None;
+		OnProfileCommitted.Broadcast();
+		return true;
+	}
+	if (!OwnedRelics.Contains(RelicId))
+	{
+		return false; // cannot equip an unbought relic
+	}
+
+	EquippedRelic = RelicId;
+	OnProfileCommitted.Broadcast();
+	return true;
+}
+
+bool UQinglanProfileSubsystem::TrySetEquippedPassives(const TArray<FName>& PassiveIds)
+{
+	// docs/03 section 4: "Eight passives with two equipped"; swap rules match
+	// the technique loadout (sanctuary only, never mid-expedition).
+	if (IsLoadoutLockedByExpedition())
+	{
+		return false;
+	}
+	if (PassiveIds.Num() > QinglanProgression::EquippedPassiveLimit)
+	{
+		return false; // at most two equipped passives (docs/03 section 4)
+	}
+
+	TSet<FName> Seen;
+	Seen.Reserve(PassiveIds.Num());
+	for (const FName PassiveId : PassiveIds)
+	{
+		if (!OwnedPassives.Contains(PassiveId))
+		{
+			return false; // cannot equip an unstudied manual
+		}
+		if (Seen.Contains(PassiveId))
+		{
+			return false; // no duplicate slots
+		}
+		Seen.Add(PassiveId);
+	}
+
+	EquippedPassives = PassiveIds;
+	OnProfileCommitted.Broadcast();
+	return true;
+}
+
+bool UQinglanProfileSubsystem::TryPurchasePassive(FName TransactionId, FName PassiveId)
+{
+	if (TransactionId == NAME_None)
+	{
+		UE_LOG(LogQinglan, Warning, TEXT("TryPurchasePassive rejected: empty transaction id"));
+		return false;
+	}
+	if (WasTransactionCommitted(TransactionId))
+	{
+		return true; // idempotent replay of this purchase
+	}
+	FQinglanPassiveCatalogEntry Entry;
+	if (!UQinglanEconomyLibrary::FindPassive(PassiveId, Entry))
+	{
+		UE_LOG(LogQinglan, Warning, TEXT("TryPurchasePassive rejected: unknown passive id"));
+		return false;
+	}
+	if (OwnedPassives.Contains(PassiveId))
+	{
+		// Already studied (e.g. granted by a different transaction): commit the
+		// transaction id so replays stay no-ops, but do not double-charge.
+		CommittedTransactionIds.Add(TransactionId);
+		OnProfileCommitted.Broadcast();
+		return true;
+	}
+
+	// Authored study cost (docs/03 section 4 lists no prices): see the
+	// PassiveStudyCost* constants beside the API declaration.
+	FQinglanInventory Cost;
+	Cost.SpiritShards = PassiveStudyCostShards;
+	Cost.SpiritHerb = PassiveStudyCostHerbs;
+	if (!IsAffordable(Inventory, Cost))
+	{
+		return false; // atomic rejection, no partial state
+	}
+
+	Inventory.SpiritShards -= Cost.SpiritShards;
+	Inventory.SpiritHerb -= Cost.SpiritHerb;
+	OwnedPassives.Add(PassiveId);
+	CommittedTransactionIds.Add(TransactionId);
+	OnInventoryChanged.Broadcast(Inventory);
+	OnProfileCommitted.Broadcast();
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// Talisman charges (docs/03 section 5)
+// ---------------------------------------------------------------------------
+
+void UQinglanProfileSubsystem::GetTalismanCharges(TMap<FName, int32>& OutCharges) const
+{
+	OutCharges = TalismanCharges;
+}
+
+int32 UQinglanProfileSubsystem::GetTalismanChargeCount(FName TalismanId) const
+{
+	const int32* Charges = TalismanCharges.Find(TalismanId);
+	return Charges ? *Charges : 0;
+}
+
+bool UQinglanProfileSubsystem::TryConsumeTalismanCharge(FName TalismanId)
+{
+	// Talismans carry expedition charges, not inventory (docs/03 section 5):
+	// no transaction journal, but the mutation still routes through this
+	// subsystem and broadcasts so a listener can persist it.
+	int32* Charges = TalismanCharges.Find(TalismanId);
+	if (Charges == nullptr || *Charges <= 0)
+	{
+		return false; // empty or unknown: nothing consumed
+	}
+	--*Charges;
+	OnProfileCommitted.Broadcast();
+	return true;
+}
+
+void UQinglanProfileSubsystem::RefillTalismans()
+{
+	// Sanctuary arrival refills every catalog talisman for free (docs/03
+	// section 5); talismans cannot restore their own charges elsewhere.
+	bool bChanged = false;
+	for (const FQinglanTalismanCatalogEntry& Entry : UQinglanEconomyLibrary::GetTalismanCatalog())
+	{
+		int32* Charges = TalismanCharges.Find(Entry.TalismanId);
+		if (Charges == nullptr)
+		{
+			TalismanCharges.Add(Entry.TalismanId, Entry.Charges);
+			bChanged = true;
+		}
+		else if (*Charges != Entry.Charges)
+		{
+			*Charges = Entry.Charges;
+			bChanged = true;
+		}
+	}
+	if (bChanged)
+	{
+		OnProfileCommitted.Broadcast();
+	}
+}
+
 void UQinglanProfileSubsystem::MarkRecordRead(FName RecordId)
 {
 	if (RecordId == NAME_None || ReadRecords.Contains(RecordId))
@@ -563,18 +808,30 @@ void UQinglanProfileSubsystem::ExportStateForSave(FQinglanProfileSnapshot& OutSn
 	OutSnapshot.Inventory = Inventory;
 	// Sorted copies keep the serialized body byte-stable for the checksum step
 	// of the durable write protocol (TSet iteration order is not stable).
+	// FName has no operator< in UE 5.8; LexicalLess gives the deterministic
+	// cross-platform order the checksum requires.
 	// EquippedTechniques keeps loadout order, which the UI depends on.
 	OutSnapshot.UnlockedTechniques = UnlockedTechniques.Array();
-	OutSnapshot.UnlockedTechniques.Sort();
+	OutSnapshot.UnlockedTechniques.Sort([](const FName& A, const FName& B) { return A.LexicalLess(B); });
 	OutSnapshot.EquippedTechniques = EquippedTechniques;
+	OutSnapshot.OwnedRelics = OwnedRelics.Array();
+	OutSnapshot.OwnedRelics.Sort([](const FName& A, const FName& B) { return A.LexicalLess(B); });
+	OutSnapshot.EquippedRelic = EquippedRelic;
+	OutSnapshot.OwnedPassives = OwnedPassives.Array();
+	OutSnapshot.OwnedPassives.Sort([](const FName& A, const FName& B) { return A.LexicalLess(B); });
+	// EquippedPassives keeps slot order, which the UI depends on.
+	OutSnapshot.EquippedPassives = EquippedPassives;
+	// TMap iteration order is not stable, but the save-side fingerprint folds
+	// the charge map in key order, so the checksum step stays deterministic.
+	OutSnapshot.TalismanCharges = TalismanCharges;
 	OutSnapshot.CampaignFlags = CampaignFlags.Array();
-	OutSnapshot.CampaignFlags.Sort();
+	OutSnapshot.CampaignFlags.Sort([](const FName& A, const FName& B) { return A.LexicalLess(B); });
 	OutSnapshot.CommittedTransactionIds = CommittedTransactionIds.Array();
-	OutSnapshot.CommittedTransactionIds.Sort();
+	OutSnapshot.CommittedTransactionIds.Sort([](const FName& A, const FName& B) { return A.LexicalLess(B); });
 	OutSnapshot.Narrative.CompletedSideStages = CompletedSideStages.Array();
-	OutSnapshot.Narrative.CompletedSideStages.Sort();
+	OutSnapshot.Narrative.CompletedSideStages.Sort([](const FName& A, const FName& B) { return A.LexicalLess(B); });
 	OutSnapshot.Narrative.ReadRecords = ReadRecords.Array();
-	OutSnapshot.Narrative.ReadRecords.Sort();
+	OutSnapshot.Narrative.ReadRecords.Sort([](const FName& A, const FName& B) { return A.LexicalLess(B); });
 }
 
 void UQinglanProfileSubsystem::ImportStateFromSave(const FQinglanProfileSnapshot& Snapshot)
@@ -584,6 +841,11 @@ void UQinglanProfileSubsystem::ImportStateFromSave(const FQinglanProfileSnapshot
 	Inventory = Snapshot.Inventory;
 	UnlockedTechniques = ToNameSet(Snapshot.UnlockedTechniques);
 	EquippedTechniques = Snapshot.EquippedTechniques;
+	OwnedRelics = ToNameSet(Snapshot.OwnedRelics);
+	EquippedRelic = Snapshot.EquippedRelic;
+	OwnedPassives = ToNameSet(Snapshot.OwnedPassives);
+	EquippedPassives = Snapshot.EquippedPassives;
+	TalismanCharges = Snapshot.TalismanCharges;
 	CampaignFlags = ToNameSet(Snapshot.CampaignFlags);
 	CommittedTransactionIds = ToNameSet(Snapshot.CommittedTransactionIds);
 	CompletedSideStages = ToNameSet(Snapshot.Narrative.CompletedSideStages);

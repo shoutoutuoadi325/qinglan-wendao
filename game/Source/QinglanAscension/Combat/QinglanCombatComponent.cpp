@@ -10,6 +10,7 @@
 #include "Combat/QinglanCharacter.h"
 #include "Combat/QinglanDamageMath.h"
 #include "Combat/QinglanStatusComponent.h"
+#include "Progression/QinglanEconomyLibrary.h"
 #include "QinglanAscension.h"
 
 namespace
@@ -197,11 +198,22 @@ void UQinglanCombatComponent::RegenResources(float DeltaTime)
 	TimeSinceEnergySpend += DeltaTime;
 	TimeSinceStaminaSpend += DeltaTime;
 
+	// Permanent equipment folds onto the base rates for the player pawn only
+	// (Energy Recovery +1/s, Measured Breath +10% recovery, docs/03 section 4);
+	// enemies keep the authored constants since the profile is the player's.
+	float EnergyRegen = EnergyRegenPerSecond;
+	float StaminaRegen = StaminaRegenPerSecond;
+	if (Cast<AQinglanCharacter>(GetOwner()) != nullptr)
+	{
+		float HealingPercent = 0.f; // heal paths consume this output; regen does not
+		UQinglanEconomyLibrary::AppendPermanentRegen(this, EnergyRegen, StaminaRegen, HealingPercent);
+	}
+
 	if (TimeSinceEnergySpend >= EnergyRegenDelay
 		&& Attributes.SpiritualEnergy < Attributes.MaxSpiritualEnergy)
 	{
 		Attributes.SpiritualEnergy = FMath::Min(Attributes.MaxSpiritualEnergy,
-			Attributes.SpiritualEnergy + EnergyRegenPerSecond * DeltaTime);
+			Attributes.SpiritualEnergy + EnergyRegen * DeltaTime);
 		OnEnergyChanged.Broadcast(Attributes.SpiritualEnergy, Attributes.MaxSpiritualEnergy);
 	}
 
@@ -209,7 +221,7 @@ void UQinglanCombatComponent::RegenResources(float DeltaTime)
 		&& Attributes.Stamina < Attributes.MaxStamina)
 	{
 		Attributes.Stamina = FMath::Min(Attributes.MaxStamina,
-			Attributes.Stamina + StaminaRegenPerSecond * DeltaTime);
+			Attributes.Stamina + StaminaRegen * DeltaTime);
 		OnStaminaChanged.Broadcast(Attributes.Stamina, Attributes.MaxStamina);
 	}
 }

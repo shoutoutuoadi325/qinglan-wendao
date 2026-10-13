@@ -62,6 +62,14 @@ public:
 	UPROPERTY() FQinglanInventory Inventory;
 	UPROPERTY() TArray<FName> UnlockedTechniques;
 	UPROPERTY() TArray<FName> EquippedTechniques;
+	/** Permanent relics bought at the sanctuary (docs/03 section 5); equip at most one. */
+	UPROPERTY() TArray<FName> OwnedRelics;
+	UPROPERTY() FName EquippedRelic = NAME_None;
+	/** Passive manuals studied (docs/03 section 4); equip at most two. */
+	UPROPERTY() TArray<FName> OwnedPassives;
+	UPROPERTY() TArray<FName> EquippedPassives;
+	/** Talisman id -> remaining expedition charges; refilled at the sanctuary. */
+	UPROPERTY() TMap<FName, int32> TalismanCharges;
 	UPROPERTY() TArray<FName> CampaignFlags;
 	UPROPERTY() TArray<FName> CommittedTransactionIds;
 	UPROPERTY() bool bHasCheckpoint = false;

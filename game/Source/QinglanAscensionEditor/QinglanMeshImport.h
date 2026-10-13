@@ -8,12 +8,12 @@
 #include "QinglanMeshImport.generated.h"
 
 UCLASS()
-class UQinglanMeshImport : public UCommandlet
+class UQinglanMeshImportCommandlet : public UCommandlet
 {
 	GENERATED_BODY()
 
 public:
-	UQinglanMeshImport();
+	UQinglanMeshImportCommandlet();
 
 	virtual int32 Main(const FString& Params) override;
 

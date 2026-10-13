@@ -31,19 +31,19 @@ E=/inspire/hdd/project/qianghuaxuexi/s26044/UnrealEngine
 P=/inspire/hdd/project/qianghuaxuexi/s26044/qinglan-wendao/game/QinglanAscension.uproject
 
 # 1) Story data -> /Game/Qinglan/Data assets (registry, techniques, realms, ST_Game)
-$E/Engine/Binaries/Linux/UnrealEditor-Cmd "$P" -run=QinglanDataImport -unattended -nop4 -nosplash
+$E/Engine/Binaries/Linux/UnrealEditor-Cmd "$P" -run=QinglanAscensionEditor.QinglanDataImportCommandlet -data=/inspire/hdd/project/qianghuaxuexi/s26044/qinglan-wendao/data -unattended -nop4 -nosplash
 
 # 2) Core content: four maps, master materials, input assets
-$E/Engine/Binaries/Linux/UnrealEditor-Cmd "$P" -run=QinglanContentBootstrap -unattended -nop4 -nosplash
+$E/Engine/Binaries/Linux/UnrealEditor-Cmd "$P" -run=QinglanAscensionEditor.QinglanContentBootstrapCommandlet -unattended -nop4 -nosplash
 
 # 3) Meshes: FBX import (characters/monsters/weapons/nature) from assets-raw
-$E/Engine/Binaries/Linux/UnrealEditor-Cmd "$P" -run=QinglanMeshImport -unattended -nop4 -nosplash
+$E/Engine/Binaries/Linux/UnrealEditor-Cmd "$P" -run=QinglanAscensionEditor.QinglanMeshImportCommandlet -unattended -nop4 -nosplash
 
 # 4) Animation: combat montages from imported takes, paired into technique assets
-$E/Engine/Binaries/Linux/UnrealEditor-Cmd "$P" -run=QinglanAnimBootstrap -unattended -nop4 -nosplash
+$E/Engine/Binaries/Linux/UnrealEditor-Cmd "$P" -run=QinglanAscensionEditor.QinglanAnimBootstrapCommandlet -unattended -nop4 -nosplash
 
 # 5) UI widget blueprints
-$E/Engine/Binaries/Linux/UnrealEditor-Cmd "$P" -run=QinglanUIBootstrap -unattended -nop4 -nosplash
+$E/Engine/Binaries/Linux/UnrealEditor-Cmd "$P" -run=QinglanAscensionEditor.QinglanUIBootstrapCommandlet -unattended -nop4 -nosplash
 ```
 
 ## Automation tests

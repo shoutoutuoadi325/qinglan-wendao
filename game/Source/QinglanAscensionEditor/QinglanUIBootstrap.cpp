@@ -26,8 +26,11 @@ namespace
 
 	UWidgetBlueprint* MakeWidgetBlueprint(const FString& ObjectPath, UClass* BaseClass)
 	{
-		const FString PackagePath = ObjectPath;
-		UPackage* Package = CreatePackage(*PackagePath);
+		// Callers pass the object-path form "/Game/.../WBP_X.WBP_X"; the package
+		// name must NOT carry the object suffix.
+		const int32 Dot = ObjectPath.Find(TEXT("."), ESearchCase::IgnoreCase, ESearchDir::FromStart);
+		const FString PackageName = Dot > 0 ? ObjectPath.Left(Dot) : ObjectPath;
+		UPackage* Package = CreatePackage(*PackageName);
 		Package->SetPackageFlags(PKG_NewlyCreated);
 		UWidgetBlueprintFactory* Factory = NewObject<UWidgetBlueprintFactory>();
 		Factory->ParentClass = BaseClass; // UE 5.8: ParentClass replaced InitialWidgetClass
@@ -37,6 +40,12 @@ namespace
 		if (!WBP)
 		{
 			return nullptr;
+		}
+		// Headless creation can leave the widget tree unset; the tree is the
+		// root every ConstructWidget call parents to, so guarantee one exists.
+		if (WBP->WidgetTree == nullptr)
+		{
+			WBP->WidgetTree = NewObject<UWidgetTree>(WBP);
 		}
 		FAssetRegistryModule::AssetCreated(WBP);
 		return WBP;
@@ -84,11 +93,11 @@ namespace
 	}
 }
 
-UQinglanUIBootstrap::UQinglanUIBootstrap()
+UQinglanUIBootstrapCommandlet::UQinglanUIBootstrapCommandlet()
 {
 }
 
-int32 UQinglanUIBootstrap::Main(const FString& Params)
+int32 UQinglanUIBootstrapCommandlet::Main(const FString& Params)
 {
 	UE_LOG(LogTemp, Log, TEXT("QinglanUIBootstrap starting"));
 	bool bOk = true;

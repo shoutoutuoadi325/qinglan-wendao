@@ -32,11 +32,11 @@ namespace
 	}
 }
 
-UQinglanMeshImport::UQinglanMeshImport()
+UQinglanMeshImportCommandlet::UQinglanMeshImportCommandlet()
 {
 }
 
-int32 UQinglanMeshImport::Main(const FString& Params)
+int32 UQinglanMeshImportCommandlet::Main(const FString& Params)
 {
 	UE_LOG(LogTemp, Log, TEXT("QinglanMeshImport starting; raw root=%s"), *RawRoot);
 	bool bOk = true;
@@ -85,7 +85,7 @@ int32 UQinglanMeshImport::Main(const FString& Params)
 	return bOk ? 0 : 1;
 }
 
-bool UQinglanMeshImport::ImportSkeletalFBX(const FString& SourceFile, const FString& DestPath, const FString& AssetName)
+bool UQinglanMeshImportCommandlet::ImportSkeletalFBX(const FString& SourceFile, const FString& DestPath, const FString& AssetName)
 {
 	UFbxImportUI* Options = NewObject<UFbxImportUI>(GetTransientPackage());
 	Options->bImportMesh = true;
@@ -106,7 +106,7 @@ bool UQinglanMeshImport::ImportSkeletalFBX(const FString& SourceFile, const FStr
 	return bOk;
 }
 
-bool UQinglanMeshImport::ImportStaticFBX(const FString& SourceFile, const FString& DestPath, const FString& AssetName)
+bool UQinglanMeshImportCommandlet::ImportStaticFBX(const FString& SourceFile, const FString& DestPath, const FString& AssetName)
 {
 	UFbxImportUI* Options = NewObject<UFbxImportUI>(GetTransientPackage());
 	Options->bImportMesh = true;

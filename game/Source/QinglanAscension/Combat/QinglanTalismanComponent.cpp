@@ -22,17 +22,17 @@
 namespace
 {
 	// PlayerStart tag convention for room entrances; mirrors the game mode's
-	// FindRoomEntranceStart (Core/QinglanGameModeBase.cpp): exact per-room form
+	// FindTalismanRoomEntranceStart (Core/QinglanGameModeBase.cpp): exact per-room form
 	// "Qinglan.RoomEntrance.<Index>", else any "Qinglan.RoomEntrance*" start.
-	const TCHAR* GRoomEntranceTagPrefix = TEXT("Qinglan.RoomEntrance");
+	const TCHAR* GTalismanRoomEntranceTagPrefix = TEXT("Qinglan.RoomEntrance");
 
-	APlayerStart* FindRoomEntranceStart(UWorld* World, int32 RoomIndex)
+	APlayerStart* FindTalismanRoomEntranceStart(UWorld* World, int32 RoomIndex)
 	{
 		if (!World)
 		{
 			return nullptr;
 		}
-		const FString Prefix(GRoomEntranceTagPrefix);
+		const FString Prefix(GTalismanRoomEntranceTagPrefix);
 		APlayerStart* AnyEntrance = nullptr;
 		for (TActorIterator<APlayerStart> It(World); It; ++It)
 		{
@@ -265,7 +265,7 @@ bool UQinglanTalismanComponent::ExecuteEffect(const FQinglanTalismanCatalogEntry
 		// room". FIXME-CONTRACT(scope): no retreat/exit-shrine flow exists in
 		// the scaffold yet, so recall teleports the player to the current
 		// room's entrance PlayerStart, replicating the game mode's
-		// FindRoomEntranceStart tag convention (Core/QinglanGameModeBase.cpp;
+		// FindTalismanRoomEntranceStart tag convention (Core/QinglanGameModeBase.cpp;
 		// crash-resume positions actors the same way). No tagged start: the
 		// use is rejected and the charge survives.
 		UWorld* World = GetWorld();
@@ -275,7 +275,7 @@ bool UQinglanTalismanComponent::ExecuteEffect(const FQinglanTalismanCatalogEntry
 		}
 		const UGameInstance* GameInstance = World->GetGameInstance();
 		const UQinglanRunSubsystem* Run = GameInstance ? GameInstance->GetSubsystem<UQinglanRunSubsystem>() : nullptr;
-		APlayerStart* Entrance = FindRoomEntranceStart(World, Run ? Run->GetCurrentRoomIndex() : 0);
+		APlayerStart* Entrance = FindTalismanRoomEntranceStart(World, Run ? Run->GetCurrentRoomIndex() : 0);
 		if (!Entrance)
 		{
 			UE_LOG(LogQinglanCombat, Verbose, TEXT("Recall rejected: no room-entrance PlayerStart in this world"));

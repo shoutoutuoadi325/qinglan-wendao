@@ -397,7 +397,7 @@ void AQinglanCharacter::BeginPlay()
 			MeshComp->SetRelativeLocation(FVector(0.f, 0.f, -QinglanCapsuleHalfHeight));
 			MeshComp->SetRelativeRotation(FRotator(0.f, -90.f, 0.f)); // rig faces +Y in the export
 			if (UAnimSequence* const Idle = Cast<UAnimSequence>(
-					FSoftObjectPath(TEXT("/Game/Qinglan/Characters/Human/AS_Idle")).TryLoad()))
+					FSoftObjectPath(TEXT("/Game/Qinglan/Characters/Human/SK_HumanHuman_Armature_Idle")).TryLoad()))
 			{
 				MeshComp->SetAnimationMode(EAnimationMode::AnimationSingleNode);
 				MeshComp->PlayAnimation(Idle, /*bLooping=*/true);

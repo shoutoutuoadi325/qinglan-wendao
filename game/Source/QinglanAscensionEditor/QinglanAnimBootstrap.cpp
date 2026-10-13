@@ -41,24 +41,21 @@ namespace
 
 	/**
 	 * Player (Human skeleton) take rules; order matters — first match wins.
-	 * Quaternius Universal Animation Library take names vary between packs, so
-	 * every rule lists synonyms. Misses are logged, never fatal: the sword
+	 * The imported Human rig carries three takes (Human_Armature_Idle / _Jump /
+	 * _ArmatureAction_001); the action take drives every melee/cast montage,
+	 * Jump stands in for the dodge. Misses are logged, never fatal: the sword
 	 * component runs its phase timers without montages.
 	 */
 	const FTakeRule PlayerRules[] = {
-		{ TEXT("Punch2"),   TEXT("SwordCut_2") },
-		{ TEXT("Punch3"),   TEXT("SwordCut_3") },
-		{ TEXT("Punch"),    TEXT("SwordCut_1") },
+		{ TEXT("ArmatureAction"), TEXT("SwordCut_1") },
 		{ TEXT("Attack2"),  TEXT("SwordCut_2") },
 		{ TEXT("Attack3"),  TEXT("SwordCut_3") },
-		{ TEXT("Attack"),   TEXT("SwordCut_1") },
+		{ TEXT("Punch"),    TEXT("SwordCut_1") },
 		{ TEXT("Slash"),    TEXT("SwordCut_1") },
+		{ TEXT("Attack"),   TEXT("SwordCut_1") },
 		{ TEXT("Cast"),     TEXT("Cast") },
 		{ TEXT("Spell"),    TEXT("Cast") },
-		{ TEXT("Magic"),    TEXT("Cast") },
-		{ TEXT("Shoot"),    TEXT("CastThrow") },
-		{ TEXT("Throw"),    TEXT("CastThrow") },
-		{ TEXT("Summon"),   TEXT("CastSummon") },
+		{ TEXT("Jump"),     TEXT("Dodge") },
 		{ TEXT("Roll"),     TEXT("Dodge") },
 		{ TEXT("Dodge"),    TEXT("Dodge") },
 	};
@@ -89,12 +86,12 @@ namespace
 	}
 } // namespace
 
-UQinglanAnimBootstrap::UQinglanAnimBootstrap()
+UQinglanAnimBootstrapCommandlet::UQinglanAnimBootstrapCommandlet()
 {
 	IsClient = false;
 }
 
-UAnimMontage* UQinglanAnimBootstrap::BuildComboMontage(const FString& OutPath, const FString& MontageName,
+UAnimMontage* UQinglanAnimBootstrapCommandlet::BuildComboMontage(const FString& OutPath, const FString& MontageName,
 	UAnimSequence* Sequence, float WindupFraction, float ActiveFraction)
 {
 	if (Sequence == nullptr)
@@ -144,7 +141,7 @@ UAnimMontage* UQinglanAnimBootstrap::BuildComboMontage(const FString& OutPath, c
 	return SaveMontage(Montage, OutPath / MontageName);
 }
 
-int32 UQinglanAnimBootstrap::Main(const FString& Params)
+int32 UQinglanAnimBootstrapCommandlet::Main(const FString& Params)
 {
 	UE_LOG(LogTemp, Log, TEXT("QinglanAnimBootstrap starting"));
 	bool bOk = true;
@@ -169,18 +166,22 @@ int32 UQinglanAnimBootstrap::Main(const FString& Params)
 		{
 			if (Plan.Group.Equals(Group, ESearchCase::IgnoreCase)) { return Plan; }
 		}
-		return Groups.AddDefaulted_GetRef();
+		FGroupPlan& NewPlan = Groups.AddDefaulted_GetRef();
+		NewPlan.Group = Group;
+		NewPlan.bPlayer = bPlayer;
+		return NewPlan;
 	};
 
 	for (const FAssetData& Asset : AllAssets)
 	{
-		const FString ObjectPath = Asset.GetObjectPathString();
-		if (!ObjectPath.StartsWith(TEXT("/Game/Qinglan/Characters/")))
+		// PackageName is the reliable "/Game/Qinglan/Characters/<Group>/<Asset>" form.
+		const FString Package = Asset.PackageName.ToString();
+		if (!Package.StartsWith(TEXT("/Game/Qinglan/Characters/")))
 		{
 			continue;
 		}
-		// /Game/Qinglan/Characters/<Group>/<...>/AS_Take -> group is the first path segment.
-		FString Rest = ObjectPath;
+		// <Group> is the first path segment after the content root.
+		FString Rest = Package;
 		Rest.RemoveFromStart(TEXT("/Game/Qinglan/Characters/"));
 		const FString Group = Rest.Contains(TEXT("/")) ? Rest.Left(Rest.Find(TEXT("/"))) : FString();
 		if (Group.IsEmpty() || Group.Equals(TEXT("Montages"), ESearchCase::IgnoreCase))
@@ -224,6 +225,24 @@ int32 UQinglanAnimBootstrap::Main(const FString& Params)
 	for (FGroupPlan& Plan : Groups)
 	{
 		const FString Dir = MontageDir(Plan.Group);
+		// The imported Human rig has a single action take; clone it into the
+		// missing combo cuts with distinct notify windows so all three player
+		// montages exist (visual repetition is acceptable; timing still differs).
+		if (Plan.bPlayer)
+		{
+			const TObjectPtr<UAnimSequence>* CutOne = Plan.Takes.Find(FName(TEXT("SwordCut_1")));
+			if (CutOne)
+			{
+				for (const TCHAR* Missing : { TEXT("SwordCut_2"), TEXT("SwordCut_3") })
+				{
+					Plan.Takes.FindOrAdd(FName(Missing)) = *CutOne;
+				}
+				if (!Plan.Takes.Contains(FName(TEXT("Cast"))))
+				{
+					Plan.Takes.FindOrAdd(FName(TEXT("Cast"))) = *CutOne;
+				}
+			}
+		}
 		for (const TPair<FName, TObjectPtr<UAnimSequence>>& Pair : Plan.Takes)
 		{
 			const FString MontageName = FString::Printf(TEXT("AM_%s_%s"), *Plan.Group, *Pair.Key.ToString());
@@ -231,17 +250,20 @@ int32 UQinglanAnimBootstrap::Main(const FString& Params)
 			// montages are cosmetic-only and get no gameplay notifies.
 			float WindupFraction = -1.f;
 			float ActiveFraction = 0.f;
-			const bool bIsSwordCut = Pair.Key.ToString().StartsWith(TEXT("SwordCut"));
-			if (bIsSwordCut)
+			const FString Suffix = Pair.Key.ToString();
+			if (Suffix.StartsWith(TEXT("SwordCut")))
 			{
-				WindupFraction = 0.35f;  // visual approximation of docs/02 section 4 phases
+				// Visual approximation of docs/02 section 4 phases; later cuts
+				// wind up a little longer to match their longer windup timers.
+				const float CutIndex = Suffix.EndsWith(TEXT("1")) ? 0.f : (Suffix.EndsWith(TEXT("2")) ? 1.f : 2.f);
+				WindupFraction = 0.30f + 0.05f * CutIndex;
 				ActiveFraction = 0.25f;
 			}
 			UAnimMontage* Montage = BuildComboMontage(Dir, MontageName, Pair.Value, FMath::Max(WindupFraction, 0.f), ActiveFraction);
 			if (Montage)
 			{
 				++BuiltCount;
-				if (Plan.bPlayer && Pair.Key.ToString().StartsWith(TEXT("Cast")))
+				if (Plan.bPlayer && Suffix.StartsWith(TEXT("Cast")))
 				{
 					CastArchetypes.Add(Pair.Key, Montage);
 				}

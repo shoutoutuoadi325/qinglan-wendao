@@ -12,12 +12,12 @@ class UAnimSequence;
 class UAnimMontage;
 
 UCLASS()
-class UQinglanAnimBootstrap : public UCommandlet
+class UQinglanAnimBootstrapCommandlet : public UCommandlet
 {
 	GENERATED_BODY()
 
 public:
-	UQinglanAnimBootstrap();
+	UQinglanAnimBootstrapCommandlet();
 	virtual int32 Main(const FString& Params) override;
 
 private:

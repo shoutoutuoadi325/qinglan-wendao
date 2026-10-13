@@ -374,29 +374,31 @@ namespace QinglanEnemyCatalog
 		Asset->bRootImmune = Spec.bRootImmune;
 		Asset->AggroRadius = Spec.AggroRadius;
 
-		// Presentation convention (mesh import + anim bootstrap paths):
-		// /Game/Qinglan/Characters/<Group>/SK_<Mesh> and
-		// /Game/Qinglan/Characters/<Group>/Montages/AM_<Group>_Attack|HitReact.
-		// Every reference null-safe: absent assets degrade to the bind pose.
-		static const TMap<FName, const TCHAR*> MeshGroups = {
-			{ FName(TEXT("spirit_wolf")),         TEXT("Monsters/SK_Skeleton") },
-			{ FName(TEXT("corrupted_disciple")),  TEXT("Human/SK_Human") },
-			{ FName(TEXT("hollow_archer")),       TEXT("Monsters/SK_Bat") },
-			{ FName(TEXT("stone_sentinel")),      TEXT("Knight/SK_Knight") },
-			{ FName(TEXT("ember_wisp")),          TEXT("Monsters/SK_Slime") },
-			{ FName(TEXT("rootbound_keeper")),    TEXT("Monsters/SK_Slime") },
-			{ FName(TEXT("bamboo_guardian")),     TEXT("Knight/SK_Knight") },
-			{ FName(TEXT("ashen_guardian")),      TEXT("Knight/SK_Knight") },
-			{ FName(TEXT("broken_guardian")),     TEXT("Monsters/SK_Dragon") },
+		// Presentation convention (mesh import + anim bootstrap paths), with
+		// the real imported idle sequence names (Quaternius take names differ
+		// per pack: Bat/Dragon idle via their Flying take, Skeleton/Slime have
+		// explicit Idles). Every reference null-safe: absent assets degrade to
+		// the bind pose.
+		struct FPresent { const TCHAR* Mesh; const TCHAR* Idle; };
+		static const TMap<FName, FPresent> MeshGroups = {
+			{ FName(TEXT("spirit_wolf")),         { TEXT("Monsters/SK_Skeleton"), TEXT("Monsters/SK_SkeletonSkeletonArmature_Skeleton_Idle") } },
+			{ FName(TEXT("corrupted_disciple")),  { TEXT("Human/SK_Human"),       TEXT("Human/SK_HumanHuman_Armature_Idle") } },
+			{ FName(TEXT("hollow_archer")),       { TEXT("Monsters/SK_Bat"),      TEXT("Monsters/SK_BatBatArmature_Bat_Flying") } },
+			{ FName(TEXT("stone_sentinel")),      { TEXT("Knight/SK_Knight"),     TEXT("Knight/SK_KnightHumanArmature_Idle") } },
+			{ FName(TEXT("ember_wisp")),          { TEXT("Monsters/SK_Slime"),    TEXT("Monsters/SK_SlimeArmature_Slime_Idle") } },
+			{ FName(TEXT("rootbound_keeper")),    { TEXT("Monsters/SK_Slime"),    TEXT("Monsters/SK_SlimeArmature_Slime_Idle") } },
+			{ FName(TEXT("bamboo_guardian")),     { TEXT("Knight/SK_Knight"),     TEXT("Knight/SK_KnightHumanArmature_Idle") } },
+			{ FName(TEXT("ashen_guardian")),      { TEXT("Knight/SK_Knight"),     TEXT("Knight/SK_KnightHumanArmature_Idle") } },
+			{ FName(TEXT("broken_guardian")),     { TEXT("Monsters/SK_Dragon"),   TEXT("Monsters/SK_DragonDragonArmature_Dragon_Flying") } },
 		};
-		if (const TCHAR* const* Group = MeshGroups.Find(Spec.EnemyId))
+		if (const FPresent* Group = MeshGroups.Find(Spec.EnemyId))
 		{
-			// Group[0] is already a TCHAR*; dereferencing it would pass one code unit.
-			const FString GroupPath = FString::Printf(TEXT("/Game/Qinglan/Characters/%s"), Group[0]);
+			const FString GroupPath = FString::Printf(TEXT("/Game/Qinglan/Characters/%s"), Group->Mesh);
 			const FString GroupDir = GroupPath.Left(GroupPath.Find(TEXT("/SK_")));
 			const FString GroupName = FPaths::GetBaseFilename(GroupDir);
 			Asset->Mesh = TSoftObjectPtr<USkeletalMesh>(FSoftObjectPath(GroupPath));
-			Asset->IdleAnimation = TSoftObjectPtr<UAnimSequence>(FSoftObjectPath(GroupDir / TEXT("AS_Idle")));
+			Asset->IdleAnimation = TSoftObjectPtr<UAnimSequence>(FSoftObjectPath(
+				FString::Printf(TEXT("/Game/Qinglan/Characters/%s"), Group->Idle)));
 			// The anim bootstrap names montages AM_<GroupFolder>_<Suffix>; the
 			// Human folder holds the player combo cuts, so humanoid enemies
 			// reuse the first cut as their attack swing.

@@ -12,12 +12,12 @@ class UWidgetBlueprint;
 class UWidgetTree;
 
 UCLASS()
-class UQinglanUIBootstrap : public UCommandlet
+class UQinglanUIBootstrapCommandlet : public UCommandlet
 {
 	GENERATED_BODY()
 
 public:
-	UQinglanUIBootstrap();
+	UQinglanUIBootstrapCommandlet();
 	virtual int32 Main(const FString& Params) override;
 
 private:

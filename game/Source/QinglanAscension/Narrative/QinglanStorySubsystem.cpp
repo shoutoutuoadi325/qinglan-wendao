@@ -92,29 +92,37 @@ namespace
 	const UQinglanStoryRegistry* LoadStoryRegistryOnce()
 	{
 		static TStrongObjectPtr<UQinglanStoryRegistry> Cached;
-		static bool bAttempted = false;
-		if (!bAttempted)
+		if (Cached.IsValid())
 		{
-			bAttempted = true;
-			// FString wrap first: FSoftObjectPath's TCHAR* constructor is explicit
-			// in some engine versions, the FString one never is. Brace init keeps
-			// this a variable even though FSoftObjectPath(Name) reads like a
-			// parenthesized parameter declarator (vexing parse).
-			const FString RegistrySoftPath(QinglanStoryRuntime::StoryRegistrySoftPath);
-			const TSoftObjectPtr<UQinglanStoryRegistry> Soft{FSoftObjectPath(RegistrySoftPath)};
-			UQinglanStoryRegistry* Loaded = Soft.LoadSynchronous();
-			if (Loaded != nullptr)
-			{
-				Cached = TStrongObjectPtr<UQinglanStoryRegistry>(Loaded);
-			}
-			else
-			{
-				// Missing asset (e.g. headless tests before STORY-002 imports
-				// content): every registry query degrades to empty, never crash.
-				UE_LOG(LogQinglanNarrative, Warning, TEXT("Story registry asset not found; narrative queries return empty"));
-			}
+			return Cached.Get();
 		}
-		return Cached.Get();
+		// Retry on every query instead of latching the first failure: the game
+		// instance pre-warms the registry asynchronously, and a query racing
+		// that warm-up (e.g. first-launch profile creation) must not cache the
+		// miss permanently. Truly-missing content logs once at Warning then at
+		// Verbose.
+		static bool bWarned = false;
+		const FString RegistrySoftPath(QinglanStoryRuntime::StoryRegistrySoftPath);
+		// StaticLoadObject logs its own failure reason; LoadSynchronous fails
+		// silently and the quiet null was hiding the actual loader error.
+		if (UQinglanStoryRegistry* Loaded = Cast<UQinglanStoryRegistry>(
+				StaticLoadObject(UQinglanStoryRegistry::StaticClass(), nullptr, *RegistrySoftPath)))
+		{
+			Cached = TStrongObjectPtr<UQinglanStoryRegistry>(Loaded);
+			return Loaded;
+		}
+		// Missing asset (e.g. headless tests before the importer runs):
+		// every registry query degrades to empty, never crash.
+		if (!bWarned)
+		{
+			UE_LOG(LogQinglanNarrative, Warning, TEXT("Story registry asset not found; narrative queries return empty"));
+			bWarned = true;
+		}
+		else
+		{
+			UE_LOG(LogQinglanNarrative, Verbose, TEXT("Story registry still missing"));
+		}
+		return nullptr;
 	}
 
 	/** Finds a scene in main scenes or side-quest stages; OutQuestId names the owning side quest. */

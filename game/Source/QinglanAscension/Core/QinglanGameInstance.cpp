@@ -175,6 +175,19 @@ void UQinglanGameInstance::Init()
 	Extra.Run = GetSubsystem<UQinglanRunSubsystem>();
 	Extra.Story = GetSubsystem<UQinglanStorySubsystem>();
 
+	// First launch creates profile slot 0 here rather than in StartFirstMap:
+	// the GameDefaultMap path (L_Hub) loads the map directly and never routes
+	// through StartFirstMap, and without an active slot the hub autosave has
+	// nothing to commit to. The benchmark frontend (docs/06 section 4) is not
+	// authored; when it exists this creation moves behind it.
+	if (UQinglanSaveSubsystem* Save = Extra.Save.Get())
+	{
+		if (IsFirstLaunch(this))
+		{
+			Save->CreateNewProfile(0);
+		}
+	}
+
 	// Early graphics: conservative detected preset (or the persisted preset the
 	// service returns once settings exist) applied before any heavy scene load
 	// (docs/06 section 4; task contract: DetectInitialSettings then ApplySettings).
@@ -252,16 +265,9 @@ void UQinglanGameInstance::StartFirstMap()
 	// shipping builds (docs/05 shipping section), so both paths go to the hub.
 	TravelToMap(this, GHubMapPath, bFirstLaunch ? GFirstLaunchOption : TEXT(""));
 #else
-	if (bFirstLaunch)
-	{
-		// First launch: offer the short hardware benchmark + preset preview
-		// before gameplay (docs/06 section 4); that frontend then travels on
-		// to the hub.
-		TravelToMap(this, GBenchmarkMapPath, GFirstLaunchOption);
-	}
-	else
-	{
-		TravelToMap(this, GHubMapPath, TEXT(""));
-	}
+	// The benchmark frontend map is not authored (docs/06 section 4 is a
+	// deferred nicety); both launch paths go straight to the hub. First-launch
+	// specifics (locale pick, profile creation) already ran above.
+	TravelToMap(this, GHubMapPath, bFirstLaunch ? GFirstLaunchOption : TEXT(""));
 #endif
 }

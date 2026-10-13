@@ -101,6 +101,42 @@ void AQinglanHubGameMode::BeginPlay()
 
 	UGameInstance* Instance = GetGameInstance();
 
+	// First arrival with no profile in any slot creates profile 0. This runs
+	// here rather than in the game instance Init because subsystem creation
+	// may not be complete during Init on the GameDefaultMap boot path; without
+	// an active slot the safe-boundary autosave below has nothing to commit.
+	if (Instance)
+	{
+		if (UQinglanSaveSubsystem* Save = Instance->GetSubsystem<UQinglanSaveSubsystem>())
+		{
+			bool bAnyProfile = false;
+			for (int32 Slot = 0; Slot < UQinglanSaveSubsystem::ProfileSlotCount; ++Slot)
+			{
+				bAnyProfile |= Save->HasProfile(Slot);
+			}
+			if (!bAnyProfile)
+			{
+				UE_LOG(LogQinglan, Log, TEXT("First launch: creating profile slot 0"));
+				Save->CreateNewProfile(0);
+			}
+			else if (Save->HasProfile(0))
+			{
+				// Boot default: continue from slot 0 (the profile-select menu is
+				// a UI feature; without a load the safe-boundary autosave would
+				// have no active slot on every non-first launch).
+				FText Notice;
+				if (Save->LoadProfile(0, Notice))
+				{
+					UE_LOG(LogQinglan, Log, TEXT("Continuing from profile slot 0"));
+				}
+				else
+				{
+					UE_LOG(LogQinglan, Warning, TEXT("Profile slot 0 failed to load: %s"), *Notice.ToString());
+				}
+			}
+		}
+	}
+
 	// Defensive diagnostic: entering the hub while an expedition is still open
 	// means the exit/banking flow was bypassed (blueprint section 1.5 banking
 	// rules; docs/03 progression and economy).

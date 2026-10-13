@@ -13,7 +13,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQinglanCultivationChanged, EQingla
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FQinglanCampaignFlagSet, FName, Flag);
 
 /**
- * Permanent profile state: cultivation, inventory, unlocks, flags, transactions.
+ * Permanent profile state: cultivation, inventory, unlocks, permanent
+ * equipment (relics, passives, talisman charges), flags, transactions.
  * Every mutation runs through this subsystem and is journaled into the save.
  */
 UCLASS()
@@ -31,6 +32,12 @@ public:
 	UFUNCTION(BlueprintPure) TArray<FName> GetEquippedTechniques() const;
 	UFUNCTION(BlueprintPure) bool IsSideQuestStageComplete(FName StageId) const;
 	UFUNCTION(BlueprintPure) bool HasReadRecord(FName RecordId) const;
+
+	// --- Permanent equipment queries (docs/03 sections 4-5) ---
+	UFUNCTION(BlueprintPure) TArray<FName> GetOwnedRelics() const;
+	UFUNCTION(BlueprintPure) FName GetEquippedRelic() const;
+	UFUNCTION(BlueprintPure) TArray<FName> GetOwnedPassives() const;
+	UFUNCTION(BlueprintPure) TArray<FName> GetEquippedPassives() const;
 
 	/** Requirements for the next rank, for UI preview. */
 	UFUNCTION(BlueprintPure) bool GetNextRankCost(int64& OutShards, int64& OutExtraMaterialCount, FName& OutExtraMaterialId) const;
@@ -53,6 +60,27 @@ public:
 	UFUNCTION(BlueprintCallable) bool TrySetEquippedTechniques(const TArray<FName>& TechniqueIds);
 	UFUNCTION(BlueprintCallable) void MarkRecordRead(FName RecordId);
 	UFUNCTION(BlueprintCallable) void MarkSideQuestStageComplete(FName StageId);
+
+	// --- Permanent equipment mutations (atomic, idempotent via transaction IDs) ---
+	/** Buys one relic for its VeinCrystalCost (docs/03 section 5); rejects unknown/owned ids. */
+	UFUNCTION(BlueprintCallable) bool TryPurchaseRelic(FName TransactionId, FName RelicId);
+	/** Equips one owned relic (limit 1); NAME_None unequips; never mid-expedition. */
+	UFUNCTION(BlueprintCallable) bool TryEquipRelic(FName RelicId);
+	/** Equips up to two owned passives (docs/03 section 4); never mid-expedition. */
+	UFUNCTION(BlueprintCallable) bool TrySetEquippedPassives(const TArray<FName>& PassiveIds);
+	/** Studies one passive manual (docs/03 section 4); rejects unknown/owned ids. */
+	UFUNCTION(BlueprintCallable) bool TryPurchasePassive(FName TransactionId, FName PassiveId);
+	/** Authored study cost (docs/03 section 4 lists no prices): 120 Shards + 2 Spirit Herbs. */
+	static constexpr int64 PassiveStudyCostShards = 120;
+	static constexpr int64 PassiveStudyCostHerbs = 2;
+
+	// --- Talisman charges (docs/03 section 5: expedition charges, free refill at the sanctuary) ---
+	UFUNCTION(BlueprintPure) void GetTalismanCharges(TMap<FName, int32>& OutCharges) const;
+	UFUNCTION(BlueprintPure) int32 GetTalismanChargeCount(FName TalismanId) const;
+	/** Consumes one charge; false (and no change) when none remain. */
+	UFUNCTION(BlueprintCallable) bool TryConsumeTalismanCharge(FName TalismanId);
+	/** Resets every catalog talisman to its authored charge count (sanctuary arrival). */
+	UFUNCTION(BlueprintCallable) void RefillTalismans();
 
 	// --- Narrative bridge (implemented with UQinglanStorySubsystem) ---
 	/** Mutates narrative state through the story subsystem's validated path. */
@@ -81,13 +109,15 @@ private:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	void ResetToFreshProfile();
 	/** Shared gate validator for TryBreakthrough and CanAttemptBreakthrough. */
-	bool CheckBreakthroughGate(struct FText& OutBlockingReason) const;
+	bool CheckBreakthroughGate(class FText& OutBlockingReason) const;
 	/** Boss/trial proofs accept either the campaign proof flag or the story flag. */
 	bool IsBambooCleared() const;
 	bool IsAshenCleared() const;
 	bool IsGoldenCoreTrialWon() const;
 	/** Adds a proof flag without broadcasting; true when newly added. */
 	bool SetCampaignFlagInternal(FName Flag);
+	/** Loadout gate shared by equipment swaps: sanctuary/entrance shrine only (docs/03 sections 3-5). */
+	bool IsLoadoutLockedByExpedition() const;
 
 	FQinglanInventory Inventory;
 	EQinglanStage Stage = EQinglanStage::QiRefining;
@@ -95,6 +125,11 @@ private:
 	TSet<FName> CampaignFlags;
 	TSet<FName> UnlockedTechniques;
 	TArray<FName> EquippedTechniques;
+	TSet<FName> OwnedRelics;
+	FName EquippedRelic = NAME_None;
+	TSet<FName> OwnedPassives;
+	TArray<FName> EquippedPassives;
+	TMap<FName, int32> TalismanCharges;
 	TSet<FName> CommittedTransactionIds;
 	TSet<FName> ReadRecords;
 	TSet<FName> CompletedSideStages;

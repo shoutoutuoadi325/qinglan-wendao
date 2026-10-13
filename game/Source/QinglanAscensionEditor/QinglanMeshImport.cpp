@@ -34,7 +34,6 @@ namespace
 
 UQinglanMeshImport::UQinglanMeshImport()
 {
-	LogToClipsAndLog = true;
 }
 
 int32 UQinglanMeshImport::Main(const FString& Params)
@@ -90,21 +89,20 @@ bool UQinglanMeshImport::ImportSkeletalFBX(const FString& SourceFile, const FStr
 {
 	UFbxImportUI* Options = NewObject<UFbxImportUI>(GetTransientPackage());
 	Options->bImportMesh = true;
-	Options->MeshTypeToImport = FBX_IMPORT_TYPE_SKEL_MESH;
+	Options->MeshTypeToImport = FBXIT_SkeletalMesh; // UE 5.8 EFBXImportType (FBX_IMPORT_TYPE_* macros are gone)
 	Options->bImportAsSkeletal = true;
 	Options->bImportAnimations = true;       // pulls every embedded take
 	Options->bImportTextures = false;        // materials handled by our master set
 	Options->bImportMaterials = false;
-	Options->bConvertSceneUnit = true;
+	// UE 5.8: UFbxImportUI no longer exposes bConvertSceneUnit (unit conversion is the importer default).
 	if (Options->SkeletalMeshImportData)
 	{
-		Options->SkeletalMeshImportData->bTransformVertexToNormal = true; // smooth low-poly normals
-		Options->SkeletalMeshImportData->ImportUniformScale = 1.0f;
+		Options->SkeletalMeshImportData->bComputeWeightedNormals = true; // smooth low-poly normals (bTransformVertexToNormal is gone)
 	}
 	UAssetImportTask* Task = MakeTask(SourceFile, DestPath, AssetName, Options);
 	FAssetToolsModule::GetModule().Get().ImportAssetTasks({ Task });
-	const bool bOk = Task->ImportedObjects.Num() > 0;
-	UE_LOG(LogTemp, Log, TEXT("skeletal import %s -> %d objects"), *AssetName, Task->ImportedObjects.Num());
+	const bool bOk = Task->GetObjects().Num() > 0; // UE 5.8: ImportedObjects replaced by GetObjects()
+	UE_LOG(LogTemp, Log, TEXT("skeletal import %s -> %d objects"), *AssetName, Task->GetObjects().Num());
 	return bOk;
 }
 
@@ -112,18 +110,18 @@ bool UQinglanMeshImport::ImportStaticFBX(const FString& SourceFile, const FStrin
 {
 	UFbxImportUI* Options = NewObject<UFbxImportUI>(GetTransientPackage());
 	Options->bImportMesh = true;
-	Options->MeshTypeToImport = FBX_IMPORT_TYPE_STATIC_MESH;
+	Options->MeshTypeToImport = FBXIT_StaticMesh; // UE 5.8 EFBXImportType (FBX_IMPORT_TYPE_* macros are gone)
 	Options->bImportAsSkeletal = false;
 	Options->bImportTextures = false;
 	Options->bImportMaterials = false;
-	Options->bConvertSceneUnit = true;
+	// UE 5.8: UFbxImportUI no longer exposes bConvertSceneUnit (unit conversion is the importer default).
 	if (Options->StaticMeshImportData)
 	{
 		Options->StaticMeshImportData->bCombineMeshes = false;
 	}
 	UAssetImportTask* Task = MakeTask(SourceFile, DestPath, AssetName, Options);
 	FAssetToolsModule::GetModule().Get().ImportAssetTasks({ Task });
-	const bool bOk = Task->ImportedObjects.Num() > 0;
-	UE_LOG(LogTemp, Log, TEXT("static import %s -> %d objects"), *AssetName, Task->ImportedObjects.Num());
+	const bool bOk = Task->GetObjects().Num() > 0; // UE 5.8: ImportedObjects replaced by GetObjects()
+	UE_LOG(LogTemp, Log, TEXT("static import %s -> %d objects"), *AssetName, Task->GetObjects().Num());
 	return bOk;
 }

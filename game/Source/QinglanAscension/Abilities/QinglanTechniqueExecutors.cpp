@@ -368,17 +368,19 @@ void UQinglanTechniqueExecutors::GatherVictims(const FQinglanTechniqueCastContex
 		OutVictims.Add(Victim);
 	}
 	// Deterministic: nearest first, then stable name order (no RNG).
-	OutVictims.Sort([Center](const AActor* A, const AActor* B)
+	// TArray::Sort wraps the predicate in TDereferenceWrapper, so the lambda
+	// receives dereferenced elements (AActor&), not the stored pointers.
+	OutVictims.Sort([Center](AActor& A, AActor& B)
 	{
-		const FVector LocA = A ? A->GetActorLocation() : Center;
-		const FVector LocB = B ? B->GetActorLocation() : Center;
+		const FVector LocA = A.GetActorLocation();
+		const FVector LocB = B.GetActorLocation();
 		const float DistA = FVector::DistSquared(LocA, Center);
 		const float DistB = FVector::DistSquared(LocB, Center);
 		if (!FMath::IsNearlyEqual(DistA, DistB))
 		{
 			return DistA < DistB;
 		}
-		return A && B ? A->GetName() < B->GetName() : A != nullptr;
+		return A.GetName() < B.GetName(); // stable name tiebreak (FString lexical)
 	});
 }
 

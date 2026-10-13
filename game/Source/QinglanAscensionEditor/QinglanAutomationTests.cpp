@@ -15,6 +15,7 @@
 #include "Abilities/QinglanBlessingLibrary.h"
 #include "Combat/QinglanCombatComponent.h"
 #include "Combat/QinglanDamageMath.h"
+#include "Narrative/QinglanEndingRules.h"
 #include "Persistence/QinglanSaveMigration.h"
 #include "Persistence/QinglanSaveSubsystem.h"
 #include "Progression/QinglanEconomyLibrary.h"
@@ -22,9 +23,15 @@
 #include "Progression/QinglanProgressionTables.h"
 #include "Progression/QinglanRunSubsystem.h" // FQinglanBlessing (MakeBlessingEntry out-param)
 
-#include "Engine/EngineDefines.h"
+#include "Dom/JsonObject.h"
+#include "EngineDefines.h" // UE 5.8: lives at Runtime/Engine/Public root, not Engine/
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "HAL/FileManager.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
 #include "UObject/UObjectGlobals.h"
 
 namespace
@@ -136,12 +143,92 @@ namespace
 		Save->Narrative.EffectiveAgreements.Add(FName(TEXT("SQ03")), FName(TEXT("sq03_rota_hub")));
 		return Save;
 	}
+
+	// ---------------------------------------------------------------------------
+	// JSON drift-guard support (Qinglan.Narrative.EndingRulesJsonDrift):
+	// minimal accessors in the importer's style (QinglanDataImportCommandlet.cpp
+	// JStr/JBool/JNameArray; UE 5.8 GetFieldUntyped is the untyped getter).
+	// ---------------------------------------------------------------------------
+
+	FString JsonString(const TSharedRef<FJsonObject>& Object, const TCHAR* Field)
+	{
+		return Object->HasField(Field) ? Object->GetFieldUntyped(Field)->AsString() : FString();
+	}
+
+	bool JsonBool(const TSharedRef<FJsonObject>& Object, const TCHAR* Field)
+	{
+		bool bOut = false;
+		return Object->HasField(Field) && Object->GetFieldUntyped(Field)->TryGetBool(bOut) && bOut;
+	}
+
+	TArray<FName> JsonNameArray(const TSharedRef<FJsonObject>& Object, const TCHAR* Field)
+	{
+		TArray<FName> Out;
+		if (!Object->HasField(Field)) { return Out; }
+		for (const TSharedPtr<FJsonValue>& Value : Object->GetFieldUntyped(Field)->AsArray())
+		{
+			if (Value.IsValid() && !Value->IsNull())
+			{
+				Out.Add(FName(*Value->AsString()));
+			}
+		}
+		return Out;
+	}
+
+	TSharedPtr<FJsonObject> JsonObject(const TSharedRef<FJsonObject>& Object, const TCHAR* Field)
+	{
+		if (!Object->HasField(Field)) { return nullptr; }
+		return Object->GetFieldUntyped(Field)->AsObject();
+	}
+
+	/**
+	 * Payload ending token -> the hardcoded commit flag it must set
+	 * (data/story/main-late.json CH06_S04 ending_id values are END_OPEN /
+	 * END_SEAL / END_SHARED; QinglanEndingRules.h spells the commit flags in
+	 * lowercase). Local mapping, not QinglanEnding::EndingIdToEnum: the runtime
+	 * module's namespace functions are not QINGLANASCENSION_API-exported, so -
+	 * like QinglanEndingGateMirror above - the spec encodes the mapping beside
+	 * itself and compares against the header's inline constants directly.
+	 */
+	FName EndingFlagForToken(const FString& Token)
+	{
+		if (Token == TEXT("END_OPEN")) { return FName(QinglanEnding::EndingOpenId); }
+		if (Token == TEXT("END_SEAL")) { return FName(QinglanEnding::EndingSealId); }
+		if (Token == TEXT("END_SHARED")) { return FName(QinglanEnding::EndingSharedId); }
+		return NAME_None;
+	}
+
+	/**
+	 * Resolves the repo's data/story/main-late.json at runtime. Editor sessions
+	 * run from the project dir (game/, with data/ a repo sibling); commandlet
+	 * sessions run from game/Binaries/<platform>; the literal relative fallback
+	 * covers a process dir matching either. Empty when this machine carries no
+	 * repo checkout (packaged builds, some CI), which skips the drift guard.
+	 */
+	FString FindMainLateJsonPath()
+	{
+		const FString Candidates[] =
+		{
+			FPaths::ProjectDir() / TEXT("../data/story/main-late.json"),
+			FPaths::LaunchDir() / TEXT("../../../data/story/main-late.json"),
+			FString(TEXT("../../../data/story/main-late.json"))
+		};
+		for (const FString& Candidate : Candidates)
+		{
+			if (IFileManager::Get().FileExists(*Candidate))
+			{
+				return Candidate;
+			}
+		}
+		return FString();
+	}
 } // namespace
 
 // ---------------------------------------------------------------------------
 // Qinglan.Combat.DamageMath - docs/02 section 5 prototype + rounding + minimum
 // ---------------------------------------------------------------------------
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanDamageMath, "Qinglan.Combat.DamageMath", QinglanTestFlags)
+bool FAutomationTestQinglanDamageMath::RunTest(const FString& Parameters)
 {
 	// Prototype check (docs/02 section 5): Power 20, coef 1.5, flat 5, Defense 10 -> 32.
 	const float Raw = PrototypeRawDamage();
@@ -171,6 +258,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanDamageMath, "Qinglan.Comb
 // Qinglan.Combat.HitKeyDedupe - (CastId, victim, ordinal) duplicates rejected
 // ---------------------------------------------------------------------------
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanHitKeyDedupe, "Qinglan.Combat.HitKeyDedupe", QinglanTestFlags)
+bool FAutomationTestQinglanHitKeyDedupe::RunTest(const FString& Parameters)
 {
 	// Pure key behaviour (docs/02 section 3).
 	const FQinglanCastId Cast{ 4, 9 };
@@ -203,6 +291,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanHitKeyDedupe, "Qinglan.Co
 // Qinglan.Combat.Conduct - Thunder vs Wet: exactly one 1.25x, consumes Wet
 // ---------------------------------------------------------------------------
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanConduct, "Qinglan.Combat.ConductSingleApplication", QinglanTestFlags)
+bool FAutomationTestQinglanConduct::RunTest(const FString& Parameters)
 {
 	FQinglanCombatWorld World;
 	if (!TestNotNull(TEXT("Combat component"), World.Combat))
@@ -230,6 +319,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanConduct, "Qinglan.Combat.
 // Qinglan.Combat.Burn - three 4-damage ticks, refresh resets but never stacks
 // ---------------------------------------------------------------------------
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanBurn, "Qinglan.Combat.BurnThreeTickRefresh", QinglanTestFlags)
+bool FAutomationTestQinglanBurn::RunTest(const FString& Parameters)
 {
 	FQinglanCombatWorld World;
 	if (!TestNotNull(TEXT("Combat component"), World.Combat))
@@ -276,6 +366,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanBurn, "Qinglan.Combat.Bur
 // Qinglan.Combat.Barrier - stronger replaces weaker, absorbs before health
 // ---------------------------------------------------------------------------
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanBarrier, "Qinglan.Combat.BarrierReplaceAbsorb", QinglanTestFlags)
+bool FAutomationTestQinglanBarrier::RunTest(const FString& Parameters)
 {
 	FQinglanCombatWorld World;
 	if (!TestNotNull(TEXT("Combat component"), World.Combat))
@@ -310,6 +401,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanBarrier, "Qinglan.Combat.
 // Qinglan.Progression.RankCostsAndBreakthroughGates - docs/03 section 1
 // ---------------------------------------------------------------------------
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanRankCosts, "Qinglan.Progression.RankCostsAndBreakthroughGates", QinglanTestFlags)
+bool FAutomationTestQinglanRankCosts::RunTest(const FString& Parameters)
 {
 	// --- Pure table checks -----------------------------------------------------
 	struct FExpected { EQinglanStage Stage; int32 Rank; int64 Shards; const TCHAR* Material; };
@@ -368,7 +460,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanRankCosts, "Qinglan.Progr
 	};
 
 	TestFalse(TEXT("Rank purchase without funds is rejected"), Profile->TryAdvanceRank(FName(TEXT("rank0"))));
-	TestEqual(TEXT("Rejected purchase changes nothing"), Profile->GetInventory().SpiritShards, 0);
+	TestEqual(TEXT("Rejected purchase changes nothing"), Profile->GetInventory().SpiritShards, static_cast<int64>(0));
 
 	const int64 QiCosts[3] = { 80, 120, 180 };
 	for (int32 RankIndex = 0; RankIndex < 3; ++RankIndex)
@@ -376,8 +468,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanRankCosts, "Qinglan.Progr
 		TestTrue(TEXT("Funds granted"), Grant(*FString::Printf(TEXT("funds_qi_%d"), RankIndex), QiCosts[RankIndex], 1, 0));
 		TestTrue(TEXT("Rank purchased"), Profile->TryAdvanceRank(*FString::Printf(TEXT("rank_qi_%d"), RankIndex)));
 		TestEqual(TEXT("Rank advanced"), Profile->GetCultivationRank(), RankIndex + 1);
-		TestEqual(TEXT("Rank purchase spends the shards"), Profile->GetInventory().SpiritShards, 0);
-		TestEqual(TEXT("Rank purchase spends the material"), Profile->GetInventory().SpiritHerb, 0);
+		TestEqual(TEXT("Rank purchase spends the shards"), Profile->GetInventory().SpiritShards, static_cast<int64>(0));
+		TestEqual(TEXT("Rank purchase spends the material"), Profile->GetInventory().SpiritHerb, static_cast<int64>(0));
 	}
 	TestFalse(TEXT("No fourth Qi rank purchasable"), Profile->TryAdvanceRank(FName(TEXT("rank_qi_3"))));
 
@@ -412,6 +504,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanRankCosts, "Qinglan.Progr
 // Qinglan.Economy.BankingMultipliers - docs/03 section 6 (0.7 floor per stack)
 // ---------------------------------------------------------------------------
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanBanking, "Qinglan.Economy.BankingMultipliers", QinglanTestFlags)
+bool FAutomationTestQinglanBanking::RunTest(const FString& Parameters)
 {
 	TestEqual(TEXT("Victory multiplier 1.0"), UQinglanEconomyLibrary::GetBankingMultiplier(true, false), UQinglanEconomyLibrary::BankingMultiplierVictory);
 	TestEqual(TEXT("Voluntary retreat multiplier 0.7"), UQinglanEconomyLibrary::GetBankingMultiplier(false, true), UQinglanEconomyLibrary::BankingMultiplierVoluntaryRetreat);
@@ -424,37 +517,37 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanBanking, "Qinglan.Economy
 	Loot.VeinCrystal = 3;
 
 	FQinglanInventory Banked = UQinglanEconomyLibrary::ApplyBankingMultiplier(Loot, true, false);
-	TestEqual(TEXT("Victory banks everything"), Banked.SpiritShards, 185);
-	TestEqual(TEXT("Victory herbs"), Banked.SpiritHerb, 1);
-	TestEqual(TEXT("Victory crystals"), Banked.VeinCrystal, 3);
+	TestEqual(TEXT("Victory banks everything"), Banked.SpiritShards, static_cast<int64>(185));
+	TestEqual(TEXT("Victory herbs"), Banked.SpiritHerb, static_cast<int64>(1));
+	TestEqual(TEXT("Victory crystals"), Banked.VeinCrystal, static_cast<int64>(3));
 
 	// Floored per stack: 185*0.7 = 129.5 -> 129, 1*0.7 = 0.7 -> 0, 3*0.7 = 2.1 -> 2.
 	Banked = UQinglanEconomyLibrary::ApplyBankingMultiplier(Loot, false, true);
-	TestEqual(TEXT("Retreat shards floored"), Banked.SpiritShards, 129);
-	TestEqual(TEXT("Retreat floors a 1-herb stack to zero"), Banked.SpiritHerb, 0);
-	TestEqual(TEXT("Retreat crystals floored"), Banked.VeinCrystal, 2);
+	TestEqual(TEXT("Retreat shards floored"), Banked.SpiritShards, static_cast<int64>(129));
+	TestEqual(TEXT("Retreat floors a 1-herb stack to zero"), Banked.SpiritHerb, static_cast<int64>(0));
+	TestEqual(TEXT("Retreat crystals floored"), Banked.VeinCrystal, static_cast<int64>(2));
 
 	// Defeat: 92.5 -> 92, 0.5 -> 0, 1.5 -> 1.
 	Banked = UQinglanEconomyLibrary::ApplyBankingMultiplier(Loot, false, false);
-	TestEqual(TEXT("Defeat shards floored"), Banked.SpiritShards, 92);
-	TestEqual(TEXT("Defeat herbs floored"), Banked.SpiritHerb, 0);
-	TestEqual(TEXT("Defeat crystals floored"), Banked.VeinCrystal, 1);
+	TestEqual(TEXT("Defeat shards floored"), Banked.SpiritShards, static_cast<int64>(92));
+	TestEqual(TEXT("Defeat herbs floored"), Banked.SpiritHerb, static_cast<int64>(0));
+	TestEqual(TEXT("Defeat crystals floored"), Banked.VeinCrystal, static_cast<int64>(1));
 
 	// Payout table parity with docs/03 section 2 (base totals include room rewards).
 	FQinglanInventory Payout;
 	TestTrue(TEXT("Bamboo payout exists"), UQinglanEconomyLibrary::GetExpeditionPayout(FName(UQinglanEconomyLibrary::BambooRealmIdText), true, Payout));
-	TestEqual(TEXT("Bamboo first clear shards"), Payout.SpiritShards, 300); // 180 base + 120 bonus
-	TestEqual(TEXT("Bamboo first clear herbs"), Payout.SpiritHerb, 3);
-	TestEqual(TEXT("Bamboo first clear crystals"), Payout.VeinCrystal, 1);
+	TestEqual(TEXT("Bamboo first clear shards"), Payout.SpiritShards, static_cast<int64>(300)); // 180 base + 120 bonus
+	TestEqual(TEXT("Bamboo first clear herbs"), Payout.SpiritHerb, static_cast<int64>(3));
+	TestEqual(TEXT("Bamboo first clear crystals"), Payout.VeinCrystal, static_cast<int64>(1));
 	TestTrue(TEXT("Bamboo repeat payout"), UQinglanEconomyLibrary::GetExpeditionPayout(FName(UQinglanEconomyLibrary::BambooRealmIdText), false, Payout));
-	TestEqual(TEXT("Bamboo repeat shards"), Payout.SpiritShards, 180);
-	TestEqual(TEXT("Bamboo repeat herbs"), Payout.SpiritHerb, 2);
+	TestEqual(TEXT("Bamboo repeat shards"), Payout.SpiritShards, static_cast<int64>(180));
+	TestEqual(TEXT("Bamboo repeat herbs"), Payout.SpiritHerb, static_cast<int64>(2));
 	TestTrue(TEXT("Ashen first clear payout"), UQinglanEconomyLibrary::GetExpeditionPayout(FName(UQinglanEconomyLibrary::AshenRealmIdText), true, Payout));
-	TestEqual(TEXT("Ashen first clear shards"), Payout.SpiritShards, 500); // 300 base + 200 bonus
-	TestEqual(TEXT("Ashen first clear crystals"), Payout.VeinCrystal, 3);
+	TestEqual(TEXT("Ashen first clear shards"), Payout.SpiritShards, static_cast<int64>(500)); // 300 base + 200 bonus
+	TestEqual(TEXT("Ashen first clear crystals"), Payout.VeinCrystal, static_cast<int64>(3));
 	UQinglanEconomyLibrary::GetTutorialPayout(Payout);
-	TestEqual(TEXT("Tutorial pays 80 shards"), Payout.SpiritShards, 80);
-	TestEqual(TEXT("Tutorial pays 1 herb"), Payout.SpiritHerb, 1);
+	TestEqual(TEXT("Tutorial pays 80 shards"), Payout.SpiritShards, static_cast<int64>(80));
+	TestEqual(TEXT("Tutorial pays 1 herb"), Payout.SpiritHerb, static_cast<int64>(1));
 	TestFalse(TEXT("Unknown realm has no payout"), UQinglanEconomyLibrary::GetExpeditionPayout(FName(TEXT("nowhere")), true, Payout));
 
 	// First-clear idempotency keys are stable and boss-scoped (docs/03 section 6).
@@ -468,6 +561,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanBanking, "Qinglan.Economy
 // Qinglan.Abilities.Blessings - group mutual exclusion + one-stack no re-offer
 // ---------------------------------------------------------------------------
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanBlessings, "Qinglan.Abilities.BlessingExclusion", QinglanTestFlags)
+bool FAutomationTestQinglanBlessings::RunTest(const FString& Parameters)
 {
 	// NOTE: QinglanBlessingGroups constants are module-local symbols, so the
 	// group ids are spelled out here ("sword_offense" etc., docs/03 section 5).
@@ -525,6 +619,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanBlessings, "Qinglan.Abili
 // Qinglan.Narrative.EndingGating - shared requirement + effective-only preview
 // ---------------------------------------------------------------------------
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanEndingGating, "Qinglan.Narrative.EndingGating", QinglanTestFlags)
+bool FAutomationTestQinglanEndingGating::RunTest(const FString& Parameters)
 {
 	using namespace QinglanEndingGateMirror;
 
@@ -567,6 +662,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanEndingGating, "Qinglan.Na
 // Qinglan.Persistence.SaveChecksumRoundtrip - roundtrip + corrupt + future schema
 // ---------------------------------------------------------------------------
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanSaveRoundtrip, "Qinglan.Persistence.SaveChecksumRoundtrip", QinglanTestFlags)
+bool FAutomationTestQinglanSaveRoundtrip::RunTest(const FString& Parameters)
 {
 	UQinglanSaveSubsystem* SaveSubsystem = NewObject<UQinglanSaveSubsystem>(GetTransientPackage());
 	if (!TestNotNull(TEXT("Save subsystem"), SaveSubsystem))
@@ -586,7 +682,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanSaveRoundtrip, "Qinglan.P
 	{
 		return false;
 	}
-	TestEqual(TEXT("Checksum mirrored onto the object"), Loaded->BodyChecksum != 0ull, true);
+	TestTrue(TEXT("Checksum mirrored onto the object"), Loaded->BodyChecksum != 0ull);
 	TestEqual(TEXT("Profile survives roundtrip"), Loaded->ProfileId, Save->ProfileId);
 	TestEqual(TEXT("Sequence survives roundtrip"), Loaded->SaveSequence, Save->SaveSequence);
 	TestEqual(TEXT("Shards survive roundtrip"), Loaded->Inventory.SpiritShards, Save->Inventory.SpiritShards);
@@ -630,6 +726,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanSaveRoundtrip, "Qinglan.P
 // Qinglan.Persistence.TransactionIdempotency - docs/03 section 6
 // ---------------------------------------------------------------------------
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanTransactions, "Qinglan.Persistence.TransactionIdempotency", QinglanTestFlags)
+bool FAutomationTestQinglanTransactions::RunTest(const FString& Parameters)
 {
 	UQinglanProfileSubsystem* Profile = NewObject<UQinglanProfileSubsystem>(GetTransientPackage());
 	if (!TestNotNull(TEXT("Profile subsystem"), Profile))
@@ -643,8 +740,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanTransactions, "Qinglan.Pe
 	Grant.SpiritHerb = 1;
 	TestTrue(TEXT("Grant commits"), Profile->TryGrant(FName(TEXT("tx.grant")), Grant));
 	TestTrue(TEXT("Grant replay reports success"), Profile->TryGrant(FName(TEXT("tx.grant")), Grant));
-	TestEqual(TEXT("Grant replay does not re-award shards"), Profile->GetInventory().SpiritShards, 80);
-	TestEqual(TEXT("Grant replay does not re-award herbs"), Profile->GetInventory().SpiritHerb, 1);
+	TestEqual(TEXT("Grant replay does not re-award shards"), Profile->GetInventory().SpiritShards, static_cast<int64>(80));
+	TestEqual(TEXT("Grant replay does not re-award herbs"), Profile->GetInventory().SpiritHerb, static_cast<int64>(1));
 	TestTrue(TEXT("Transaction is journaled"), Profile->WasTransactionCommitted(FName(TEXT("tx.grant"))));
 	TestFalse(TEXT("Unknown transaction is not journaled"), Profile->WasTransactionCommitted(FName(TEXT("tx.other"))));
 
@@ -654,14 +751,14 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanTransactions, "Qinglan.Pe
 	Cost.SpiritHerb = 1;
 	TestTrue(TEXT("Spend commits"), Profile->TrySpend(FName(TEXT("tx.spend")), Cost));
 	TestTrue(TEXT("Spend replay reports success"), Profile->TrySpend(FName(TEXT("tx.spend")), Cost));
-	TestEqual(TEXT("Spend replay deducts nothing extra"), Profile->GetInventory().SpiritShards, 0);
-	TestEqual(TEXT("Spend replay deducts no extra material"), Profile->GetInventory().SpiritHerb, 0);
+	TestEqual(TEXT("Spend replay deducts nothing extra"), Profile->GetInventory().SpiritShards, static_cast<int64>(0));
+	TestEqual(TEXT("Spend replay deducts no extra material"), Profile->GetInventory().SpiritHerb, static_cast<int64>(0));
 
 	// Insufficient funds: atomic rejection.
 	FQinglanInventory OneShard;
 	OneShard.SpiritShards = 1;
 	TestFalse(TEXT("Insufficient spend rejected"), Profile->TrySpend(FName(TEXT("tx.broke")), OneShard));
-	TestEqual(TEXT("Rejected spend changes nothing"), Profile->GetInventory().SpiritShards, 0);
+	TestEqual(TEXT("Rejected spend changes nothing"), Profile->GetInventory().SpiritShards, static_cast<int64>(0));
 	TestFalse(TEXT("Rejected spend is not journaled"), Profile->WasTransactionCommitted(FName(TEXT("tx.broke"))));
 
 	// Negative and overflowing grants are rejected (docs/03 section 6).
@@ -682,5 +779,177 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanTransactions, "Qinglan.Pe
 	TestTrue(TEXT("Already-owned unlock stays a no-op success"), Profile->UnlockTechnique(FName(TEXT("tx.tech2")), FName(TEXT("mist_step"))));
 	TestTrue(TEXT("Unlocked technique is owned"), Profile->IsTechniqueUnlocked(FName(TEXT("mist_step"))));
 	TestFalse(TEXT("Unknown technique id rejected"), Profile->UnlockTechnique(FName(TEXT("tx.tech3")), FName(TEXT("not_a_technique"))));
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// Qinglan.Narrative.EndingRulesJsonDrift - hardcoded ending constants must
+// match the authoritative CH06_S04 choice payloads in data/story/main-late.json
+// (blueprint section 6 risk 3 "Unverifiable contract drift"; QinglanEndingRules.h
+// header cites this exact file as its data source)
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanEndingRulesJsonDrift, "Qinglan.Narrative.EndingRulesJsonDrift", QinglanTestFlags)
+bool FAutomationTestQinglanEndingRulesJsonDrift::RunTest(const FString& Parameters)
+{
+	// The registry JSON drifts fastest; this spec loads the repo file at runtime
+	// and asserts Narrative/QinglanEndingRules.h still agrees. Machines without
+	// a checkout skip it (a missing file is a packaging fact, not a drift).
+	const FString StoryPath = FindMainLateJsonPath();
+	if (StoryPath.IsEmpty())
+	{
+		AddInfo(TEXT("data/story/main-late.json not found beside the project or binaries dir; skipping the JSON drift guard"));
+		return true;
+	}
+
+	FString FileText;
+	if (!TestTrue(TEXT("main-late.json loads"), FFileHelper::LoadFileToString(FileText, *StoryPath)))
+	{
+		return false;
+	}
+	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(FileText);
+	TSharedPtr<FJsonObject> Root;
+	if (!TestTrue(TEXT("main-late.json parses"), FJsonSerializer::Deserialize(Reader, Root) && Root.IsValid() && Reader->GetErrorMessage().IsEmpty()))
+	{
+		return false;
+	}
+
+	// Locate CH06_S04 (the ending decision platform scene).
+	TSharedPtr<FJsonObject> Scene04;
+	if (Root->HasField(TEXT("scenes")))
+	{
+		for (const TSharedPtr<FJsonValue>& Value : Root->GetFieldUntyped(TEXT("scenes"))->AsArray())
+		{
+			const TSharedPtr<FJsonObject> Scene = Value->AsObject();
+			if (Scene.IsValid() && JsonString(Scene.ToSharedRef(), TEXT("id")) == TEXT("CH06_S04"))
+			{
+				Scene04 = Scene;
+				break;
+			}
+		}
+	}
+	if (!TestTrue(TEXT("CH06_S04 present"), Scene04.IsValid()))
+	{
+		return false;
+	}
+	const TSharedRef<FJsonObject> Scene = Scene04.ToSharedRef();
+
+	// The scene itself gates on Shen's release (QinglanEnding::ShenReleasedFlag;
+	// blueprint section 2.3 "All require mq_shen_released").
+	TestTrue(TEXT("CH06_S04 prerequisites carry the hardcoded Shen release flag"),
+		JsonNameArray(Scene, TEXT("prerequisites")).Contains(FName(QinglanEnding::ShenReleasedFlag)));
+
+	// Split the ending choices into preview_ending / confirm_ending payloads.
+	TArray<TSharedRef<FJsonObject>> PreviewChoices;
+	TArray<TSharedRef<FJsonObject>> ConfirmChoices;
+	if (Scene->HasField(TEXT("choices")))
+	{
+		for (const TSharedPtr<FJsonValue>& Value : Scene->GetFieldUntyped(TEXT("choices"))->AsArray())
+		{
+			const TSharedPtr<FJsonObject> Choice = Value->AsObject();
+			if (!Choice.IsValid())
+			{
+				continue;
+			}
+			const TSharedPtr<FJsonObject> Action = JsonObject(Choice.ToSharedRef(), TEXT("action"));
+			if (!Action.IsValid())
+			{
+				continue;
+			}
+			const FString Type = JsonString(Action.ToSharedRef(), TEXT("type"));
+			if (Type == TEXT("preview_ending"))
+			{
+				PreviewChoices.Add(Choice.ToSharedRef());
+			}
+			else if (Type == TEXT("confirm_ending"))
+			{
+				ConfirmChoices.Add(Choice.ToSharedRef());
+			}
+		}
+	}
+	TestEqual(TEXT("Three authored endings to preview"), PreviewChoices.Num(), 3);
+	TestEqual(TEXT("Three authored endings to confirm"), ConfirmChoices.Num(), 3);
+
+	// Mutual exclusivity: every confirm payload lists exactly the three
+	// hardcoded commit flags (QinglanEnding::Ending*Id).
+	TArray<FName> ExclusiveSet;
+	ExclusiveSet.Add(FName(QinglanEnding::EndingOpenId));
+	ExclusiveSet.Add(FName(QinglanEnding::EndingSealId));
+	ExclusiveSet.Add(FName(QinglanEnding::EndingSharedId));
+	TArray<FName> SharedAgreementSet;
+	for (int32 FlagIndex = 0; FlagIndex < QinglanEnding::SharedAgreementFlagCount; ++FlagIndex)
+	{
+		SharedAgreementSet.Add(FName(QinglanEnding::SharedAgreementFlags[FlagIndex]));
+	}
+
+	for (const TSharedRef<FJsonObject>& Confirm : ConfirmChoices)
+	{
+		const TSharedRef<FJsonObject> Action = JsonObject(Confirm, TEXT("action")).ToSharedRef();
+		const FString EndingToken = JsonString(Action, TEXT("ending_id"));
+		const FName EndingFlag = EndingFlagForToken(EndingToken);
+		if (!TestTrue(FString::Printf(TEXT("Payload ending_id %s maps to a hardcoded ending flag"), *EndingToken), EndingFlag != NAME_None))
+		{
+			continue;
+		}
+		// The choice sets exactly the commit flag the hardcoded rules derive.
+		TestTrue(TEXT("Confirm choice sets its hardcoded commit flag"),
+			JsonNameArray(Confirm, TEXT("sets_flags")).Contains(EndingFlag));
+		TestTrue(TEXT("mutually_exclusive_flags is exactly the three hardcoded ending flags"),
+			SameNameArray(JsonNameArray(Action, TEXT("mutually_exclusive_flags")), ExclusiveSet));
+		// ConfirmEnding hardcodes the warning gate and the one-time commit.
+		TestTrue(TEXT("requires_warning_acknowledgment stays mandatory"), JsonBool(Action, TEXT("requires_warning_acknowledgment")));
+		TestTrue(TEXT("commit_once stays mandatory"), JsonBool(Action, TEXT("commit_once")));
+		// requires_preview names a preview_ending of the SAME ending in this
+		// scene (ConfirmEnding only accepts endings it previewed).
+		const FString RequiresPreview = JsonString(Action, TEXT("requires_preview"));
+		TestFalse(TEXT("requires_preview is authored"), RequiresPreview.IsEmpty());
+		bool bPreviewMatches = false;
+		for (const TSharedRef<FJsonObject>& Preview : PreviewChoices)
+		{
+			const TSharedPtr<FJsonObject> PreviewAction = JsonObject(Preview, TEXT("action"));
+			if (JsonString(Preview, TEXT("id")) == RequiresPreview && PreviewAction.IsValid()
+				&& JsonString(PreviewAction.ToSharedRef(), TEXT("ending_id")) == EndingToken)
+			{
+				bPreviewMatches = true;
+			}
+		}
+		TestTrue(TEXT("requires_preview names a same-ending preview choice"), bPreviewMatches);
+
+		const TArray<FName> Prerequisites = JsonNameArray(Confirm, TEXT("prerequisites"));
+		TestTrue(TEXT("Every confirm requires the hardcoded Shen release flag"),
+			Prerequisites.Contains(FName(QinglanEnding::ShenReleasedFlag)));
+		// END_SHARED additionally carries the three hardcoded agreement flags.
+		if (EndingFlag == FName(QinglanEnding::EndingSharedId))
+		{
+			for (const FName AgreementFlag : SharedAgreementSet)
+			{
+				TestTrue(TEXT("Shared confirm carries every hardcoded agreement flag"), Prerequisites.Contains(AgreementFlag));
+			}
+			TestEqual(TEXT("Shared confirm adds only the Shen release beyond the agreements"),
+				Prerequisites.Num(), QinglanEnding::SharedAgreementFlagCount + 1);
+		}
+	}
+
+	// The shared PREVIEW is presented only with the three agreements
+	// (blueprint section 2.3: journal shows the unlock conditions) and no
+	// preview choice ever sets a commit flag (preview commits nothing,
+	// docs/story/narrative-implementation.md section 4).
+	for (const TSharedRef<FJsonObject>& Preview : PreviewChoices)
+	{
+		const TSharedPtr<FJsonObject> PreviewAction = JsonObject(Preview, TEXT("action"));
+		if (!PreviewAction.IsValid())
+		{
+			continue;
+		}
+		const FName EndingFlag = EndingFlagForToken(JsonString(PreviewAction.ToSharedRef(), TEXT("ending_id")));
+		if (EndingFlag == FName(QinglanEnding::EndingSharedId))
+		{
+			TestTrue(TEXT("Shared preview prerequisites are exactly the three hardcoded agreement flags"),
+				SameNameArray(JsonNameArray(Preview, TEXT("prerequisites")), SharedAgreementSet));
+		}
+		const TArray<FName> SetsFlags = JsonNameArray(Preview, TEXT("sets_flags"));
+		TestFalse(TEXT("Preview sets no ending_open flag"), SetsFlags.Contains(FName(QinglanEnding::EndingOpenId)));
+		TestFalse(TEXT("Preview sets no ending_seal flag"), SetsFlags.Contains(FName(QinglanEnding::EndingSealId)));
+		TestFalse(TEXT("Preview sets no ending_shared flag"), SetsFlags.Contains(FName(QinglanEnding::EndingSharedId)));
+	}
 	return true;
 }

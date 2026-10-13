@@ -44,6 +44,8 @@ public:
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 private:
+	// Plain struct (not a USTRUCT): runtime-only cue bookkeeping with weak
+	// pointers, so no UPROPERTY reflection is needed or allowed for it.
 	struct FCueInstance
 	{
 		TWeakObjectPtr<USceneComponent> Root;
@@ -58,6 +60,6 @@ private:
 	class UMaterialInterface* GetCueMaterial(FName MaterialKey);
 	FLinearColor ElementColor(EQinglanElement Element) const;
 
-	UPROPERTY(Transient) TArray<FCueInstance> ActiveCues;
+	TArray<FCueInstance> ActiveCues;
 	UPROPERTY(Transient) TMap<FName, TObjectPtr<UMaterialInterface>> CachedMaterials;
 };

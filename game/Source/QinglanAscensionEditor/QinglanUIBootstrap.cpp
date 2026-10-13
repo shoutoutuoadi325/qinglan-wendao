@@ -3,7 +3,7 @@
 // named building blocks they manipulate at runtime.
 #include "QinglanUIBootstrap.h"
 
-#include "AssetToolsModule.h"
+#include "AssetRegistry/AssetRegistryModule.h" // FAssetRegistryModule::AssetCreated (IAssetTools::CreatedAsset is gone in UE 5.8)
 #include "Blueprint/UserWidget.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
@@ -11,13 +11,14 @@
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
-#include "Factories/WidgetBlueprintFactory.h"
+#include "Blueprint/WidgetTree.h" // complete UWidgetTree for RootWidget/ConstructWidget (UMG/Public/Blueprint)
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Misc/PackageName.h"
 #include "UI/QinglanUIWidgets.h"
 #include "UObject/Package.h"
 #include "UObject/SavePackage.h"
 #include "WidgetBlueprint.h"
+#include "WidgetBlueprintFactory.h" // UE 5.8: UMGEditor/Classes root (no Factories/ subfolder)
 
 namespace
 {
@@ -29,7 +30,7 @@ namespace
 		UPackage* Package = CreatePackage(*PackagePath);
 		Package->SetPackageFlags(PKG_NewlyCreated);
 		UWidgetBlueprintFactory* Factory = NewObject<UWidgetBlueprintFactory>();
-		Factory->InitialWidgetClass = BaseClass;
+		Factory->ParentClass = BaseClass; // UE 5.8: ParentClass replaced InitialWidgetClass
 		UWidgetBlueprint* WBP = Cast<UWidgetBlueprint>(
 			Factory->FactoryCreateNew(UWidgetBlueprint::StaticClass(), Package,
 				*FPackageName::ObjectPathToObjectName(ObjectPath), RF_Public | RF_Standalone, nullptr, GWarn));
@@ -37,14 +38,15 @@ namespace
 		{
 			return nullptr;
 		}
-		FAssetToolsModule::GetModule().Get().CreatedAsset(WBP);
+		FAssetRegistryModule::AssetCreated(WBP);
 		return WBP;
 	}
 
 	UTextBlock* AddText(UWidgetTree* Tree, UPanelWidget* Parent, const FText& Label,
-		const FVector2D& Position, const FVector2D& Size, int32 FontSize = 18)
+		const FVector2D& Position, const FVector2D& Size, int32 FontSize = 18, FName Name = NAME_None)
 	{
-		UTextBlock* Text = Tree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+		// UE 5.8: UWidget has no SetObjectName; widgets are named at construction.
+		UTextBlock* Text = Tree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), Name);
 		Text->Text = Label;
 		// TODO pass font size when the default font asset chain is wired; scale via render transform.
 		Text->SetRenderScale(FVector2D(FontSize / 18.f, FontSize / 18.f));
@@ -57,9 +59,10 @@ namespace
 	}
 
 	UProgressBar* AddBar(UWidgetTree* Tree, UPanelWidget* Parent,
-		const FVector2D& Position, const FVector2D& Size, const FLinearColor& Color)
+		const FVector2D& Position, const FVector2D& Size, const FLinearColor& Color, FName Name = NAME_None)
 	{
-		UProgressBar* Bar = Tree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass());
+		// UE 5.8: UWidget has no SetObjectName; widgets are named at construction.
+		UProgressBar* Bar = Tree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass(), Name);
 		Bar->SetFillColorAndOpacity(Color);
 		if (UCanvasPanelSlot* Slot = Cast<UCanvasPanelSlot>(Parent->AddChild(Bar)))
 		{
@@ -83,7 +86,6 @@ namespace
 
 UQinglanUIBootstrap::UQinglanUIBootstrap()
 {
-	LogToClipsAndLog = true;
 }
 
 int32 UQinglanUIBootstrap::Main(const FString& Params)
@@ -97,22 +99,22 @@ int32 UQinglanUIBootstrap::Main(const FString& Params)
 		UWidgetTree* Tree = Hud->WidgetTree;
 		UCanvasPanel* Root = Tree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("RootCanvas"));
 		Tree->RootWidget = Root;
-		AddBar(Tree, Root, FVector2D(40, 980), FVector2D(420, 18), FLinearColor::Red)->SetObjectName(TEXT("Bar_Health"));
-		AddBar(Tree, Root, FVector2D(40, 1006), FVector2D(420, 12), FLinearColor(0.2f, 0.5f, 1.0f))->SetObjectName(TEXT("Bar_Energy"));
-		AddBar(Tree, Root, FVector2D(40, 1024), FVector2D(420, 10), FLinearColor::Green)->SetObjectName(TEXT("Bar_Stamina"));
-		AddText(Tree, Root, FText::FromString(TEXT("Barrier 0")), FVector2D(40, 940), FVector2D(220, 28), 16)->SetObjectName(TEXT("Txt_Barrier"));
+		AddBar(Tree, Root, FVector2D(40, 980), FVector2D(420, 18), FLinearColor::Red, TEXT("Bar_Health"));
+		AddBar(Tree, Root, FVector2D(40, 1006), FVector2D(420, 12), FLinearColor(0.2f, 0.5f, 1.0f), TEXT("Bar_Energy"));
+		AddBar(Tree, Root, FVector2D(40, 1024), FVector2D(420, 10), FLinearColor::Green, TEXT("Bar_Stamina"));
+		AddText(Tree, Root, FText::FromString(TEXT("Barrier 0")), FVector2D(40, 940), FVector2D(220, 28), 16, TEXT("Txt_Barrier"));
 		for (int32 i = 0; i < 4; ++i)
 		{
 			AddText(Tree, Root, FText::FromString(FString::Printf(TEXT("[Skill %d]"), i + 1)),
-				FVector2D(700 + i * 150, 980), FVector2D(140, 44), 20)->SetObjectName(*FString::Printf(TEXT("Txt_Skill%d"), i));
+				FVector2D(700 + i * 150, 980), FVector2D(140, 44), 20, *FString::Printf(TEXT("Txt_Skill%d"), i));
 		}
 		for (int32 i = 0; i < 2; ++i)
 		{
 			AddText(Tree, Root, FText::FromString(FString::Printf(TEXT("[Item %d]"), i + 1)),
-				FVector2D(1340 + i * 120, 980), FVector2D(110, 36), 16)->SetObjectName(*FString::Printf(TEXT("Txt_Talisman%d"), i));
+				FVector2D(1340 + i * 120, 980), FVector2D(110, 36), 16, *FString::Printf(TEXT("Txt_Talisman%d"), i));
 		}
-		AddText(Tree, Root, FText::FromString(TEXT("Objective")), FVector2D(40, 40), FVector2D(700, 60), 20)->SetObjectName(TEXT("Txt_Objective"));
-		AddText(Tree, Root, FText::FromString(TEXT("")), FVector2D(500, 830), FVector2D(900, 100), 18)->SetObjectName(TEXT("Txt_Bark"));
+		AddText(Tree, Root, FText::FromString(TEXT("Objective")), FVector2D(40, 40), FVector2D(700, 60), 20, TEXT("Txt_Objective"));
+		AddText(Tree, Root, FText::FromString(TEXT("")), FVector2D(500, 830), FVector2D(900, 100), 18, TEXT("Txt_Bark"));
 		bOk &= SaveWidget(Hud);
 	}
 
@@ -122,9 +124,9 @@ int32 UQinglanUIBootstrap::Main(const FString& Params)
 		UWidgetTree* Tree = Dlg->WidgetTree;
 		UCanvasPanel* Root = Tree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("RootCanvas"));
 		Tree->RootWidget = Root;
-		AddText(Tree, Root, FText::FromString(TEXT("Speaker")), FVector2D(320, 700), FVector2D(300, 40), 22)->SetObjectName(TEXT("Txt_Speaker"));
-		AddText(Tree, Root, FText::FromString(TEXT("Line text")), FVector2D(320, 748), FVector2D(1240, 130), 20)->SetObjectName(TEXT("Txt_Line"));
-		AddText(Tree, Root, FText::FromString(TEXT("source")), FVector2D(1320, 700), FVector2D(200, 30), 14)->SetObjectName(TEXT("Txt_SourceKind"));
+		AddText(Tree, Root, FText::FromString(TEXT("Speaker")), FVector2D(320, 700), FVector2D(300, 40), 22, TEXT("Txt_Speaker"));
+		AddText(Tree, Root, FText::FromString(TEXT("Line text")), FVector2D(320, 748), FVector2D(1240, 130), 20, TEXT("Txt_Line"));
+		AddText(Tree, Root, FText::FromString(TEXT("source")), FVector2D(1320, 700), FVector2D(200, 30), 14, TEXT("Txt_SourceKind"));
 		UVerticalBox* Choices = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("Box_Choices"));
 		if (UCanvasPanelSlot* Slot = Cast<UCanvasPanelSlot>(Root->AddChild(Choices)))
 		{
@@ -140,8 +142,8 @@ int32 UQinglanUIBootstrap::Main(const FString& Params)
 		UWidgetTree* Tree = Jrn->WidgetTree;
 		UCanvasPanel* Root = Tree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("RootCanvas"));
 		Tree->RootWidget = Root;
-		AddText(Tree, Root, FText::FromString(TEXT("Journal")), FVector2D(640, 60), FVector2D(640, 60), 32)->SetObjectName(TEXT("Txt_Title"));
-		AddText(Tree, Root, FText::FromString(TEXT("")), FVector2D(240, 160), FVector2D(1440, 800), 18)->SetObjectName(TEXT("Txt_Body"));
+		AddText(Tree, Root, FText::FromString(TEXT("Journal")), FVector2D(640, 60), FVector2D(640, 60), 32, TEXT("Txt_Title"));
+		AddText(Tree, Root, FText::FromString(TEXT("")), FVector2D(240, 160), FVector2D(1440, 800), 18, TEXT("Txt_Body"));
 		bOk &= SaveWidget(Jrn);
 	}
 
@@ -151,8 +153,8 @@ int32 UQinglanUIBootstrap::Main(const FString& Params)
 		UWidgetTree* Tree = End->WidgetTree;
 		UCanvasPanel* Root = Tree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("RootCanvas"));
 		Tree->RootWidget = Root;
-		AddText(Tree, Root, FText::FromString(TEXT("Ending Preview")), FVector2D(240, 200), FVector2D(1440, 500), 24)->SetObjectName(TEXT("Txt_Preview"));
-		AddText(Tree, Root, FText::FromString(TEXT("")), FVector2D(240, 760), FVector2D(1440, 200), 18)->SetObjectName(TEXT("Txt_Warning"));
+		AddText(Tree, Root, FText::FromString(TEXT("Ending Preview")), FVector2D(240, 200), FVector2D(1440, 500), 24, TEXT("Txt_Preview"));
+		AddText(Tree, Root, FText::FromString(TEXT("")), FVector2D(240, 760), FVector2D(1440, 200), 18, TEXT("Txt_Warning"));
 		bOk &= SaveWidget(End);
 	}
 

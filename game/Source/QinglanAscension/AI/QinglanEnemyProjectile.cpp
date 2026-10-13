@@ -117,7 +117,7 @@ void AQinglanEnemyProjectile::Tick(float DeltaSeconds)
 	}
 	// Paused-game-time semantics: accumulate DeltaTime, never wall clock.
 	FlightSeconds += DeltaSeconds;
-	RemainingRange -= DeltaSeconds * Movement->GetVelocity().Size();
+	RemainingRange -= DeltaSeconds * Movement->Velocity.Size(); // UE 5.8: UProjectileMovementComponent has no GetVelocity(); use Velocity
 	if (RemainingRange <= 0.f || FlightSeconds >= MaxFlightSeconds)
 	{
 		Deactivate();
@@ -177,8 +177,7 @@ void AQinglanEnemyProjectile::HandleBeginOverlap(UPrimitiveComponent* /*Overlapp
 	Deactivate();
 }
 
-void AQinglanEnemyProjectile::HandleImpact(AActor* /*EncroachedActor*/, FVector /*HitLocation*/,
-	const FHitResult& /*Hit*/)
+void AQinglanEnemyProjectile::HandleImpact(const FHitResult& /*Hit*/)
 {
 	Deactivate();
 }

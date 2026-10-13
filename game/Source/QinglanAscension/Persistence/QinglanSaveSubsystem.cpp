@@ -10,7 +10,9 @@
 #include "Persistence/QinglanSaveSubsystem.h"
 
 #include "Async/TaskGraphInterfaces.h"
+#include "GenericPlatform/GenericPlatformFile.h" // IFileHandle
 #include "HAL/FileManager.h"
+#include "HAL/PlatformFileManager.h"
 #include "HAL/PlatformProcess.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -239,6 +241,20 @@ namespace
 				Out += TCHAR(',');
 			}
 		};
+		auto AppendChargeMap = [](FString& Out, const TMap<FName, int32>& Values)
+		{
+			TArray<FName> Keys;
+			Values.GetKeys(Keys);
+			Keys.Sort([](const FName& A, const FName& B) { return A.LexicalLess(B); });
+			for (const FName Key : Keys)
+			{
+				const int32* Value = Values.Find(Key);
+				Out += Key.ToString();
+				Out += TEXT("->");
+				Out += FString::Printf(TEXT("%d"), Value ? *Value : 0);
+				Out += TCHAR(',');
+			}
+		};
 		FString Dump;
 		Dump += FString::Printf(TEXT("v%d|%s|%s|seq%d|st%d|r%d|"), Save->SchemaVersion,
 			*Save->ContentVersion.ToString(), *Save->ProfileId.ToString(), Save->SaveSequence,
@@ -247,6 +263,16 @@ namespace
 		AppendNameArray(Dump, Save->UnlockedTechniques);
 		Dump += TCHAR('|');
 		AppendNameArray(Dump, Save->EquippedTechniques);
+		Dump += TCHAR('|');
+		AppendNameArray(Dump, Save->OwnedRelics);
+		Dump += TCHAR('|');
+		Dump += Save->EquippedRelic.ToString();
+		Dump += TCHAR('|');
+		AppendNameArray(Dump, Save->OwnedPassives);
+		Dump += TCHAR('|');
+		AppendNameArray(Dump, Save->EquippedPassives);
+		Dump += TCHAR('|');
+		AppendChargeMap(Dump, Save->TalismanCharges);
 		Dump += TCHAR('|');
 		AppendNameArray(Dump, Save->CampaignFlags);
 		Dump += TCHAR('|');
@@ -346,21 +372,23 @@ namespace
 	uint8 WriteAllBytesDurably(const FString& Path, const TArray<uint8>& Bytes)
 	{
 		IFileManager& FileManager = IFileManager::Get();
+		IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
 		const FString Directory = FPaths::GetPath(Path);
 		if (!FileManager.DirectoryExists(*Directory) && !FileManager.MakeDirectory(*Directory, true))
 		{
 			return 2; // cannot obtain the save directory at all
 		}
-		IFileHandle* Handle = FileManager.CreateFileHandle(*Path, EFileWrite::FILEWRITE_None);
+		// IPlatformFile::OpenWrite is the raw IFileHandle factory in UE 5.8;
+		// the handle closes in its destructor (no Close() member).
+		IFileHandle* Handle = PlatformFile.OpenWrite(*Path);
 		if (Handle == nullptr)
 		{
 			// Distinguish "nothing can be created here" (permission) from quota
 			// exhaustion with a tiny probe file in the same directory.
 			const FString ProbePath = FPaths::Combine(Directory, TEXT("QinglanWriteProbe.tmp"));
-			IFileHandle* Probe = FileManager.CreateFileHandle(*ProbePath, EFileWrite::FILEWRITE_None);
+			IFileHandle* Probe = PlatformFile.OpenWrite(*ProbePath);
 			if (Probe != nullptr)
 			{
-				Probe->Close();
 				delete Probe;
 				FileManager.Delete(*ProbePath);
 				return 1; // small file fits, full payload does not: disk full
@@ -369,7 +397,6 @@ namespace
 		}
 		const bool bWrote = Handle->Write(Bytes.GetData(), Bytes.Num());
 		Handle->Flush(true); // durable-write step 3: flush before verification
-		Handle->Close();
 		delete Handle;
 		return bWrote ? 0 : 1; // failed write of an opened handle: quota
 	}
@@ -401,6 +428,11 @@ namespace
 		Snapshot.Inventory = Save->Inventory;
 		Snapshot.UnlockedTechniques = Save->UnlockedTechniques;
 		Snapshot.EquippedTechniques = Save->EquippedTechniques;
+		Snapshot.OwnedRelics = Save->OwnedRelics;
+		Snapshot.EquippedRelic = Save->EquippedRelic;
+		Snapshot.OwnedPassives = Save->OwnedPassives;
+		Snapshot.EquippedPassives = Save->EquippedPassives;
+		Snapshot.TalismanCharges = Save->TalismanCharges;
 		Snapshot.CampaignFlags = Save->CampaignFlags;
 		Snapshot.CommittedTransactionIds = Save->CommittedTransactionIds;
 		Snapshot.Narrative = Save->Narrative;
@@ -416,6 +448,11 @@ namespace
 		Save->Inventory = Snapshot.Inventory;
 		Save->UnlockedTechniques = Snapshot.UnlockedTechniques;
 		Save->EquippedTechniques = Snapshot.EquippedTechniques;
+		Save->OwnedRelics = Snapshot.OwnedRelics;
+		Save->EquippedRelic = Snapshot.EquippedRelic;
+		Save->OwnedPassives = Snapshot.OwnedPassives;
+		Save->EquippedPassives = Snapshot.EquippedPassives;
+		Save->TalismanCharges = Snapshot.TalismanCharges;
 		Save->CampaignFlags = Snapshot.CampaignFlags;
 		Save->CommittedTransactionIds = Snapshot.CommittedTransactionIds;
 		Save->Narrative = Snapshot.Narrative;

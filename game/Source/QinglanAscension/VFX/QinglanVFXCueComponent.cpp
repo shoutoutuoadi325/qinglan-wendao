@@ -13,6 +13,27 @@
 #include "Materials/MaterialParameterCollectionInstance.h" // IWYU
 #include "UObject/SoftObjectPath.h"
 
+namespace QinglanVFXCues
+{
+	// Defined here (not in the header) to avoid namespace-scope global FName constructors.
+	const FName SwordArc("vfx.sword_arc");
+	const FName SwordImpact("vfx.sword_impact");
+	const FName JadeArcRelease("vfx.jade_sword_arc");
+	const FName EmberLanceRelease("vfx.ember_lance");
+	const FName EmberTrail("vfx.ember_trail");
+	const FName FlowingWardBarrier("vfx.flowing_ward");
+	const FName ThunderSealStrike("vfx.thunder_seal");
+	const FName ConductArc("vfx.conduct_arc");
+	const FName StoneAegisBarrier("vfx.stone_aegis");
+	const FName VerdantHeal("vfx.verdant_pulse");
+	const FName MistStepBurst("vfx.mist_step");
+	const FName OrbitingBlades("vfx.orbiting_blades");
+	const FName Portal("vfx.portal");
+	const FName TelegraphRing("vfx.telegraph_ring");
+	const FName BossGroundMarker("vfx.boss_ground_marker");
+	const FName DeathDissolve("vfx.death_dissolve");
+}
+
 namespace
 {
 	FName MaterialKeyForCue(FName CueId)
@@ -62,9 +83,11 @@ FLinearColor UQinglanVFXCueComponent::ElementColor(EQinglanElement Element) cons
 
 UMaterialInterface* UQinglanVFXCueComponent::GetCueMaterial(FName MaterialKey)
 {
-	if (UMaterialInterface* const* Cached = CachedMaterials.Find(MaterialKey))
+	// CachedMaterials values are TObjectPtr (UPROPERTY/GC-tracked), so Find
+	// yields TObjectPtr<UMaterialInterface>*; .Get() unwraps the raw pointer.
+	if (TObjectPtr<UMaterialInterface>* const Cached = CachedMaterials.Find(MaterialKey))
 	{
-		return *Cached;
+		return Cached->Get();
 	}
 	UMaterialInterface* Mat = LoadObject<UMaterialInterface>(nullptr, *MaterialKey.ToString());
 	if (!Mat)
@@ -95,10 +118,14 @@ void UQinglanVFXCueComponent::PlayTelegraph(FVector Center, float Radius, float 
 	Decal->DecalSize = FVector(Duration * 100.f, Radius, Radius);
 	if (UMaterialInterface* Mat = GetCueMaterial(TEXT("/Game/Qinglan/Materials/M_QinglanDecalRing")))
 	{
-		UMaterialInstanceDynamic* MID = Decal->CreateDynamicMaterialInstance();
-		MID->SetParent(Mat);
-		MID->SetVectorParameterValue("Color", ElementColor(Element));
-		MID->SetScalarParameterValue("Intensity", 1.f);
+		// UE 5.8: UMaterialInstanceDynamic has no public SetParent; assign the
+		// decal material first so CreateDynamicMaterialInstance() parents to it.
+		Decal->SetDecalMaterial(Mat);
+		if (UMaterialInstanceDynamic* MID = Decal->CreateDynamicMaterialInstance())
+		{
+			MID->SetVectorParameterValue("Color", ElementColor(Element));
+			MID->SetScalarParameterValue("Intensity", 1.f);
+		}
 	}
 	Decal->RegisterComponent();
 

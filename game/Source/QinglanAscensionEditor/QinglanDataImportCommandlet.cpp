@@ -22,6 +22,7 @@
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
 #include "Internationalization/StringTable.h" // UE 5.8 location (was Engine/StringTable.h)
+#include "Internationalization/StringTableCore.h" // FStringTable definition (SetSourceString); the header above only forward-declares it
 #include "Misc/FileHelper.h"
 #include "Misc/Parse.h"
 #include "Misc/Paths.h"
@@ -61,12 +62,6 @@ namespace
 
 	/** Story registry asset. Task contract + QinglanStoryDataTypes.h header note. */
 	constexpr const TCHAR* StoryRegistryAssetPath = TEXT("/Game/Qinglan/Data/DA_StoryRegistry");
-
-	/** One technique asset per id. Task contract; ids mirror docs blueprint section 2.5. */
-	constexpr const TCHAR* TechniqueAssetPathFormat = TEXT("/Game/Qinglan/Data/Techniques/DA_Tech_%s");
-
-	/** One realm asset per realm id. Task contract; realm ids mirror docs blueprint section 1.4. */
-	constexpr const TCHAR* RealmAssetPathFormat = TEXT("/Game/Qinglan/Data/DA_Realm_%s");
 
 	/** Story JSON schema version. docs/dev/implementation-blueprint.md section 3 ("schema_version 1 everywhere"). */
 	constexpr int32 ExpectedSchemaVersion = 1;
@@ -221,7 +216,7 @@ namespace
 			AddError(Errors, Context, TEXT("invalid JSON"));
 			return false;
 		}
-		if (Reader->GetErrorCode() != EJson::None)
+		if (!Reader->GetErrorMessage().IsEmpty()) // UE 5.8: TJsonReader has GetErrorMessage(), no GetErrorCode()
 		{
 			AddError(Errors, Context, TEXT("trailing garbage after JSON document"));
 			return false;
@@ -234,7 +229,8 @@ namespace
 
 	FString JStr(const TSharedRef<FJsonObject>& Obj, const TCHAR* Field, const FString& Default = FString())
 	{
-		return Obj->HasField(Field) ? Obj->GetField(Field)->AsString() : Default;
+		// UE 5.8: untyped GetField is GetFieldUntyped (GetField now requires an EJson template arg).
+		return Obj->HasField(Field) ? Obj->GetFieldUntyped(Field)->AsString() : Default;
 	}
 
 	FName JName(const TSharedRef<FJsonObject>& Obj, const TCHAR* Field)
@@ -247,7 +243,7 @@ namespace
 	{
 		if (!Obj->HasField(Field)) { return Default; }
 		double Out = Default;
-		if (Obj->GetField(Field)->TryGetNumber(Out)) { return Out; }
+		if (Obj->GetFieldUntyped(Field)->TryGetNumber(Out)) { return Out; }
 		return Default;
 	}
 
@@ -255,20 +251,20 @@ namespace
 	{
 		if (!Obj->HasField(Field)) { return Default; }
 		bool Out = Default;
-		if (Obj->GetField(Field)->TryGetBool(Out)) { return Out; }
+		if (Obj->GetFieldUntyped(Field)->TryGetBool(Out)) { return Out; }
 		return Default;
 	}
 
 	TArray<TSharedPtr<FJsonValue>> JArr(const TSharedRef<FJsonObject>& Obj, const TCHAR* Field)
 	{
 		if (!Obj->HasField(Field)) { return TArray<TSharedPtr<FJsonValue>>(); }
-		return Obj->GetField(Field)->AsArray();
+		return Obj->GetFieldUntyped(Field)->AsArray();
 	}
 
 	TSharedPtr<FJsonObject> JObj(const TSharedRef<FJsonObject>& Obj, const TCHAR* Field)
 	{
 		if (!Obj->HasField(Field)) { return nullptr; }
-		return Obj->GetField(Field)->AsObject();
+		return Obj->GetFieldUntyped(Field)->AsObject();
 	}
 
 	TArray<FName> JNameArray(const TSharedRef<FJsonObject>& Obj, const TCHAR* Field)
@@ -368,10 +364,11 @@ namespace
 		const FString Context = FString::Printf(TEXT("%s/%s"), *Culture, *FPaths::GetCleanFilename(FilePath));
 		TMap<FString, FString>& Keys = Out.CultureKeys.FindOrAdd(Culture);
 		TMap<FString, FString>& KeyFiles = Out.CultureKeySourceFile.FindOrAdd(Culture);
-		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Root->Values)
+		// UE 5.8: FJsonObject::Values keys are UE::TSharedString, not FString (auto keeps this key-type agnostic).
+		for (const auto& Pair : Root->Values)
 		{
 			if (!Pair.Value.IsValid() || Pair.Value->IsNull()) { continue; }
-			const FString& Key = Pair.Key;
+			const FString Key(Pair.Key);
 			const FString Value = Pair.Value->AsString();
 			if (Key.IsEmpty())
 			{
@@ -519,9 +516,9 @@ namespace
 			const TSharedRef<FJsonObject> ObjRef = Obj.ToSharedRef();
 			for (const TCHAR* Field : LocKeyRefFields)
 			{
-				if (ObjRef->HasField(Field) && !ObjRef->GetField(Field)->IsNull())
+				if (ObjRef->HasField(Field) && !ObjRef->GetFieldUntyped(Field)->IsNull())
 				{
-					OutRefs.Add(ObjRef->GetField(Field)->AsString());
+					OutRefs.Add(ObjRef->GetFieldUntyped(Field)->AsString());
 				}
 			}
 			for (const TCHAR* Field : LocKeyRefListFields)
@@ -534,7 +531,7 @@ namespace
 					}
 				}
 			}
-			for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : ObjRef->Values)
+			for (const auto& Pair : ObjRef->Values)
 			{
 				if (Pair.Value.IsValid())
 				{
@@ -790,7 +787,8 @@ namespace
 		TArray<FString> LocRefs;
 		for (const TPair<FString, TSharedRef<FJsonObject>>& FilePair : StoryFiles)
 		{
-			CollectLocKeyRefs(FilePair.Value, LocRefs);
+			// UE 5.8: wrap the object in an FJsonValueObject (no implicit TSharedRef<FJsonObject> -> TSharedRef<FJsonValue>).
+			CollectLocKeyRefs(MakeShared<FJsonValueObject>(FilePair.Value), LocRefs);
 		}
 		for (const FString& Key : LocRefs)
 		{
@@ -818,9 +816,14 @@ namespace
 				const TSharedRef<FJsonObject> ChapterRef = Chapter.ToSharedRef();
 				const FName ChapterId = JName(ChapterRef, TEXT("id"));
 				if (ChapterId.IsNone()) { continue; }
-				if (!ChapterIds.Add(ChapterId))
+				// UE 5.8: TSet::Add returns FSetElementId, not bool; check Contains first.
+				if (ChapterIds.Contains(ChapterId))
 				{
 					AddError(Errors, FPaths::GetCleanFilename(FilePair.Key), FString::Printf(TEXT("duplicate chapter id '%s'"), *ChapterId.ToString()));
+				}
+				else
+				{
+					ChapterIds.Add(ChapterId);
 				}
 				for (const FName SceneId : JNameArray(ChapterRef, TEXT("scene_ids")))
 				{
@@ -835,9 +838,13 @@ namespace
 				const TSharedRef<FJsonObject> SceneRef = Scene.ToSharedRef();
 				const FName SceneId = JName(SceneRef, TEXT("id"));
 				if (SceneId.IsNone()) { continue; }
-				if (!SceneIds.Add(SceneId))
+				if (SceneIds.Contains(SceneId)) // UE 5.8: TSet::Add returns FSetElementId, not bool
 				{
 					AddError(Errors, FPaths::GetCleanFilename(FilePair.Key), FString::Printf(TEXT("duplicate scene id '%s'"), *SceneId.ToString()));
+				}
+				else
+				{
+					SceneIds.Add(SceneId);
 				}
 				const FName ChapterId = JName(SceneRef, TEXT("chapter"));
 				if (!ChapterId.IsNone())
@@ -854,9 +861,13 @@ namespace
 				const FName QuestId = JName(QuestRef, TEXT("id"));
 				if (!QuestId.IsNone())
 				{
-					if (!QuestIds.Add(QuestId))
+					if (QuestIds.Contains(QuestId)) // UE 5.8: TSet::Add returns FSetElementId, not bool
 					{
 						AddError(Errors, FPaths::GetCleanFilename(FilePair.Key), FString::Printf(TEXT("duplicate quest id '%s'"), *QuestId.ToString()));
+					}
+					else
+					{
+						QuestIds.Add(QuestId);
 					}
 				}
 				for (const TSharedPtr<FJsonValue>& StageValue : JArr(QuestRef, TEXT("stages")))
@@ -865,9 +876,13 @@ namespace
 					if (!Stage.IsValid()) { continue; }
 					const FName StageId = JName(Stage.ToSharedRef(), TEXT("id"));
 					if (StageId.IsNone()) { continue; }
-					if (!StageIds.Add(StageId))
+					if (StageIds.Contains(StageId)) // UE 5.8: TSet::Add returns FSetElementId, not bool
 					{
 						AddError(Errors, FPaths::GetCleanFilename(FilePair.Key), FString::Printf(TEXT("duplicate stage id '%s'"), *StageId.ToString()));
+					}
+					else
+					{
+						StageIds.Add(StageId);
 					}
 					++OutSideStageCount;
 				}
@@ -1326,12 +1341,17 @@ namespace
 		Out.ConfirmationGuard = JName(Json, TEXT("confirmation_guard")).IsNone()
 			? NAME_None
 			: FName(*FString::Printf(TEXT("guard.%s"), *Out.SceneId.ToString()));
+		Out.JournalKey = JName(Json, TEXT("journal_key"));
 		Out.AdvanceDeliveryKey = JName(Json, TEXT("advance_delivery_key"));
 		Out.DeliveryTimeKey = JName(Json, TEXT("delivery_time_key"));
 		if (const TSharedPtr<FJsonObject> Transition = JObj(Json, TEXT("delivery_transition")))
 		{
 			Out.DeliveryTransition = JName(Transition.ToSharedRef(), TEXT("type"));
 		}
+		// CH07_S04 scene-extras (optional_epilogue_*): only the epilogue-owning
+		// scene carries these; every other scene imports empty arrays.
+		Out.OptionalEpilogueQuestIds = JNameArray(Json, TEXT("optional_epilogue_quest_ids"));
+		Out.OptionalEpilogueSource = JName(Json, TEXT("optional_epilogue_source"));
 	}
 
 	void FillChapter(const TSharedRef<FJsonObject>& Json, FQinglanRegistryChapter& Out)
@@ -1357,6 +1377,18 @@ namespace
 			}
 		}
 		Out.CompletionFlags = JNameArray(Json, TEXT("completion_flags"));
+		Out.EpilogueKeys = JNameArray(Json, TEXT("epilogue_keys"));
+		// rewards.technique_access is a scalar id in the current contract (SQ04
+		// mist_step, SQ05 orbiting_blades); the array member keeps any future
+		// multi-grant data-driven without a schema change.
+		if (const TSharedPtr<FJsonObject> Rewards = JObj(Json, TEXT("rewards")))
+		{
+			const FName TechniqueAccess = JName(Rewards.ToSharedRef(), TEXT("technique_access"));
+			if (!TechniqueAccess.IsNone())
+			{
+				Out.RewardTechniqueIds.Add(TechniqueAccess);
+			}
+		}
 	}
 
 	void FillRecord(const TSharedRef<FJsonObject>& Json, FQinglanRegistryRecord& Out)
@@ -1390,7 +1422,8 @@ namespace
 		UQinglanStoryRegistry* Registry = static_cast<UQinglanStoryRegistry*>(Raw);
 
 		FString RevisionInput; // deterministic content revision (docs blueprint section 1.9 revision gate)
-		TArray<FString> SortedFiles = StoryFiles.Keys;
+		TArray<FString> SortedFiles;
+		StoryFiles.GetKeys(SortedFiles); // UE 5.8: TMap has GetKeys(), not a Keys member
 		SortedFiles.Sort();
 		for (const FString& FilePath : SortedFiles)
 		{
@@ -1447,7 +1480,9 @@ namespace
 	bool ImportTechnique(const TSharedRef<FJsonObject>& Tech, TArray<FString>& Errors)
 	{
 		const FString Id = JStr(Tech, TEXT("id"));
-		const FString PackagePath = FString::Printf(TechniqueAssetPathFormat, *Id);
+		// One technique asset per id. Task contract; ids mirror docs blueprint section 2.5.
+		// UE 5.8: FString::Printf needs a literal format string (TCheckedFormatString), so the format is inlined here.
+		const FString PackagePath = FString::Printf(TEXT("/Game/Qinglan/Data/Techniques/DA_Tech_%s"), *Id);
 		UObject* Raw = CreateFreshAsset(PackagePath, FindQinglanScriptClass(TEXT("QinglanTechniqueDataAsset")), Errors);
 		if (Raw == nullptr) { return false; }
 		UQinglanTechniqueDataAsset* Asset = static_cast<UQinglanTechniqueDataAsset*>(Raw);
@@ -1478,7 +1513,9 @@ namespace
 	bool ImportRealm(const TSharedRef<FJsonObject>& Root, TArray<FString>& Errors)
 	{
 		const FString Id = JStr(Root, TEXT("id"));
-		const FString PackagePath = FString::Printf(RealmAssetPathFormat, *Id);
+		// One realm asset per realm id. Task contract; realm ids mirror docs blueprint section 1.4.
+		// UE 5.8: FString::Printf needs a literal format string (TCheckedFormatString), so the format is inlined here.
+		const FString PackagePath = FString::Printf(TEXT("/Game/Qinglan/Data/DA_Realm_%s"), *Id);
 		UObject* Raw = CreateFreshAsset(PackagePath, FindQinglanScriptClass(TEXT("QinglanRealmDataAsset")), Errors);
 		if (Raw == nullptr) { return false; }
 		UQinglanRealmDataAsset* Asset = static_cast<UQinglanRealmDataAsset*>(Raw);

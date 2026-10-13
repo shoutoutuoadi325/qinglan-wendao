@@ -5,17 +5,19 @@
 #include "Components/ExponentialHeightFogComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "EditorFramework/AssetImportData.h"
+#include "Components/LightComponent.h" // complete ULightComponent for SetIntensity/SetLightColor
+#include "Components/SkyLightComponent.h"
 #include "Engine/DirectionalLight.h"
 #include "Engine/ExponentialHeightFog.h"
 #include "Engine/SkyLight.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/Texture2D.h"
 #include "Engine/World.h"
+#include "GameFramework/GameModeBase.h" // AGameModeBase for LoadClass<> (not pulled in by WorldSettings.h anymore)
 #include "GameFramework/PlayerStart.h"
 #include "GameFramework/WorldSettings.h"
 #include "Engine/TargetPoint.h"
-#include "EnhancedInput/Subsystem/IEnhancedInputModule.h"
-#include "FileHelper.h"
+#include "EnhancedInputModule.h" // UE 5.8: IEnhancedInputModule moved here from EnhancedInput/Subsystem/
 #include "HAL/FileManager.h"
 #include "ImageUtils.h"
 #include "InputAction.h"
@@ -23,16 +25,22 @@
 #include "InputModifiers.h"
 #include "InputTriggers.h"
 #include "Materials/Material.h"
+#include "Materials/MaterialExpressionConstant2Vector.h"
+#include "Materials/MaterialExpressionFresnel.h"
+#include "Materials/MaterialExpressionMultiply.h"
 #include "Materials/MaterialExpressionScalarParameter.h"
+#include "Materials/MaterialExpressionSphereMask.h"
+#include "Materials/MaterialExpressionTextureCoordinate.h"
 #include "Materials/MaterialExpressionTextureSampleParameter2D.h"
 #include "Materials/MaterialExpressionVectorParameter.h"
 #include "Materials/MaterialInstanceConstant.h"
+#include "Misc/FileHelper.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "Modules/ModuleManager.h"
-#include "Package.h"
 #include "UObject/Package.h"
 #include "UObject/SavePackage.h"
+#include "UObject/SoftObjectPath.h" // UE 5.8: FSoftObjectPath replaces FPackageName::GetObjectPathPackage
 
 #define LOCTEXT_NAMESPACE "QinglanContentBootstrap"
 
@@ -43,7 +51,7 @@ namespace
 
 	UPackage* CreateOrFetchPackage(const FString& ObjectPath)
 	{
-		const FString PackageName = FPackageName::GetObjectPathPackage(ObjectPath);
+		const FString PackageName = FSoftObjectPath(ObjectPath).GetLongPackageName(); // UE 5.8: FPackageName::GetObjectPathPackage is gone
 		UPackage* Package = CreatePackage(*PackageName);
 		Package->SetPackageFlags(PKG_NewlyCreated);
 		Package->FullyLoad();
@@ -53,7 +61,6 @@ namespace
 
 UQinglanContentBootstrap::UQinglanContentBootstrap()
 {
-	LogToClipsAndLog = true;
 }
 
 int32 UQinglanContentBootstrap::Main(const FString& Params)
@@ -208,7 +215,7 @@ UMaterial* UQinglanContentBootstrap::CreateOrLoadMasterMaterial()
 	UPackage* Pkg = CreateOrFetchPackage(Path);
 	UMaterial* Mat = NewObject<UMaterial>(Pkg, TEXT("M_QinglanSurface"), RF_Public | RF_Standalone);
 	Mat->BlendMode = BLEND_Opaque;
-	Mat->ShadingModel = MSM_DefaultLit;
+	Mat->SetShadingModel(MSM_DefaultLit); // UE 5.8: ShadingModel is private; setter is the engine idiom
 
 	auto AddTextureParam = [Mat](const FName& Name, int32& OutY) -> UMaterialExpressionTextureSampleParameter2D*
 	{
@@ -228,15 +235,165 @@ UMaterial* UQinglanContentBootstrap::CreateOrLoadMasterMaterial()
 	UMaterialExpressionTextureSampleParameter2D* RoughParam = AddTextureParam(TEXT("Roughness"), Y);
 	UMaterialExpressionTextureSampleParameter2D* AOParam = AddTextureParam(TEXT("AmbientOcclusion"), Y);
 
-	Mat->BaseColor.Connect(0, BaseColorParam);
-	Mat->Normal.Connect(0, NormalParam);
-	Mat->Roughness.Connect(1, RoughParam); // green channel of packed map when packed
-	Mat->AmbientOcclusion.Connect(1, AOParam);
-	Mat->UpdateMaterialExpressionCommentTexts(false);
+	// UE 5.8: material input properties (BaseColor, Normal, ...) live on UMaterialEditorOnlyData.
+	Mat->GetEditorOnlyData()->BaseColor.Connect(0, BaseColorParam);
+	Mat->GetEditorOnlyData()->Normal.Connect(0, NormalParam);
+	Mat->GetEditorOnlyData()->Roughness.Connect(1, RoughParam); // green channel of packed map when packed
+	Mat->GetEditorOnlyData()->AmbientOcclusion.Connect(1, AOParam);
 	Mat->PreEditChange(nullptr);
 	Mat->PostEditChange();
 	SavePackage(Pkg, Mat);
 	return Mat;
+}
+
+bool UQinglanContentBootstrap::BootstrapVFXMaterials()
+{
+	// The three cue materials UQinglanVFXCueComponent resolves by convention
+	// (VFX/QinglanVFXCueComponent.cpp MaterialKeyForCue): additive sprite
+	// glow, deferred-decal telegraph disc, translucent fresnel barrier. Each
+	// exposes the same "Color" vector + "Intensity" scalar parameter pair the
+	// cue component drives through material instance dynamics.
+	bool bOk = true;
+
+	// --- Shared expression helpers -------------------------------------
+	auto AddVectorParam = [](UMaterial* Mat, const TCHAR* Name, const FLinearColor& Default, int32 Y)
+	{
+		UMaterialExpressionVectorParameter* Param = NewObject<UMaterialExpressionVectorParameter>(Mat);
+		Param->ParameterName = FName(Name);
+		Param->DefaultValue = Default;
+		Param->MaterialExpressionEditorX = -700;
+		Param->MaterialExpressionEditorY = Y;
+		Mat->GetExpressionCollection().AddExpression(Param);
+		return Param;
+	};
+	auto AddScalarParam = [](UMaterial* Mat, const TCHAR* Name, float Default, int32 Y)
+	{
+		UMaterialExpressionScalarParameter* Param = NewObject<UMaterialExpressionScalarParameter>(Mat);
+		Param->ParameterName = FName(Name);
+		Param->DefaultValue = Default;
+		Param->MaterialExpressionEditorX = -700;
+		Param->MaterialExpressionEditorY = Y;
+		Mat->GetExpressionCollection().AddExpression(Param);
+		return Param;
+	};
+	auto AddMultiply = [](UMaterial* Mat, UMaterialExpression* A, int32 AOut, UMaterialExpression* B, int32 BOut, int32 Y)
+	{
+		UMaterialExpressionMultiply* Mul = NewObject<UMaterialExpressionMultiply>(Mat);
+		Mul->A.Connect(AOut, A);
+		Mul->B.Connect(BOut, B);
+		Mul->MaterialExpressionEditorX = -400;
+		Mul->MaterialExpressionEditorY = Y;
+		Mat->GetExpressionCollection().AddExpression(Mul);
+		return Mul;
+	};
+
+	auto BeginMaterial = [](const FString& Path, EBlendMode Blend, EMaterialDomain Domain) -> TPair<UPackage*, UMaterial*>
+	{
+		if (UMaterial* Existing = LoadObject<UMaterial>(nullptr, *Path))
+		{
+			return { nullptr, Existing };
+		}
+		UPackage* Pkg = CreateOrFetchPackage(Path);
+		UMaterial* Mat = NewObject<UMaterial>(Pkg, *FPackageName::GetShortName(Path), RF_Public | RF_Standalone);
+		Mat->BlendMode = Blend;
+		Mat->SetShadingModel(MSM_Unlit); // UE 5.8: shading model is private; setter is the engine idiom
+		Mat->MaterialDomain = Domain;
+		return { Pkg, Mat };
+	};
+	auto FinishMaterial = [this](UPackage* Pkg, UMaterial* Mat)
+	{
+		if (Pkg == nullptr || Mat == nullptr)
+		{
+			return true; // already existed on disk; nothing to author
+		}
+		Mat->PreEditChange(nullptr);
+		Mat->PostEditChange();
+		const bool bSaved = SavePackage(Pkg, Mat);
+		if (!bSaved)
+		{
+			UE_LOG(LogTemp, Error, TEXT("BootstrapVFXMaterials: save failed for %s"), *Mat->GetName());
+		}
+		return bSaved;
+	};
+
+	// --- M_QinglanAdditive: emissive sprite/particle glow ----------------
+	{
+		const FString Path = ContentRoot + TEXT("/Materials/M_QinglanAdditive");
+		auto [Pkg, Mat] = BeginMaterial(Path, BLEND_Additive, MD_Surface);
+		if (Pkg)
+		{
+			UMaterialExpressionVectorParameter* Color = AddVectorParam(Mat, TEXT("Color"), FLinearColor(0.55f, 0.85f, 1.f, 1.f), -300);
+			UMaterialExpressionScalarParameter* Intensity = AddScalarParam(Mat, TEXT("Intensity"), 4.f, -100);
+			UMaterialExpressionMultiply* Emissive = AddMultiply(Mat, Color, 0, Intensity, 0, -200);
+			Mat->GetEditorOnlyData()->EmissiveColor.Connect(0, Emissive);
+			// Additive translucency scales by opacity; drive it with intensity too.
+			Mat->GetEditorOnlyData()->Opacity.Connect(0, Intensity);
+			bOk &= FinishMaterial(Pkg, Mat);
+		}
+	}
+
+	// --- M_QinglanDecalRing: telegraph disc on the ground -----------------
+	{
+		const FString Path = ContentRoot + TEXT("/Materials/M_QinglanDecalRing");
+		auto [Pkg, Mat] = BeginMaterial(Path, BLEND_Translucent, MD_DeferredDecal);
+		if (Pkg)
+		{
+			UMaterialExpressionTextureCoordinate* TexCoord = NewObject<UMaterialExpressionTextureCoordinate>(Mat);
+			TexCoord->MaterialExpressionEditorX = -900;
+			TexCoord->MaterialExpressionEditorY = -300;
+			Mat->GetExpressionCollection().AddExpression(TexCoord);
+
+			UMaterialExpressionConstant2Vector* Center = NewObject<UMaterialExpressionConstant2Vector>(Mat);
+			Center->R = 0.5f;
+			Center->G = 0.5f;
+			Center->MaterialExpressionEditorX = -900;
+			Center->MaterialExpressionEditorY = -80;
+			Mat->GetExpressionCollection().AddExpression(Center);
+
+			UMaterialExpressionSphereMask* Disc = NewObject<UMaterialExpressionSphereMask>(Mat);
+			Disc->A.Connect(0, TexCoord);
+			Disc->B.Connect(0, Center);
+			Disc->AttenuationRadius = 0.5f;  // UV space; covers the decal face
+			Disc->HardnessPercent = 12.f;    // soft edge keeps reads readable, not harsh
+			Disc->MaterialExpressionEditorX = -600;
+			Disc->MaterialExpressionEditorY = -200;
+			Mat->GetExpressionCollection().AddExpression(Disc);
+
+			UMaterialExpressionVectorParameter* Color = AddVectorParam(Mat, TEXT("Color"), FLinearColor(1.f, 0.42f, 0.12f, 1.f), -420);
+			UMaterialExpressionScalarParameter* Intensity = AddScalarParam(Mat, TEXT("Intensity"), 2.f, -40);
+
+			UMaterialExpressionMultiply* DiscTimesIntensity = AddMultiply(Mat, Disc, 0, Intensity, 0, -200);
+			UMaterialExpressionMultiply* Emissive = AddMultiply(Mat, Color, 0, DiscTimesIntensity, 0, -260);
+			Mat->GetEditorOnlyData()->EmissiveColor.Connect(0, Emissive);
+			Mat->GetEditorOnlyData()->Opacity.Connect(0, DiscTimesIntensity);
+			bOk &= FinishMaterial(Pkg, Mat);
+		}
+	}
+
+	// --- M_QinglanBarrier: fresnel edge shield -----------------------------
+	{
+		const FString Path = ContentRoot + TEXT("/Materials/M_QinglanBarrier");
+		auto [Pkg, Mat] = BeginMaterial(Path, BLEND_Translucent, MD_Surface);
+		if (Pkg)
+		{
+			UMaterialExpressionFresnel* Edge = NewObject<UMaterialExpressionFresnel>(Mat);
+			Edge->Exponent = 2.6f;
+			Edge->BaseReflectFraction = 0.04f;
+			Edge->MaterialExpressionEditorX = -700;
+			Edge->MaterialExpressionEditorY = -300;
+			Mat->GetExpressionCollection().AddExpression(Edge);
+
+			UMaterialExpressionVectorParameter* Color = AddVectorParam(Mat, TEXT("Color"), FLinearColor(0.4f, 0.95f, 0.75f, 1.f), -500);
+			UMaterialExpressionScalarParameter* Intensity = AddScalarParam(Mat, TEXT("Intensity"), 3.f, -60);
+
+			UMaterialExpressionMultiply* EdgeTimesIntensity = AddMultiply(Mat, Edge, 0, Intensity, 0, -200);
+			UMaterialExpressionMultiply* Emissive = AddMultiply(Mat, Color, 0, EdgeTimesIntensity, 0, -320);
+			Mat->GetEditorOnlyData()->EmissiveColor.Connect(0, Emissive);
+			Mat->GetEditorOnlyData()->Opacity.Connect(0, EdgeTimesIntensity);
+			bOk &= FinishMaterial(Pkg, Mat);
+		}
+	}
+	return bOk;
 }
 
 namespace
@@ -362,7 +519,7 @@ bool UQinglanContentBootstrap::BootstrapMaterials()
 		UPackage* Pkg = CreateOrFetchPackage(ContentRoot + TEXT("/Materials/") + Set.MaterialName);
 		const FName AssetName(*Set.MaterialName);
 		UMaterialInstanceConstant* MIC = NewObject<UMaterialInstanceConstant>(Pkg, AssetName, RF_Public | RF_Standalone);
-		MIC->SetParentMasterMaterial(Master);
+		MIC->Parent = Master; // UE 5.8: SetParentMasterMaterial removed; assign Parent directly
 
 		auto ApplyParam = [&](const TCHAR* ParamName, const FString& File, TextureGroup Group)
 		{
@@ -375,7 +532,7 @@ bool UQinglanContentBootstrap::BootstrapMaterials()
 			if (Tex)
 			{
 				SaveTexture(Tex);
-				MIC->SetTextureParameterValue(FMaterialParameterInfo(ParamName), Tex);
+				MIC->SetTextureParameterValueEditorOnly(FMaterialParameterInfo(ParamName), Tex); // UE 5.8: MIC editor-only setter
 			}
 		};
 		ApplyParam(TEXT("BaseColor"), Diff, TEXTUREGROUP_World);
@@ -478,7 +635,7 @@ namespace
 
 	UWorld* CreateNewMapWorld(const FString& MapName)
 	{
-		const FString PackagePath = ContentRoot + TEXT("/Maps/") + MapName + TEXT(".") + MapName);
+		const FString PackagePath = ContentRoot + TEXT("/Maps/") + MapName + TEXT(".") + MapName;
 		UPackage* Package = CreateOrFetchPackage(PackagePath);
 		UWorld* World = UWorld::CreateWorld(EWorldType::Inactive, false, *MapName, Package);
 		return World;

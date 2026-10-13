@@ -7,6 +7,8 @@
 #include "QinglanEnemyTypes.generated.h"
 
 class UAnimMontage;
+class UAnimSequence;
+class USkeletalMesh;
 class UNiagaraSystem;
 
 /** FSM states; decisions at 5-10 Hz, execution every tick. */
@@ -55,6 +57,9 @@ public:
 	UPROPERTY(EditDefaultsOnly) bool bRootImmune = false;
 	UPROPERTY(EditDefaultsOnly) float AggroRadius = 1500.f;
 	UPROPERTY(EditDefaultsOnly) FName SwordSocketId = NAME_None;
+	/** Presentation mesh/pose; filled from the import convention, null-safe. */
+	UPROPERTY(EditDefaultsOnly) TSoftObjectPtr<USkeletalMesh> Mesh;
+	UPROPERTY(EditDefaultsOnly) TSoftObjectPtr<UAnimSequence> IdleAnimation;
 	UPROPERTY(EditDefaultsOnly) TSoftObjectPtr<UAnimMontage> AttackMontage;
 	UPROPERTY(EditDefaultsOnly) TSoftObjectPtr<UAnimMontage> HitReactMontage;
 	UPROPERTY(EditDefaultsOnly) TSoftObjectPtr<UNiagaraSystem> DeathCue;

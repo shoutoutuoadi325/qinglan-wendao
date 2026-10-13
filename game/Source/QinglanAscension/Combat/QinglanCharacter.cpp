@@ -7,6 +7,7 @@
 #include "Combat/QinglanSwordComponent.h"
 #include "Combat/QinglanDodgeComponent.h"
 #include "Combat/QinglanCombatComponent.h"
+#include "Combat/QinglanTalismanComponent.h"
 #include "Combat/QinglanTechniqueComponent.h"
 #include "Core/QinglanCoreTypes.h"
 
@@ -24,6 +25,9 @@
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Animation/AnimSequence.h"
+#include "Engine/SkeletalMesh.h"
+#include "UObject/SoftObjectPath.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
@@ -218,7 +222,8 @@ namespace
 		FIntPoint ViewportSize(1, 1);
 		if (PC)
 		{
-			PC->GetViewportSize(ViewportSize);
+			// APlayerController::GetViewportSize takes two int32 refs, not FIntPoint.
+			PC->GetViewportSize(ViewportSize.X, ViewportSize.Y);
 		}
 		const FVector2D ScreenCenter(static_cast<float>(ViewportSize.X) * 0.5f, static_cast<float>(ViewportSize.Y) * 0.5f);
 		const float HalfDiagonal = FMath::Sqrt(FMath::Square(ScreenCenter.X) + FMath::Square(ScreenCenter.Y));
@@ -336,6 +341,9 @@ AQinglanCharacter::AQinglanCharacter()
 	// no members for them (owned by this actor as default subobjects).
 	CreateDefaultSubobject<UQinglanSwordComponent>(TEXT("SwordComponent"));
 	CreateDefaultSubobject<UQinglanDodgeComponent>(TEXT("DodgeComponent"));
+	// Talisman slots for the Q/R bindings (docs/02 section 1; docs/03 section 5);
+	// charges live in the profile subsystem, effects resolve against CombatComponent.
+	CreateDefaultSubobject<UQinglanTalismanComponent>(TEXT("TalismanComponent"));
 
 	// Enhanced Input assets. The mapping context path is contractual; action assets
 	// are null-guarded everywhere they are used.
@@ -376,6 +384,25 @@ void AQinglanCharacter::BeginPlay()
 	if (UCharacterMovementComponent* const Movement = GetCharacterMovement())
 	{
 		Movement->MaxWalkSpeed = WalkSpeed;
+	}
+
+	// Presentation wiring: resolve the imported player rig by convention
+	// (mesh import + anim bootstrap authors these); null-safe in test worlds.
+	if (USkeletalMeshComponent* const MeshComp = GetMesh())
+	{
+		if (USkeletalMesh* const Mesh = Cast<USkeletalMesh>(
+				FSoftObjectPath(TEXT("/Game/Qinglan/Characters/Human/SK_Human")).TryLoad()))
+		{
+			MeshComp->SetSkeletalMesh(Mesh);
+			MeshComp->SetRelativeLocation(FVector(0.f, 0.f, -QinglanCapsuleHalfHeight));
+			MeshComp->SetRelativeRotation(FRotator(0.f, -90.f, 0.f)); // rig faces +Y in the export
+			if (UAnimSequence* const Idle = Cast<UAnimSequence>(
+					FSoftObjectPath(TEXT("/Game/Qinglan/Characters/Human/AS_Idle")).TryLoad()))
+			{
+				MeshComp->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+				MeshComp->PlayAnimation(Idle, /*bLooping=*/true);
+			}
+		}
 	}
 
 	if (UQinglanDodgeComponent* const Dodge = QinglanFindComponent<UQinglanDodgeComponent>(this))
@@ -559,9 +586,12 @@ void AQinglanCharacter::InputTechniqueSlot(int32 Slot)
 
 void AQinglanCharacter::InputTalismanSlot(int32 Slot)
 {
-	// FIXME-CONTRACT: no talisman component/subsystem exists in the scaffold headers;
-	// route to it here once provided (docs/02 §1 slots Q/R).
-	UE_LOG(LogQinglanCombat, Verbose, TEXT("Talisman slot %d pressed; no talisman subsystem in scaffold"), Slot);
+	// docs/02 §1 slots Q/R; charge accounting and effect execution live in the
+	// talisman component (docs/03 §5).
+	if (UQinglanTalismanComponent* const Talisman = QinglanFindComponent<UQinglanTalismanComponent>(this))
+	{
+		Talisman->UseSlot(Slot);
+	}
 }
 
 void AQinglanCharacter::InputInteract(const FInputActionValue& /*Value*/)

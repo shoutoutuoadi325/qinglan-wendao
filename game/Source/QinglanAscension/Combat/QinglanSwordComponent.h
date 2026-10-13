@@ -6,6 +6,7 @@
 #include "Components/ActorComponent.h"
 #include "Combat/QinglanCombatState.h"
 #include "Core/QinglanCoreTypes.h"
+#include "UObject/SoftObjectPath.h"
 #include "QinglanSwordComponent.generated.h"
 
 class UQinglanCombatComponent;
@@ -134,6 +135,13 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Qinglan|Sword") float MaxSubstepDistance = 15.f;
 	/** Optional cosmetic montages; phase timers in code stay authoritative when null. */
 	UPROPERTY(EditDefaultsOnly, Category = "Qinglan|Sword") TArray<TObjectPtr<UAnimMontage>> SwingMontages;
+	/**
+	 * Fallback montage paths used when SwingMontages is empty (pure-C++ pawn,
+	 * no Blueprint defaults). QinglanAnimBootstrap authors these packages;
+	 * missing assets degrade to no montage. Order mirrors Cuts (cut 1..3).
+	 */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Qinglan|Sword")
+	TArray<FSoftObjectPath> SwingMontageSoftPaths;
 
 protected:
 	virtual void BeginPlay() override;
@@ -151,10 +159,14 @@ private:
 	void TickSweep();
 	void SweepSocketSegment(const FVector& From, const FVector& To);
 	void ApplyHit(AActor* Victim);
+	/** Blessings + permanent equipment sword-damage percent, resolved once per swing (docs/02 §4; docs/03 sections 4-5). */
+	float ResolveSwingSwordDamagePercent();
 	UQinglanCombatComponent* GetOwnerCombat() const;
 	USkeletalMeshComponent* GetOwnerMesh() const;
 	FVector GetBladeSocketLocation(FName SocketName) const;
 	void PlaySwingMontage();
+	/** Loads SwingMontageSoftPaths[CutIndex]; null when absent (no montage is fine). */
+	UAnimMontage* ResolveSwingMontageSoft(int32 CutIndex);
 	void StopSwingMontage();
 	/** Paused-game-time clock: accumulates DeltaTime only while unpaused. */
 	float Now = 0.f;
@@ -174,4 +186,6 @@ private:
 	TArray<TWeakObjectPtr<AActor>> SwingVictims;
 	FQinglanCastId SwingCastId;
 	int32 SwingSerialCounter = 0;
+	/** Sword-damage percent for the committed swing (blessings + relic + passives, docs/03 sections 4-5). */
+	float SwingSwordDamagePercent = 0.f;
 };

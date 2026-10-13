@@ -25,6 +25,7 @@
 
 #include "Dom/JsonObject.h"
 #include "EngineDefines.h" // UE 5.8: lives at Runtime/Engine/Public root, not Engine/
+#include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "HAL/FileManager.h"
@@ -445,7 +446,8 @@ bool FAutomationTestQinglanRankCosts::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Tier 2 available from Foundation"), UQinglanEconomyLibrary::IsTier2Available(EQinglanStage::FoundationEstablishment));
 
 	// --- Subsystem flow: purchases are atomic and gates gate ------------------
-	UQinglanProfileSubsystem* Profile = NewObject<UQinglanProfileSubsystem>(GetTransientPackage());
+	UGameInstance* ProfileOwner = NewObject<UGameInstance>(GetTransientPackage()); // UE 5.8 ClassWithin: subsystems need a GameInstance outer
+	UQinglanProfileSubsystem* Profile = NewObject<UQinglanProfileSubsystem>(ProfileOwner);
 	if (!TestNotNull(TEXT("Profile subsystem"), Profile))
 	{
 		return false;
@@ -664,7 +666,10 @@ bool FAutomationTestQinglanEndingGating::RunTest(const FString& Parameters)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanSaveRoundtrip, "Qinglan.Persistence.SaveChecksumRoundtrip", QinglanTestFlags)
 bool FAutomationTestQinglanSaveRoundtrip::RunTest(const FString& Parameters)
 {
-	UQinglanSaveSubsystem* SaveSubsystem = NewObject<UQinglanSaveSubsystem>(GetTransientPackage());
+	// UE 5.8 enforces ClassWithin: a UGameInstanceSubsystem must live inside a
+	// UGameInstance outer, so give the throwaway instance a throwaway owner.
+	UGameInstance* OwnerInstance = NewObject<UGameInstance>(GetTransientPackage());
+	UQinglanSaveSubsystem* SaveSubsystem = NewObject<UQinglanSaveSubsystem>(OwnerInstance);
 	if (!TestNotNull(TEXT("Save subsystem"), SaveSubsystem))
 	{
 		return false;
@@ -728,7 +733,8 @@ bool FAutomationTestQinglanSaveRoundtrip::RunTest(const FString& Parameters)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanTransactions, "Qinglan.Persistence.TransactionIdempotency", QinglanTestFlags)
 bool FAutomationTestQinglanTransactions::RunTest(const FString& Parameters)
 {
-	UQinglanProfileSubsystem* Profile = NewObject<UQinglanProfileSubsystem>(GetTransientPackage());
+	UGameInstance* ProfileOwner = NewObject<UGameInstance>(GetTransientPackage()); // UE 5.8 ClassWithin: subsystems need a GameInstance outer
+	UQinglanProfileSubsystem* Profile = NewObject<UQinglanProfileSubsystem>(ProfileOwner);
 	if (!TestNotNull(TEXT("Profile subsystem"), Profile))
 	{
 		return false;

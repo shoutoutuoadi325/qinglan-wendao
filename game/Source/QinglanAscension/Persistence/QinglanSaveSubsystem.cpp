@@ -332,9 +332,9 @@ namespace
 		{
 			return false;
 		}
-		const uint64 Checksum = QinglanSave::Fnv1a64(Body.GetData(), Body.Num());
-		WorkCopy->BodyChecksum = Checksum; // mirror only; not part of the body bytes
-
+		// The parser verifies the trailer over EVERY container byte except the
+		// trailer itself (header + body), so the writer must hash the same span:
+		// write header + body first, checksum those bytes, then append the trailer.
 		FMemoryWriter ContainerWriter(OutBytes);
 		uint32 Magic = SaveContainerMagic;
 		int32 ContainerVersion = SaveContainerVersion;
@@ -347,6 +347,12 @@ namespace
 		ContainerWriter << SaveSequence;
 		ContainerWriter << BodyLength;
 		ContainerWriter.Serialize(Body.GetData(), Body.Num());
+		if (ContainerWriter.IsError())
+		{
+			return false;
+		}
+		const uint64 Checksum = QinglanSave::Fnv1a64(OutBytes.GetData(), OutBytes.Num());
+		WorkCopy->BodyChecksum = Checksum; // mirror only; not part of the body bytes
 		uint64 Trailer = Checksum;
 		ContainerWriter << Trailer;
 		return !ContainerWriter.IsError();
@@ -485,24 +491,29 @@ bool UQinglanSaveSubsystem::SerializeVerified(const UQinglanSaveGame* Save, TArr
 	FText ParseError;
 	if (!DeserializeVerified(OutBytes, Parsed, ParseError))
 	{
+		UE_LOG(LogQinglanSave, Warning, TEXT("SerializeVerified: first parse failed: %s"), *ParseError.ToString());
 		OutBytes.Reset();
 		return false;
 	}
 	TArray<uint8> Reserialized;
 	if (!BuildContainerBytes(Parsed, Reserialized))
 	{
+		UE_LOG(LogQinglanSave, Warning, TEXT("SerializeVerified: reserialize failed"));
 		OutBytes.Reset();
 		return false;
 	}
 	UQinglanSaveGame* Reparsed = nullptr;
 	if (!DeserializeVerified(Reserialized, Reparsed, ParseError))
 	{
+		UE_LOG(LogQinglanSave, Warning, TEXT("SerializeVerified: reparse failed: %s"), *ParseError.ToString());
 		OutBytes.Reset();
 		return false;
 	}
 	const uint64 Reference = ComputeSaveFingerprint(Save);
 	if (ComputeSaveFingerprint(Parsed) != Reference || ComputeSaveFingerprint(Reparsed) != Reference)
 	{
+		UE_LOG(LogQinglanSave, Warning, TEXT("SerializeVerified: fingerprint drift ref=%llu parsed=%llu reparsed=%llu"),
+			Reference, ComputeSaveFingerprint(Parsed), ComputeSaveFingerprint(Reparsed));
 		OutBytes.Reset();
 		return false;
 	}

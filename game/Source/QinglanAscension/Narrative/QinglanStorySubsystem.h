@@ -44,6 +44,13 @@ public:
 	/** Scenes whose prerequisites are satisfied and are not yet completed. */
 	UFUNCTION(BlueprintPure) TArray<FName> GetPlayableMainScenes() const;
 	UFUNCTION(BlueprintPure) TArray<FName> GetAvailableSideQuests() const;
+	/** Ending-specific epilogue text keys for a quest, authored order [open,
+	 *  seal, shared] (side-quests.json epilogue_keys); empty for unknown quests. */
+	UFUNCTION(BlueprintPure) TArray<FName> GetQuestEpilogueKeys(FName QuestId) const;
+	/** The epilogue key for one ending (index 0 open / 1 seal / 2 shared); NAME_None when unauthored. */
+	UFUNCTION(BlueprintPure) FName GetQuestEpilogueKey(FName QuestId, EQinglanEnding Ending) const;
+	/** Journal key authored for a main scene or side-quest stage (journal_key); NAME_None when unauthored. */
+	UFUNCTION(BlueprintPure) FName GetStageJournalKey(FName SceneId) const;
 
 	// --- Scene playback ---
 	/** Begins a scene at a safe boundary. Returns false when prerequisites fail. */

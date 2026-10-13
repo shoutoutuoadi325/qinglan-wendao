@@ -6,8 +6,9 @@
 // interaction rather than per frame.
 //
 // FIXME-CONTRACT: the realm asset accessors are declared in
-// Narrative/QinglanStoryDataTypes.h alongside the story registry types, so
-// their definitions live here even though the expedition runtime
+// Narrative/QinglanStoryDataTypes.h alongside the story registry types; their
+// definitions live in Progression/QinglanRealmDataAsset.cpp (the richer,
+// warning-logging copy) even though the expedition runtime
 // (UQinglanRunSubsystem) is their primary consumer.
 #include "Narrative/QinglanStoryDataTypes.h"
 
@@ -62,28 +63,4 @@ const FQinglanRegistrySideQuest* UQinglanStoryRegistry::FindQuest(FName QuestId)
 		}
 	}
 	return nullptr;
-}
-
-// ---------------------------------------------------------------------------
-// UQinglanRealmDataAsset (mirrors data/examples/realm.json rooms[])
-// ---------------------------------------------------------------------------
-
-EQinglanRoomKind UQinglanRealmDataAsset::GetRoomKind(int32 RoomIndex) const
-{
-	// Out-of-range queries (including the -1 "no room" state) resolve to the
-	// entrance kind; rooms are authored contiguously from index 0.
-	if (!Rooms.IsValidIndex(RoomIndex))
-	{
-		return EQinglanRoomKind::Entrance;
-	}
-	return Rooms[RoomIndex].Kind;
-}
-
-int32 UQinglanRealmDataAsset::GetRoomShards(int32 RoomIndex) const
-{
-	if (!Rooms.IsValidIndex(RoomIndex))
-	{
-		return 0;
-	}
-	return Rooms[RoomIndex].SpiritShards;
 }

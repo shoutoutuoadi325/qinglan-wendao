@@ -16,23 +16,25 @@ enum class EQinglanVFXQuality : uint8
 
 namespace QinglanVFXCues
 {
+	// Extern declarations (UE builds error on namespace-scope FName global
+	// constructors in headers); definitions live in QinglanVFXCueComponent.cpp.
 	// Sword / melee
-	const FName SwordArc = "vfx.sword_arc";
-	const FName SwordImpact = "vfx.sword_impact";
+	extern const FName SwordArc;           // "vfx.sword_arc"
+	extern const FName SwordImpact;        // "vfx.sword_impact"
 	// Techniques
-	const FName JadeArcRelease = "vfx.jade_sword_arc";
-	const FName EmberLanceRelease = "vfx.ember_lance";
-	const FName EmberTrail = "vfx.ember_trail";
-	const FName FlowingWardBarrier = "vfx.flowing_ward";
-	const FName ThunderSealStrike = "vfx.thunder_seal";
-	const FName ConductArc = "vfx.conduct_arc";
-	const FName StoneAegisBarrier = "vfx.stone_aegis";
-	const FName VerdantHeal = "vfx.verdant_pulse";
-	const FName MistStepBurst = "vfx.mist_step";
-	const FName OrbitingBlades = "vfx.orbiting_blades";
+	extern const FName JadeArcRelease;     // "vfx.jade_sword_arc"
+	extern const FName EmberLanceRelease;  // "vfx.ember_lance"
+	extern const FName EmberTrail;         // "vfx.ember_trail"
+	extern const FName FlowingWardBarrier; // "vfx.flowing_ward"
+	extern const FName ThunderSealStrike;  // "vfx.thunder_seal"
+	extern const FName ConductArc;         // "vfx.conduct_arc"
+	extern const FName StoneAegisBarrier;  // "vfx.stone_aegis"
+	extern const FName VerdantHeal;        // "vfx.verdant_pulse"
+	extern const FName MistStepBurst;      // "vfx.mist_step"
+	extern const FName OrbitingBlades;     // "vfx.orbiting_blades"
 	// World / enemies
-	const FName Portal = "vfx.portal";
-	const FName TelegraphRing = "vfx.telegraph_ring";
-	const FName BossGroundMarker = "vfx.boss_ground_marker";
-	const FName DeathDissolve = "vfx.death_dissolve";
+	extern const FName Portal;             // "vfx.portal"
+	extern const FName TelegraphRing;      // "vfx.telegraph_ring"
+	extern const FName BossGroundMarker;   // "vfx.boss_ground_marker"
+	extern const FName DeathDissolve;      // "vfx.death_dissolve"
 }

@@ -13,12 +13,12 @@
 #include "Combat/QinglanCombatComponent.h"
 #include "Combat/QinglanTechniqueComponent.h"
 #include "Engine/Engine.h"
-#include "Engine/StringTable.h"
 #include "Engine/World.h"
-#include "Internationalization/NumberFormattingOptions.h"
+#include "Internationalization/StringTable.h" // UE 5.8 location (was Engine/StringTable.h)
+#include "Internationalization/StringTableCore.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
-#include "Kismet/WidgetBlueprintLibrary.h"
+#include "Blueprint/WidgetBlueprintLibrary.h" // UMG public root (UMG module in Build.cs)
 #include "Narrative/QinglanStorySubsystem.h"
 #include "QinglanAscension.h"
 #include "UObject/UObjectGlobals.h"
@@ -128,7 +128,8 @@ bool UQinglanHUDStatics::HasGameText(FName Key)
 	if (UStringTable* Table = LoadGameStringTable())
 	{
 		const TSharedPtr<FStringTable> Root = Table->GetMutableStringTable();
-		return Root.IsValid() && Root->GetString(Key.ToString()) != nullptr;
+		// UE 5.8: FStringTable has no GetString; FindEntry is the key-exists probe.
+		return Root.IsValid() && Root->FindEntry(FTextKey(Key.ToString())) != nullptr;
 	}
 	return false;
 }
@@ -136,21 +137,21 @@ bool UQinglanHUDStatics::HasGameText(FName Key)
 FText UQinglanHUDStatics::FormatGameTextWithNumber(FName Key, FName ArgName, int32 Value)
 {
 	FFormatNamedArguments Args;
-	Args.Add(ArgName, FText::AsNumber(Value));
+	Args.Add(ArgName.ToString(), FText::AsNumber(Value));
 	return FText::Format(GameText(Key), Args);
 }
 
 FText UQinglanHUDStatics::FormatGameTextWithInt64(FName Key, FName ArgName, int64 Value)
 {
 	FFormatNamedArguments Args;
-	Args.Add(ArgName, FText::AsNumber(Value));
+	Args.Add(ArgName.ToString(), FText::AsNumber(Value));
 	return FText::Format(GameText(Key), Args);
 }
 
 FText UQinglanHUDStatics::FormatGameTextWithText(FName Key, FName ArgName, const FText& Value)
 {
 	FFormatNamedArguments Args;
-	Args.Add(ArgName, Value);
+	Args.Add(ArgName.ToString(), Value);
 	return FText::Format(GameText(Key), Args);
 }
 
@@ -179,8 +180,8 @@ FText UQinglanHUDStatics::FormatPercent(float FractionZeroToOne)
 FText UQinglanHUDStatics::FormatCooldownSeconds(float Seconds)
 {
 	FNumberFormattingOptions Options;
-	Options.MinimumFractionDigits = CooldownFractionDigits;
-	Options.MaximumFractionDigits = CooldownFractionDigits;
+	Options.MinimumFractionalDigits = CooldownFractionDigits;
+	Options.MaximumFractionalDigits = CooldownFractionDigits;
 	return FText::AsNumber(FMath::Max(0.f, Seconds), &Options);
 }
 
@@ -241,7 +242,8 @@ UUserWidget* UQinglanHUDStatics::CreateWidgetById(const UObject* WorldContextObj
 		? GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::LogAndReturnNull)
 		: nullptr;
 	APlayerController* OwningPlayer = World ? World->GetFirstPlayerController() : nullptr;
-	return UWidgetBlueprintLibrary::Create(WorldContextObject, Class, OwningPlayer);
+	// Create takes a mutable context (world resolution only); the const here just pins the lookup.
+	return UWidgetBlueprintLibrary::Create(const_cast<UObject*>(WorldContextObject), Class, OwningPlayer);
 }
 
 void UQinglanHUDStatics::RegisterWidgetClass(FName WidgetId, const FString& ClassObjectPath)

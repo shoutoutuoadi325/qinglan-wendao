@@ -29,11 +29,14 @@
 #include "Combat/QinglanCharacter.h"
 #include "Combat/QinglanCombatComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
+#include "Animation/AnimSequence.h"
+#include "Engine/SkeletalMesh.h"
 
 namespace
 {
@@ -191,7 +194,7 @@ void AQinglanEnemyCharacter::Tick(float DeltaSeconds)
 
 FName AQinglanEnemyCharacter::GetEnemyId() const
 {
-	return EnemyData.IsValid() ? EnemyData->EnemyId : NAME_None;
+	return EnemyData != nullptr ? EnemyData->EnemyId : NAME_None;
 }
 
 bool AQinglanEnemyCharacter::IsAlive() const
@@ -240,7 +243,7 @@ float AQinglanEnemyCharacter::TakeDamage(float Damage, const FDamageEvent& Damag
 			TelegraphTimer = 0.f;
 			bAttackCommitted = false;
 			AI->NotifyStaggerBegan();
-			if (EnemyData.IsValid())
+			if (EnemyData != nullptr)
 			{
 				if (UAnimMontage* Montage = EnemyData->HitReactMontage.LoadSynchronous())
 				{
@@ -262,7 +265,7 @@ float AQinglanEnemyCharacter::TakeDamage(float Damage, const FDamageEvent& Damag
 		{
 			GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		}
-		if (EnemyData.IsValid())
+		if (EnemyData != nullptr)
 		{
 			// Death cue placeholder (docs/05 section 3); null asset degrades safely.
 			if (UNiagaraSystem* DeathCue = EnemyData->DeathCue.LoadSynchronous())
@@ -294,6 +297,27 @@ void AQinglanEnemyCharacter::InitializeFromData(UQinglanEnemyDataAsset* InData)
 		return;
 	}
 	EnemyData = InData;
+
+	// Presentation wiring (mesh/pose conventions from the enemy catalog);
+	// every step null-safe so tests without imported content still run.
+	if (USkeletalMeshComponent* MeshComp = GetMesh())
+	{
+		if (USkeletalMesh* Mesh = InData->Mesh.LoadSynchronous())
+		{
+			MeshComp->SetSkeletalMesh(Mesh);
+			// Pivot the rig onto the capsule: root at capsule base, facing
+			// the movement forward axis (Quaternius exports face +Y).
+			const float CapsuleHalfHeight = GetCapsuleComponent() ? GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight() : 88.f;
+			MeshComp->SetRelativeLocation(FVector(0.f, 0.f, -CapsuleHalfHeight));
+			MeshComp->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));
+			if (UAnimSequence* Idle = InData->IdleAnimation.LoadSynchronous())
+			{
+				MeshComp->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+				MeshComp->SetAnimation(Idle);
+				MeshComp->PlayAnimation(Idle, /*bLooping=*/true);
+			}
+		}
+	}
 
 	// Fresh attributes from the archetype (HP/Defense per docs/02 sections 8-9).
 	FQinglanAttributes Base;
@@ -381,7 +405,7 @@ void AQinglanEnemyCharacter::UpdateDecisions(float DeltaSeconds)
 	// --- Shared windup entry (lambdas keep protected-member access) ---
 	auto BeginWindup = [this, AI]()
 	{
-		if (!AI || !EnemyData.IsValid())
+		if (!AI || EnemyData == nullptr)
 		{
 			return;
 		}
@@ -462,7 +486,7 @@ void AQinglanEnemyCharacter::UpdateDecisions(float DeltaSeconds)
 		}
 		// Shared attack arbitration: melee windup slots (<= 3 simultaneous)
 		// or the separate ranged budget (docs/05 section 5).
-		const bool bRanged = EnemyData.IsValid() && EnemyData->bRanged;
+		const bool bRanged = EnemyData != nullptr && EnemyData->bRanged;
 		const bool bGranted = bRanged ? AI->TryAcquireRangedAttackSlot()
 			: AI->TryAcquireMeleeWindupSlot();
 		if (bGranted)

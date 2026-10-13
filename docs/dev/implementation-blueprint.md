@@ -1,5 +1,5 @@
 # QinglanAscension — Consolidated Implementation Blueprint
-Repo: `/inspire/hdd/project/qianghuaxuexi/s26044/qinglan-wendao` (docs + data + tools only; `game/` Unreal project does not exist yet). Engine: UE 5.8, C++ gameplay / Blueprint presentation / Niagara / Enhanced Input, **no GAS** (lightweight ability components), offline-only, EN + zh-Hans.
+Repo: `/inspire/hdd/project/qianghuaxuexi/s26044/qinglan-wendao` (docs + data + tools + `game/` UE 5.8 project: runtime module `QinglanAscension`, editor module `QinglanAscensionEditor`). Engine: UE 5.8, C++ gameplay / Blueprint presentation / Niagara / Enhanced Input, **no GAS** (lightweight ability components), offline-only, EN + zh-Hans.
 
 ---
 

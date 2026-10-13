@@ -83,5 +83,17 @@
   "settings.feature.gpu_particles.reason": "Requires a validated graphics backend above the Performance preset.",
   "settings.feature.low_flash_mode.reason": "Always available; reduces flashes when the accessibility setting is on.",
   "settings.feature.unavailable.reason": "Not available on this hardware or quality preset.",
-  "hud.clock": "{minutes}:{seconds}"
+  "hud.clock": "{minutes}:{seconds}",
+  "relic.jade_pendant.name": "Jade Pendant",
+  "relic.jade_pendant.desc": "+8 barrier points from Flowing Ward and Stone Aegis; you take 5% more damage while the jade wards burn.",
+  "relic.ember_bead.name": "Ember Bead",
+  "relic.ember_bead.desc": "Burn lasts 2 s longer on foes you ignite; the bead's heat never quite leaves your palm.",
+  "relic.river_pearl.name": "River Pearl",
+  "relic.river_pearl.desc": "Wet lasts 2 s longer where your arts land; techniques cost 5% more energy as the current drags at your casting.",
+  "relic.thunder_charm.name": "Thunder Charm",
+  "relic.thunder_charm.desc": "Conduct hits deal 20% more damage; the charm's edge shaves your guard — you take 5% more damage.",
+  "relic.mountain_token.name": "Mountain Token",
+  "relic.mountain_token.desc": "+20 max health while carried; the stone's weight slows your blade by 8% sword damage.",
+  "relic.verdant_seed.name": "Verdant Seed",
+  "relic.verdant_seed.desc": "Healing you receive is 15% stronger; the seedling draws on your qi — techniques cost 5% more energy."
 }

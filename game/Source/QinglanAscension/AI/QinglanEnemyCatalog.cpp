@@ -5,6 +5,9 @@
 // the C++ constants stay the reference.
 #include "AI/QinglanEnemyCatalog.h"
 
+#include "Misc/Paths.h"
+#include "UObject/SoftObjectPath.h"
+
 namespace QinglanPatternIds
 {
 	FName SweepingBlade()   { static const FName V(TEXT("sweeping_blade"));   return V; }
@@ -370,6 +373,39 @@ namespace QinglanEnemyCatalog
 		Asset->bRanged = Spec.bRanged;
 		Asset->bRootImmune = Spec.bRootImmune;
 		Asset->AggroRadius = Spec.AggroRadius;
+
+		// Presentation convention (mesh import + anim bootstrap paths):
+		// /Game/Qinglan/Characters/<Group>/SK_<Mesh> and
+		// /Game/Qinglan/Characters/<Group>/Montages/AM_<Group>_Attack|HitReact.
+		// Every reference null-safe: absent assets degrade to the bind pose.
+		static const TMap<FName, const TCHAR*> MeshGroups = {
+			{ FName(TEXT("spirit_wolf")),         TEXT("Monsters/SK_Skeleton") },
+			{ FName(TEXT("corrupted_disciple")),  TEXT("Human/SK_Human") },
+			{ FName(TEXT("hollow_archer")),       TEXT("Monsters/SK_Bat") },
+			{ FName(TEXT("stone_sentinel")),      TEXT("Knight/SK_Knight") },
+			{ FName(TEXT("ember_wisp")),          TEXT("Monsters/SK_Slime") },
+			{ FName(TEXT("rootbound_keeper")),    TEXT("Monsters/SK_Slime") },
+			{ FName(TEXT("bamboo_guardian")),     TEXT("Knight/SK_Knight") },
+			{ FName(TEXT("ashen_guardian")),      TEXT("Knight/SK_Knight") },
+			{ FName(TEXT("broken_guardian")),     TEXT("Monsters/SK_Dragon") },
+		};
+		if (const TCHAR* const* Group = MeshGroups.Find(Spec.EnemyId))
+		{
+			// Group[0] is already a TCHAR*; dereferencing it would pass one code unit.
+			const FString GroupPath = FString::Printf(TEXT("/Game/Qinglan/Characters/%s"), Group[0]);
+			const FString GroupDir = GroupPath.Left(GroupPath.Find(TEXT("/SK_")));
+			const FString GroupName = FPaths::GetBaseFilename(GroupDir);
+			Asset->Mesh = TSoftObjectPtr<USkeletalMesh>(FSoftObjectPath(GroupPath));
+			Asset->IdleAnimation = TSoftObjectPtr<UAnimSequence>(FSoftObjectPath(GroupDir / TEXT("AS_Idle")));
+			// The anim bootstrap names montages AM_<GroupFolder>_<Suffix>; the
+			// Human folder holds the player combo cuts, so humanoid enemies
+			// reuse the first cut as their attack swing.
+			const TCHAR* AttackSuffix = GroupName == TEXT("Human") ? TEXT("SwordCut_1") : TEXT("Attack");
+			Asset->AttackMontage = TSoftObjectPtr<UAnimMontage>(FSoftObjectPath(
+				FString::Printf(TEXT("%s/Montages/AM_%s_%s"), *GroupDir, *GroupName, AttackSuffix)));
+			Asset->HitReactMontage = TSoftObjectPtr<UAnimMontage>(FSoftObjectPath(
+				FString::Printf(TEXT("%s/Montages/AM_%s_HitReact"), *GroupDir, *GroupName)));
+		}
 
 		if (UQinglanBossDataAsset* BossAsset = Cast<UQinglanBossDataAsset>(Asset))
 		{

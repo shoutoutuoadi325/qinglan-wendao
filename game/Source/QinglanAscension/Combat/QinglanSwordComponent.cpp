@@ -6,6 +6,7 @@
 #include "Combat/QinglanSwordComponent.h"
 
 #include "QinglanAscension.h"
+#include "Abilities/QinglanBlessingLibrary.h"
 #include "Combat/QinglanCombatComponent.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -13,6 +14,7 @@
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
 #include "Engine/World.h"
+#include "Progression/QinglanEconomyLibrary.h"
 
 namespace
 {
@@ -36,6 +38,26 @@ UQinglanSwordComponent::UQinglanSwordComponent()
 		FQinglanSwordCut{ 0.16f, 0.10f, 0.24f, 0.9f }, // Cut 2
 		FQinglanSwordCut{ 0.22f, 0.12f, 0.32f, 1.3f }  // Cut 3
 	};
+
+	// Convention paths authored by QinglanAnimBootstrap (config-overridable).
+	SwingMontageSoftPaths = {
+		FSoftObjectPath(TEXT("/Game/Qinglan/Characters/Human/Montages/AM_SwordCut_1")),
+		FSoftObjectPath(TEXT("/Game/Qinglan/Characters/Human/Montages/AM_SwordCut_2")),
+		FSoftObjectPath(TEXT("/Game/Qinglan/Characters/Human/Montages/AM_SwordCut_3")),
+	};
+}
+
+UAnimMontage* UQinglanSwordComponent::ResolveSwingMontageSoft(int32 CutIndex)
+{
+	if (!SwingMontageSoftPaths.IsValidIndex(CutIndex) || !SwingMontageSoftPaths[CutIndex].IsValid())
+	{
+		return nullptr;
+	}
+	if (UObject* Resolved = SwingMontageSoftPaths[CutIndex].TryLoad())
+	{
+		return Cast<UAnimMontage>(Resolved);
+	}
+	return nullptr;
 }
 
 void UQinglanSwordComponent::BeginPlay()
@@ -147,9 +169,28 @@ void UQinglanSwordComponent::StartSwing(int32 CutIndex)
 	bHavePreviousSocketLocations = false;
 	CloseWindow();
 	bHasBufferedAttack = false;    // the buffer is consumed by starting this swing
+	// Resolve the swing's sword-damage percent once here: loadout swaps are
+	// rejected mid-expedition and blessings change only between rooms, so the
+	// committed swing can safely carry one stable total (docs/03 section 4
+	// "add within category, apply once").
+	SwingSwordDamagePercent = ResolveSwingSwordDamagePercent();
 	EnterPhase(EQinglanSwordPhase::Windup);
 	PlaySwingMontage();
 	OnSwingStarted.Broadcast(ComboIndex, GetSwingId());
+}
+
+float UQinglanSwordComponent::ResolveSwingSwordDamagePercent()
+{
+	// Sword-damage category total: expedition blessings plus the permanent
+	// equipment fold (Sword Discipline +10%; relic bonuses/tradeoffs,
+	// docs/03 sections 4-5). Headless contexts without a profile fold the
+	// blessing part only.
+	FQinglanBlessingModifiers Mods;
+	TArray<FName> Owned;
+	UQinglanBlessingLibrary::GetOwnedBlessings(this, Owned);
+	UQinglanBlessingLibrary::ComputeModifiers(Owned, Mods);
+	UQinglanEconomyLibrary::AppendPermanentModifiers(this, Mods);
+	return Mods.SwordDamagePercent;
 }
 
 void UQinglanSwordComponent::OpenWindow()
@@ -405,7 +446,10 @@ void UQinglanSwordComponent::ApplyHit(AActor* Victim)
 	SwingVictims.AddUnique(Victim);
 
 	// Raw = Power * Coefficient + Flat (docs/02 §5); the sword's coefficient is 1 and
-	// the per-cut multiplier comes from the §4 table.
+	// the per-cut multiplier comes from the §4 table. Sword-damage percents
+	// (blessings + relic + passives) apply to the complete raw expression once
+	// (docs/03 section 4 "add within category, apply once"), resolved per swing
+	// in StartSwing.
 	const FQinglanSwordCut& Cut = Cuts[ComboIndex];
 	FQinglanDamageEvent Event;
 	Event.Attacker = GetOwner();
@@ -414,7 +458,8 @@ void UQinglanSwordComponent::ApplyHit(AActor* Victim)
 	Event.HitOrdinal = 1; // one hit per victim per swing; multi-tick effects would increment deliberately
 	Event.TechniqueId = GetSwingId();
 	Event.Element = EQinglanElement::None;
-	Event.RawMagnitude = OwnerCombat->GetTechniquePower() * SwordBaseCoefficient * Cut.PowerMultiplier + SwordFlatDamage;
+	Event.RawMagnitude = (OwnerCombat->GetTechniquePower() * SwordBaseCoefficient * Cut.PowerMultiplier + SwordFlatDamage)
+		* (1.f + SwingSwordDamagePercent / 100.f);
 	Event.Timestamp = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f; // paused-game-time timestamp
 
 	VictimCombat->ApplyDamage(Event);
@@ -437,7 +482,13 @@ void UQinglanSwordComponent::PlaySwingMontage()
 		return;
 	}
 	UAnimInstance* const AnimInstance = MeshComp->GetAnimInstance();
-	UAnimMontage* const Montage = SwingMontages.IsValidIndex(ComboIndex) ? SwingMontages[ComboIndex].Get() : nullptr;
+	UAnimMontage* Montage = SwingMontages.IsValidIndex(ComboIndex) ? SwingMontages[ComboIndex].Get() : nullptr;
+	if (Montage == nullptr)
+	{
+		// Pure-C++ pawn fallback: resolve the bootstrapped montage by well-known
+		// package path (QinglanAnimBootstrap authors these); null-safe.
+		Montage = ResolveSwingMontageSoft(ComboIndex);
+	}
 	if (AnimInstance && Montage)
 	{
 		// Cosmetic only: phase timers above stay authoritative; notifies refine the window.

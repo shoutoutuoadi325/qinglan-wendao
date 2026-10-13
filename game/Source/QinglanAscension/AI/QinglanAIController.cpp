@@ -16,6 +16,7 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
+#include "Navigation/PathFollowingComponent.h" // full EPathFollowingRequestResult enumerators (AIController.h only forward-declares the enum)
 #include "Sound/SoundBase.h"
 
 DEFINE_LOG_CATEGORY(LogQinglanAI);

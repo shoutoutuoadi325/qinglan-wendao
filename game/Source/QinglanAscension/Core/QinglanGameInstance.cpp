@@ -20,6 +20,7 @@
 #include "Engine/AssetManager.h"
 #include "Engine/StreamableManager.h"
 #include "Engine/World.h"
+#include "Internationalization/Culture.h" // complete FCulture for GetName()
 #include "Internationalization/Internationalization.h"
 #include "Kismet/GameplayStatics.h"
 #include "Narrative/QinglanStorySubsystem.h"
@@ -136,7 +137,9 @@ namespace
 			return; // returning players keep their persisted culture
 		}
 		FInternationalization& I18N = FInternationalization::Get();
-		const FString OSLanguage = I18N.GetCurrentLanguage();
+		// GetCurrentLanguage returns an FCultureRef (TSharedRef<FCulture>); the
+		// culture name (eg "zh-Hans-CN") is the string the prefix check needs.
+		const FString OSLanguage = I18N.GetCurrentLanguage()->GetName();
 		if (OSLanguage.StartsWith(TEXT("zh")))
 		{
 			if (I18N.SetCurrentCulture(TEXT("zh-Hans")))

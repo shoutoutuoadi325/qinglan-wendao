@@ -18,6 +18,8 @@ namespace
 	constexpr int32 MaxNarrativeEntries = 1024;      // bounded array (§1.6)
 	constexpr int32 MaxBlessingEntries = 64;         // bounded array (§1.6); 2 drafted per expedition (§1.4)
 	constexpr int32 MaxRoomEntries = 32;             // 7-room contract (§1.4), generous bound
+	constexpr int32 MaxTalismanChargeEntries = 16;   // bounded map (§1.6); 6 catalog talismans
+	constexpr int32 MaxTalismanCharges = 9;          // charges 0..9; catalog ships at most 2 (docs/03 section 5)
 	// FNV-1a constants for UQinglanSaveGame::BodyChecksum ("detects corruption,
 	// not tampering", docs/05-technical-architecture.md §6).
 	constexpr uint64 Fnv1a64OffsetBasis = 0xcbf29ce484222325ULL;
@@ -29,10 +31,11 @@ namespace
 		Seen.Reserve(Values.Num());
 		for (const FName Value : Values)
 		{
-			if (!Seen.Add(Value).IsSet())
+			if (Seen.Contains(Value))
 			{
 				return true;
 			}
+			Seen.Add(Value);
 		}
 		return false;
 	}
@@ -257,6 +260,59 @@ namespace QinglanSave
 			!IsBoundedNameArray(Save->CommittedTransactionIds, MaxTransactionEntries, "committed transactions", OutError))
 		{
 			return false;
+		}
+
+		// Relics/passives: unique ids, equipped subset of owned, equip limits
+		// (one relic, two passives — docs/03 sections 4-5; tables hold limits).
+		if (HasDuplicates(Save->OwnedRelics) || HasDuplicates(Save->OwnedPassives) || HasDuplicates(Save->EquippedPassives))
+		{
+			UE_LOG(LogQinglanSave, Error, TEXT("Save invariant 'unique relic/passive ids' failed"));
+			OutError = Loc(TEXT("save.invalid"));
+			return false;
+		}
+		if (!IsBoundedNameArray(Save->OwnedRelics, MaxNarrativeEntries, "owned relics", OutError) ||
+			!IsBoundedNameArray(Save->OwnedPassives, MaxNarrativeEntries, "owned passives", OutError) ||
+			!IsBoundedNameArray(Save->EquippedPassives, MaxNarrativeEntries, "equipped passives", OutError))
+		{
+			return false;
+		}
+		{
+			const TSet<FName> OwnedRelics(Save->OwnedRelics);
+			if (!Save->EquippedRelic.IsNone() && !OwnedRelics.Contains(Save->EquippedRelic))
+			{
+				UE_LOG(LogQinglanSave, Error, TEXT("Save invariant 'equipped relic owned' failed"));
+				OutError = Loc(TEXT("save.invalid"));
+				return false;
+			}
+			const TSet<FName> OwnedPassives(Save->OwnedPassives);
+			for (const FName EquippedPassive : Save->EquippedPassives)
+			{
+				if (!OwnedPassives.Contains(EquippedPassive))
+				{
+					UE_LOG(LogQinglanSave, Error, TEXT("Save invariant 'equipped passive owned' failed"));
+					OutError = Loc(TEXT("save.invalid"));
+					return false;
+				}
+			}
+		}
+
+		// Talisman charges: bounded map, non-empty ids, values 0..9 (docs/03
+		// section 5 ships at most 2 charges per talisman; the bound is the sane
+		// corruption guard, not a gameplay limit).
+		if (Save->TalismanCharges.Num() > MaxTalismanChargeEntries)
+		{
+			UE_LOG(LogQinglanSave, Error, TEXT("Save invariant 'bounded talisman charges' failed"));
+			OutError = Loc(TEXT("save.invalid"));
+			return false;
+		}
+		for (const TPair<FName, int32>& Charge : Save->TalismanCharges)
+		{
+			if (Charge.Key.IsNone() || Charge.Value < 0 || Charge.Value > MaxTalismanCharges)
+			{
+				UE_LOG(LogQinglanSave, Error, TEXT("Save invariant 'talisman charges 0..9' failed"));
+				OutError = Loc(TEXT("save.invalid"));
+				return false;
+			}
 		}
 
 		const FQinglanNarrativeState& Narrative = Save->Narrative;

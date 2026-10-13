@@ -97,10 +97,11 @@ namespace
 		{
 			bAttempted = true;
 			// FString wrap first: FSoftObjectPath's TCHAR* constructor is explicit
-			// in some engine versions, the FString one never is. The named local
-			// also avoids the vexing parse of Soft(FSoftObjectPath(FString(X))).
+			// in some engine versions, the FString one never is. Brace init keeps
+			// this a variable even though FSoftObjectPath(Name) reads like a
+			// parenthesized parameter declarator (vexing parse).
 			const FString RegistrySoftPath(QinglanStoryRuntime::StoryRegistrySoftPath);
-			const TSoftObjectPtr<UQinglanStoryRegistry> Soft(FSoftObjectPath(RegistrySoftPath));
+			const TSoftObjectPtr<UQinglanStoryRegistry> Soft{FSoftObjectPath(RegistrySoftPath)};
 			UQinglanStoryRegistry* Loaded = Soft.LoadSynchronous();
 			if (Loaded != nullptr)
 			{
@@ -376,6 +377,48 @@ namespace
 		Story->OnObjectiveUpdated.Broadcast(Objective.ObjectiveId, TableText(Objective.TextKey));
 	}
 
+	/** True when every completion flag of the quest is set; set semantics make
+	 *  this idempotent. SQ01/SQ04-SQ08 reach it through the final stage's scene
+	 *  transaction, SQ02/SQ03 through the atomic effective-agreement commit. */
+	bool IsQuestComplete(const FQinglanStorySession& Session, const FQinglanRegistrySideQuest& Quest)
+	{
+		return HasAllFlags(Session, Quest.CompletionFlags);
+	}
+
+	/**
+	 * Data-driven quest-completion reward: unlocks the quest's imported
+	 * rewards.technique_access ids (RewardTechniqueIds; side-quests.json
+	 * rewards, blueprint section 2.5 "Mist Step (SQ04) + Orbiting Blades (SQ05)
+	 * via training access") through the profile subsystem's idempotent
+	 * UnlockTechnique. Unknown technique ids are rejected by the profile
+	 * subsystem itself, so an unresolvable reward is a null-safe no-op.
+	 */
+	void GrantQuestRewardTechniques(const UQinglanStorySubsystem* Story, const FQinglanStorySession& Session, const FQinglanRegistrySideQuest& Quest)
+	{
+		if (Quest.RewardTechniqueIds.Num() == 0 || !IsQuestComplete(Session, Quest))
+		{
+			return;
+		}
+		const UGameInstance* GameInstance = Story->GetGameInstance();
+		UQinglanProfileSubsystem* Profile = GameInstance ? GameInstance->GetSubsystem<UQinglanProfileSubsystem>() : nullptr;
+		if (Profile == nullptr)
+		{
+			return;
+		}
+		for (const FName TechniqueId : Quest.RewardTechniqueIds)
+		{
+			if (TechniqueId == NAME_None)
+			{
+				continue;
+			}
+			// Transaction id style mirrors the agreement reward journaling key
+			// ("sq.<questid>.reward"), suffixed with the technique id.
+			Profile->UnlockTechnique(
+				FName(*FString::Printf(TEXT("sq.%s.reward.%s"), *Quest.QuestId.ToString(), *TechniqueId.ToString())),
+				TechniqueId);
+		}
+	}
+
 	void CompleteSceneById(UQinglanStorySubsystem* Story, FQinglanStorySession& Session, FName SceneId, bool bRevisit)
 	{
 		const UQinglanStoryRegistry* Registry = LoadStoryRegistryOnce();
@@ -418,6 +461,15 @@ namespace
 				{
 					Profile->MarkSideQuestStageComplete(SceneId);
 				}
+			}
+			// Quest-completion rewards ride the same one-time transaction: the
+			// completion flags were just applied by this scene's SetsFlags (or by
+			// the atomic effective commit before it called in), so a now-complete
+			// quest grants its technique access exactly once and replays of any
+			// stage stay no-ops (crash-after-commit never re-awards; spec section 3).
+			if (const FQinglanRegistrySideQuest* Quest = Registry->FindQuest(QuestId))
+			{
+				GrantQuestRewardTechniques(Story, Session, *Quest);
 			}
 		}
 
@@ -815,6 +867,42 @@ TArray<FName> UQinglanStorySubsystem::GetAvailableSideQuests() const
 		}
 	}
 	return Result;
+}
+
+TArray<FName> UQinglanStorySubsystem::GetQuestEpilogueKeys(FName QuestId) const
+{
+	// Authored order [open, seal, shared] (side-quests.json epilogue_keys);
+	// CH07_S04's closure cards index the entry for the confirmed ending.
+	TArray<FName> Result;
+	const UQinglanStoryRegistry* Registry = LoadStoryRegistryOnce();
+	const FQinglanRegistrySideQuest* Quest = Registry ? Registry->FindQuest(QuestId) : nullptr;
+	if (Quest != nullptr)
+	{
+		Result = Quest->EpilogueKeys;
+	}
+	return Result;
+}
+
+FName UQinglanStorySubsystem::GetQuestEpilogueKey(FName QuestId, EQinglanEnding Ending) const
+{
+	// epilogue_keys are authored [open, seal, shared]; EQinglanEnding declares
+	// the same order after None (Core/QinglanCoreTypes.h), so the enum indexes
+	// the authored slots directly.
+	if (Ending == EQinglanEnding::None)
+	{
+		return NAME_None;
+	}
+	const TArray<FName> Keys = GetQuestEpilogueKeys(QuestId);
+	const int32 Index = static_cast<int32>(Ending) - 1;
+	return Keys.IsValidIndex(Index) ? Keys[Index] : NAME_None;
+}
+
+FName UQinglanStorySubsystem::GetStageJournalKey(FName SceneId) const
+{
+	const UQinglanStoryRegistry* Registry = LoadStoryRegistryOnce();
+	FName QuestId = NAME_None;
+	const FQinglanRegistryScene* Scene = FindSceneAny(Registry, SceneId, QuestId);
+	return Scene != nullptr ? Scene->JournalKey : NAME_None;
 }
 
 // ---------------------------------------------------------------------------

@@ -78,7 +78,7 @@ AQinglanProjectile::AQinglanProjectile()
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.bStartWithTickEnabled = false;
 	bReplicates = false; // offline game, single process
-	NetUpdateFrequency = 0.f;
+	SetNetUpdateFrequency(0.f); // UE 5.8: direct member access deprecated
 
 	CollisionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("CollisionSphere"));
 	CollisionSphere->InitSphereRadius(KSweepRadiusCm);

@@ -83,5 +83,17 @@
   "settings.feature.gpu_particles.reason": "需要性能档以上并经验证的图形后端。",
   "settings.feature.low_flash_mode.reason": "始终可用；开启辅助设置后自动减弱闪烁。",
   "settings.feature.unavailable.reason": "当前硬件或画质档位下不可用。",
-  "hud.clock": "{minutes}:{seconds}"
+  "hud.clock": "{minutes}:{seconds}",
+  "relic.jade_pendant.name": "翠玉佩",
+  "relic.jade_pendant.desc": "流光护与石甲的护盾点数+8；玉佩灼灼护身时，你受到的伤害增加5%。",
+  "relic.ember_bead.name": "余烬珠",
+  "relic.ember_bead.desc": "你点燃的灼烧效果延长2秒；珠上的热意常驻掌心，挥之不去。",
+  "relic.river_pearl.name": "江珠",
+  "relic.river_pearl.desc": "术法落处的濡湿效果延长2秒；水流牵绊施法，术法能耗增加5%。",
+  "relic.thunder_charm.name": "雷纹符",
+  "relic.thunder_charm.desc": "传导伤害提高20%；符锋刮削护身罡气——你受到的伤害增加5%。",
+  "relic.mountain_token.name": "山岳令",
+  "relic.mountain_token.desc": "携带时生命上限+20；令牌沉重，剑伤降低8%。",
+  "relic.verdant_seed.name": "青木籽",
+  "relic.verdant_seed.desc": "受到的治疗效果提高15%；幼苗汲取真元——术法能耗增加5%。"
 }

@@ -9,7 +9,7 @@
 
 #include "Containers/Ticker.h"
 #include "Engine/Engine.h"
-#include "Engine/GameUserSettings.h"
+#include "GameFramework/GameUserSettings.h"
 #include "HAL/IConsoleManager.h"
 #include "HAL/PlatformMemory.h"
 #include "Kismet/GameplayStatics.h"
@@ -43,7 +43,7 @@ namespace
 		float PreviewSecondsRemaining = 0.f;
 		FIntPoint PreviewResolution = FIntPoint::NoneValue;
 		EWindowMode::Type PreviewFullscreenMode = EWindowMode::Windowed;
-		FTickerHandle PreviewTickerHandle;
+		FTSTicker::FDelegateHandle PreviewTickerHandle;
 	};
 
 	TMap<TWeakObjectPtr<UQinglanGraphicsSettingsService>, FQinglanGraphicsBookkeeping> GGraphicsBookkeeping;
@@ -61,7 +61,7 @@ namespace
 	/** Active RHI backend name from the engine (e.g. D3D12, Metal, Vulkan). */
 	FString GetRhiNameString()
 	{
-		return FString(GDynamicRHIName);
+		return FString(GDynamicRHI ? GDynamicRHI->GetName() : TEXT(""));
 	}
 
 	/**
@@ -119,7 +119,7 @@ namespace
 				GameUserSettings->SetShadowQuality(Settings.ShadowQuality);
 				GameUserSettings->SetVisualEffectQuality(Settings.EffectsDetail);
 				GameUserSettings->SetViewDistanceQuality(Settings.ViewDistance);
-				GameUserSettings->SetVSync(Settings.bVSync);
+				GameUserSettings->SetVSyncEnabled(Settings.bVSync);
 				GameUserSettings->SetFrameRateLimit(static_cast<float>(Settings.FrameRateLimit));
 				GameUserSettings->ApplySettings(/*bValidateForPlatform=*/false); // sanitized already
 			}
@@ -158,7 +158,8 @@ namespace
 		{
 			return false;
 		}
-		if (!GConfig->DoesKeyExist(GraphicsIniSection, TEXT("Preset"), *GGameUserSettingsIni))
+		FString PresetValue;
+		if (!GConfig->GetString(GraphicsIniSection, TEXT("Preset"), PresetValue, *GGameUserSettingsIni))
 		{
 			return false; // first launch on this machine
 		}
@@ -210,8 +211,9 @@ namespace
 			UE_LOG(LogQinglanGraphics, Error, TEXT("Preview revert: GameUserSettings unavailable"));
 			return;
 		}
-		GameUserSettings->SetScreenResolution(Bookkeeping.PreviewResolution, Bookkeeping.PreviewFullscreenMode);
-		GameUserSettings->ApplyResolutionSettings(/*bForceReapply=*/true);
+		GameUserSettings->SetScreenResolution(Bookkeeping.PreviewResolution);
+		GameUserSettings->SetFullscreenMode(Bookkeeping.PreviewFullscreenMode);
+		GameUserSettings->ApplyResolutionSettings(/*bCheckForCommandLineOverrides=*/true);
 		UE_LOG(LogQinglanGraphics, Log, TEXT("Preview window expired: reverted to %dx%d (window mode %d)"),
 			Bookkeeping.PreviewResolution.X, Bookkeeping.PreviewResolution.Y,
 			static_cast<int32>(Bookkeeping.PreviewFullscreenMode));
@@ -223,7 +225,7 @@ namespace
 		FQinglanGraphicsBookkeeping& Bookkeeping = Book(Service);
 		if (!Bookkeeping.bPreviewActive)
 		{
-			Bookkeeping.PreviewTickerHandle = FTickerHandle();
+			Bookkeeping.PreviewTickerHandle = FTSTicker::FDelegateHandle();
 			return false;
 		}
 		// Paused-game-time semantics: the countdown only advances while world
@@ -239,7 +241,7 @@ namespace
 		}
 		Bookkeeping.bPreviewActive = false;
 		RevertVideoSettings(Bookkeeping);
-		Bookkeeping.PreviewTickerHandle = FTickerHandle();
+		Bookkeeping.PreviewTickerHandle = FTSTicker::FDelegateHandle();
 		return false;
 	}
 
@@ -418,13 +420,13 @@ void UQinglanGraphicsSettingsService::BeginPreviewRevertWindow(float Seconds)
 	// "15-second preview with Revert if the user changes resolution/fullscreen").
 	FIntPoint RevertResolution = FIntPoint::NoneValue;
 	EWindowMode::Type RevertMode = EWindowMode::Windowed;
-	GameUserSettings->GetLastConfirmedScreenResolution(RevertResolution);
+	RevertResolution = GameUserSettings->GetLastConfirmedScreenResolution();
 	RevertMode = GameUserSettings->GetLastConfirmedFullscreenMode();
 	if (RevertResolution.X <= 0 || RevertResolution.Y <= 0)
 	{
 		// No confirmed mode recorded yet: snapshot the current mode so an
 		// expiry revert is a safe no-op instead of a bogus resolution.
-		GameUserSettings->GetScreenResolution(RevertResolution);
+		RevertResolution = GameUserSettings->GetScreenResolution();
 		RevertMode = GameUserSettings->GetFullscreenMode();
 	}
 	Bookkeeping.PreviewResolution = RevertResolution;
@@ -464,7 +466,7 @@ void UQinglanGraphicsSettingsService::CancelPreviewRevert()
 	// target.
 	if (UGameUserSettings* GameUserSettings = ResolveGameUserSettings())
 	{
-		GameUserSettings->ConfirmVideoModeSettings();
+		GameUserSettings->ConfirmVideoMode();
 	}
 	UE_LOG(LogQinglanGraphics, Log, TEXT("Preview revert window cancelled; new video mode kept"));
 }

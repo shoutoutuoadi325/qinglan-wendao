@@ -32,7 +32,9 @@ public class QinglanAscension : ModuleRules
 			"AIModule",
 			// Platform/QinglanGraphicsSettingsService reads the active RHI name,
 			// adapter string, and ray-tracing capability globals (docs/06 §2-§3).
-			"RHI"
+			"RHI",
+			// UI/QinglanHUDStatics creates widget instances (UWidgetBlueprintLibrary).
+			"UMG"
 		});
 	}
 }

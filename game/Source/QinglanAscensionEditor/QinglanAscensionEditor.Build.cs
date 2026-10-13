@@ -31,7 +31,9 @@ public class QinglanAscensionEditor : ModuleRules
 			"PythonScriptPlugin",
 			"UMG",
 			"UMGEditor",
-			"Kismet"
+			"Kismet",
+			"EnhancedInput", // UInputAction/UInputMappingContext bootstrap assets
+			"InputCore" // EKeys bindings authored by the content bootstrap
 		});
 	}
 }

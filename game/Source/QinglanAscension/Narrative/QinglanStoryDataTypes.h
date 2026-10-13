@@ -62,11 +62,19 @@ struct FQinglanRegistryScene
 	UPROPERTY() TArray<FQinglanRegistryObjective> Objectives;
 	UPROPERTY() TArray<FName> SetsFlags;
 	UPROPERTY() TArray<FName> NextSceneIds;
+	/** Journal key rendered by the HUD/journal for this scene or stage (stage field journal_key). */
+	UPROPERTY() FName JournalKey = NAME_None;
 	UPROPERTY() FName RetryKey = NAME_None;
 	UPROPERTY() FName ConfirmationGuard = NAME_None;
 	UPROPERTY() FName AdvanceDeliveryKey = NAME_None;
 	UPROPERTY() FName DeliveryTimeKey = NAME_None;
 	UPROPERTY() FName DeliveryTransition = NAME_None;
+	/** CH07_S04 scene-extras: quests whose ending-specific epilogue cards render
+	 *  during the first-winter retrospective (optional_epilogue_quest_ids; the
+	 *  keys themselves live on the quests' EpilogueKeys). */
+	UPROPERTY() TArray<FName> OptionalEpilogueQuestIds;
+	/** Authored data source of the optional epilogues (optional_epilogue_source). */
+	UPROPERTY() FName OptionalEpilogueSource = NAME_None;
 };
 
 USTRUCT()
@@ -89,6 +97,12 @@ struct FQinglanRegistrySideQuest
 	UPROPERTY() TArray<FName> Availability;
 	UPROPERTY() TArray<FQinglanRegistryScene> Stages;
 	UPROPERTY() TArray<FName> CompletionFlags;
+	/** Ending-specific epilogue text keys, authored order [open, seal, shared]
+	 *  (blueprint section 2.1 CH07 "per-ending + per-side-quest closure"). */
+	UPROPERTY() TArray<FName> EpilogueKeys;
+	/** rewards.technique_access ids unlocked once at quest completion (currently
+	 *  SQ04 mist_step + SQ05 orbiting_blades; blueprint section 2.5 unlock order). */
+	UPROPERTY() TArray<FName> RewardTechniqueIds;
 };
 
 USTRUCT()
@@ -121,7 +135,7 @@ struct FQinglanRegistryBark
 
 /**
  * Complete narrative registry. Populated by the editor importer from
- * data/story/*.json and validated against both locales. Immutable at runtime.
+ * the data/story JSON files and validated against both locales. Immutable at runtime.
  */
 UCLASS()
 class UQinglanStoryRegistry : public UDataAsset

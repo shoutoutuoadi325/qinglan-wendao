@@ -646,7 +646,15 @@ namespace
 
 	UWorld* CreateNewMapWorld(const FString& MapName)
 	{
-		const FString PackagePath = ContentRoot + TEXT("/Maps/") + MapName + TEXT(".") + MapName;
+		// Re-runs must rebuild the map from scratch: a saved world already owns
+		// its PersistentLevel/WorldSettings names, and spawning into it trips
+		// the unique-name fatal. Delete the previous file; the bootstrap is the
+		// single author of this layout (docs/dev/level-layout.md).
+		const FString PackageName = ContentRoot + TEXT("/Maps/") + MapName;
+		const FString MapFileName = FPackageName::LongPackageNameToFilename(PackageName, FPackageName::GetMapPackageExtension());
+		IFileManager::Get().Delete(*MapFileName, /*bRequireExists=*/false, /*bEvenReadOnly=*/true, /*bQuiet=*/true);
+
+		const FString PackagePath = PackageName + TEXT(".") + MapName;
 		UPackage* Package = CreateOrFetchPackage(PackagePath);
 		UWorld* World = UWorld::CreateWorld(EWorldType::Inactive, false, *MapName, Package);
 		if (World)

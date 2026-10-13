@@ -37,7 +37,10 @@ public:
 
 	/** Equipment changes only outside expeditions; cooldowns are preserved. */
 	UFUNCTION(BlueprintCallable) bool SetLoadout(const TArray<UQinglanTechniqueDataAsset*>& NewLoadout);
-	UFUNCTION(BlueprintPure) TArray<UQinglanTechniqueDataAsset*> GetLoadout() const { return Loadout; }
+	// Direct-initialization: TArray's TArray<OtherElement> converting constructor
+	// is explicit in UE 5.x, so a plain copy-return from the TObjectPtr store
+	// would not compile. Public signature unchanged.
+	UFUNCTION(BlueprintPure) TArray<UQinglanTechniqueDataAsset*> GetLoadout() const { return TArray<UQinglanTechniqueDataAsset*>(Loadout); }
 
 	/** Time-scaled tick so cooldowns freeze with paused game time. */
 	virtual void TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;

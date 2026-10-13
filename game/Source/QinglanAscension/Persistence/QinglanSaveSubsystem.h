@@ -20,7 +20,7 @@ enum class EQinglanSavePhase : uint8
  * valid primary. Keeps 3 profile slots x 2 validated backups.
  */
 UCLASS()
-class UQinglanSaveSubsystem : public UGameInstanceSubsystem
+class QINGLANASCENSION_API UQinglanSaveSubsystem : public UGameInstanceSubsystem // QINGLANASCENSION_API: linkage-only export for the editor automation specs (checksum roundtrip / corrupt / future-schema rejection); public API unchanged.
 {
 	GENERATED_BODY()
 

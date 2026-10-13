@@ -38,8 +38,9 @@ namespace QinglanSave
 	 * by applying registered steps one version at a time. Newer-than-current
 	 * schemas are rejected explicitly; migration happens only in memory, the
 	 * on-disk bytes are never rewritten during a load.
+	 * QINGLANASCENSION_API: linkage-only export for the editor automation specs; public API unchanged.
 	 */
-	EQinglanMigrationResult MigrateToCurrentSchema(UQinglanSaveGame* Save, FText& OutError);
+	QINGLANASCENSION_API EQinglanMigrationResult MigrateToCurrentSchema(UQinglanSaveGame* Save, FText& OutError);
 
 	/**
 	 * Future v2 step, registered up front to fix the v1_to_v2 pattern
@@ -51,8 +52,9 @@ namespace QinglanSave
 	 * Shared invariant validator used by durable-write step 1 (snapshot +
 	 * validate) and by every load: nonnegative currency, unique technique ids,
 	 * rank 0..6, bounded arrays, valid enums, equipped subset of unlocked.
+	 * QINGLANASCENSION_API: linkage-only export for the editor automation specs; public API unchanged.
 	 */
-	bool ValidateSaveInvariants(const UQinglanSaveGame* Save, FText& OutError);
+	QINGLANASCENSION_API bool ValidateSaveInvariants(const UQinglanSaveGame* Save, FText& OutError);
 
 	/** FNV-1a-64 over bytes (UQinglanSaveGame::BodyChecksum contract). */
 	uint64 Fnv1a64(const uint8* Data, int64 Num);

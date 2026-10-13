@@ -71,5 +71,17 @@
   "technique.stone_aegis.name": "磐石护身",
   "technique.verdant_pulse.name": "青木回春",
   "technique.mist_step.name": "云水步",
-  "technique.orbiting_blades.name": "御剑环阵"
+  "technique.orbiting_blades.name": "御剑环阵",
+  "cultivation.blocked.ranks_incomplete": "请先购齐本阶段的三次进阶。",
+  "cultivation.blocked.boss_required": "请先击败所需的守护者。",
+  "cultivation.blocked.trial_required": "请先通过金丹试炼。",
+  "cultivation.blocked.stage_max": "你已抵达此道途的尽头。",
+  "settings.adapter_unknown": "未知显示适配器",
+  "settings.feature.hardware_ray_tracing.reason": "需要支持光线追踪的显卡与已验证的图形后端。",
+  "settings.feature.lumen.reason": "性能档画质下不可用。",
+  "settings.feature.nanite.reason": "性能档画质下不可用。",
+  "settings.feature.gpu_particles.reason": "需要性能档以上并经验证的图形后端。",
+  "settings.feature.low_flash_mode.reason": "始终可用；开启辅助设置后自动减弱闪烁。",
+  "settings.feature.unavailable.reason": "当前硬件或画质档位下不可用。",
+  "hud.clock": "{minutes}:{seconds}"
 }

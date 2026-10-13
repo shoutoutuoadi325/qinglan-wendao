@@ -17,7 +17,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FQinglanCampaignFlagSet, FName, Flag
  * Every mutation runs through this subsystem and is journaled into the save.
  */
 UCLASS()
-class UQinglanProfileSubsystem : public UGameInstanceSubsystem
+class QINGLANASCENSION_API UQinglanProfileSubsystem : public UGameInstanceSubsystem // QINGLANASCENSION_API: linkage-only export for the editor automation specs (transaction idempotency, breakthrough gates); public API unchanged.
 {
 	GENERATED_BODY()
 

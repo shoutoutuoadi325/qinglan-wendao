@@ -63,7 +63,7 @@ struct FQinglanTalismanCatalogEntry
  * atomic and idempotent (docs/03 section 6).
  */
 UCLASS()
-class UQinglanEconomyLibrary : public UBlueprintFunctionLibrary
+class QINGLANASCENSION_API UQinglanEconomyLibrary : public UBlueprintFunctionLibrary // QINGLANASCENSION_API: linkage-only export for the editor automation specs (rank costs, banking multipliers); public API unchanged.
 {
 	GENERATED_BODY()
 

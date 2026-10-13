@@ -13,6 +13,7 @@
 
 #include "CoreMinimal.h"
 #include "Core/QinglanCoreTypes.h"
+#include "Templates/Function.h"
 
 /** Ending gating rules namespace; no UObject state, no randomness. */
 namespace QinglanEnding

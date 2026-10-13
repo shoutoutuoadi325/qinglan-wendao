@@ -71,5 +71,17 @@
   "technique.stone_aegis.name": "Stone Aegis",
   "technique.verdant_pulse.name": "Verdant Pulse",
   "technique.mist_step.name": "Mist Step",
-  "technique.orbiting_blades.name": "Orbiting Blades"
+  "technique.orbiting_blades.name": "Orbiting Blades",
+  "cultivation.blocked.ranks_incomplete": "Purchase all three ranks of this stage first.",
+  "cultivation.blocked.boss_required": "Defeat the required guardian first.",
+  "cultivation.blocked.trial_required": "Pass the Golden Core trial first.",
+  "cultivation.blocked.stage_max": "You have reached the summit of this path.",
+  "settings.adapter_unknown": "Unknown display adapter",
+  "settings.feature.hardware_ray_tracing.reason": "Requires a ray-tracing capable GPU on a validated backend.",
+  "settings.feature.lumen.reason": "Unavailable at the Performance preset.",
+  "settings.feature.nanite.reason": "Unavailable at the Performance preset.",
+  "settings.feature.gpu_particles.reason": "Requires a validated graphics backend above the Performance preset.",
+  "settings.feature.low_flash_mode.reason": "Always available; reduces flashes when the accessibility setting is on.",
+  "settings.feature.unavailable.reason": "Not available on this hardware or quality preset.",
+  "hud.clock": "{minutes}:{seconds}"
 }

@@ -21,7 +21,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FQinglanStatusCleared, EQinglanStatu
  * status application -> cue. Duplicate (CastId, victim, ordinal) rejected.
  */
 UCLASS(ClassGroup = (Qinglan), meta = (BlueprintSpawnableComponent))
-class UQinglanCombatComponent : public UActorComponent
+class QINGLANASCENSION_API UQinglanCombatComponent : public UActorComponent // QINGLANASCENSION_API: linkage-only export so the editor automation specs can drive ApplyDamage/ApplyStatus/ApplyBarrier from the modular editor build; public API unchanged.
 {
 	GENERATED_BODY()
 

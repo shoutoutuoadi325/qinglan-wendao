@@ -91,7 +91,7 @@ struct FQinglanBlessingModifiers
  * /Game/Qinglan/Data/ST_Game via FText::FromStringTable only.
  */
 UCLASS()
-class UQinglanBlessingLibrary : public UBlueprintFunctionLibrary
+class QINGLANASCENSION_API UQinglanBlessingLibrary : public UBlueprintFunctionLibrary // QINGLANASCENSION_API: linkage-only export for the editor automation specs (blessing exclusion, one-stack no re-offer); public API unchanged.
 {
 	GENERATED_BODY()
 

@@ -8,14 +8,16 @@
 // shared pure computations are free functions that use only public APIs.
 #include "AI/QinglanEnemyCharacter.h"
 
-// The Abilities module's status component may not be authored yet; compile
-// with or without it (the scaffold declares the pointer either way).
-// FIXME-CONTRACT: wire EnemyStatus once UQinglanStatusComponent lands.
-#if __has_include("Abilities/QinglanStatusComponent.h")
-#include "Abilities/QinglanStatusComponent.h"
-#define QINGLAN_HAS_STATUS_COMPONENT 1
-#elif __has_include("Combat/QinglanStatusComponent.h")
+// UQinglanStatusComponent ships in the Combat folder (the combat module's
+// deliverable); the Abilities spelling stays as a tolerated fallback from the
+// parallel-module handoff. Compile with or without it (the scaffold declares
+// the pointer either way).
+// FIXME-CONTRACT: keep the probe until the include location is contractual.
+#if __has_include("Combat/QinglanStatusComponent.h")
 #include "Combat/QinglanStatusComponent.h"
+#define QINGLAN_HAS_STATUS_COMPONENT 1
+#elif __has_include("Abilities/QinglanStatusComponent.h")
+#include "Abilities/QinglanStatusComponent.h"
 #define QINGLAN_HAS_STATUS_COMPONENT 1
 #else
 #define QINGLAN_HAS_STATUS_COMPONENT 0

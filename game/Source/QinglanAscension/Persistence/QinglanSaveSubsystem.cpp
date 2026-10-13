@@ -19,6 +19,8 @@
 #include "Serialization/ObjectAndNameAsStringProxyArchive.h"
 #include "UObject/UObjectGlobals.h"
 
+#include "Narrative/QinglanStoryRuntime.h"
+#include "Narrative/QinglanStorySubsystem.h"
 #include "Persistence/QinglanProfileSnapshot.h"
 #include "Persistence/QinglanSaveMigration.h"
 #include "Progression/QinglanProfileSubsystem.h"
@@ -54,14 +56,11 @@ namespace
 		bool bCheckpointSuppressed = false;
 		/**
 		 * Story-owned narrative fields (revision, scenes, flags, decisions,
-		 * agreements, ending) carried from the last load/save.
-		 * FIXME-CONTRACT: UQinglanStorySubsystem exposes no bulk
-		 * export/import yet, so SaveNow pre-fills the snapshot with this
-		 * carry (UQinglanProfileSubsystem::ExportStateForSave merges over it
-		 * and only touches CompletedSideStages/ReadRecords). Session changes
-		 * made through the story subsystem reach the file only after the
-		 * narrative module gains a save bridge; until then round-trip
-		 * stability of the v1 narrative section is preserved.
+		 * agreements, ending) carried from the last load/save. SaveNow prefers
+		 * the live narrative export bridge (QinglanStoryRuntime::
+		 * ExportNarrativeState) and uses this carry only to seed fields the
+		 * bridge leaves untouched (missing story subsystem, or a session that
+		 * has not been created yet, e.g. a brand-new profile).
 		 */
 		FQinglanNarrativeState CarriedNarrative;
 	};
@@ -578,6 +577,15 @@ bool UQinglanSaveSubsystem::LoadProfile(int32 Slot, FText& OutNotice)
 		return false;
 	}
 	ProfileSubsystem->ImportStateFromSave(SnapshotFromSave(ChosenSave));
+	// Narrative save bridge: story-owned fields (revision, scenes, flags,
+	// choice decisions, agreements, ending) import live into the story
+	// subsystem so in-session progress reaches the file on the next SaveNow
+	// (FQinglanSaveBookkeeping::CarriedNarrative remains the fallback for a
+	// missing story subsystem, e.g. headless automation).
+	if (UQinglanStorySubsystem* StorySubsystem = GameInstancePtr ? GameInstancePtr->GetSubsystem<UQinglanStorySubsystem>() : nullptr)
+	{
+		QinglanStoryRuntime::ImportNarrativeState(StorySubsystem, ChosenSave->Narrative);
+	}
 	UQinglanRunSubsystem* RunSubsystem = GameInstancePtr ? GameInstancePtr->GetSubsystem<UQinglanRunSubsystem>() : nullptr;
 	if (RunSubsystem != nullptr && ChosenSave->bHasCheckpoint)
 	{
@@ -637,9 +645,17 @@ bool UQinglanSaveSubsystem::SaveNow(FText& OutError)
 	Phase = EQinglanSavePhase::Snapshotting;
 	UQinglanSaveGame* Save = NewObject<UQinglanSaveGame>(GetTransientPackage());
 	FQinglanProfileSnapshot Snapshot;
-	// Pre-fill story-owned fields; ExportStateForSave merges progression-owned
-	// fields on top (see FQinglanSaveBookkeeping::CarriedNarrative note).
+	// Narrative save bridge: story-owned fields export live from the story
+	// subsystem; the carried state only seeds fields the bridge leaves
+	// untouched (missing subsystem or a not-yet-created session, e.g. a
+	// brand-new profile before its first scene). ExportStateForSave then
+	// merges the progression-owned fields (plus side stages / read records)
+	// on top.
 	Snapshot.Narrative = Bookkeeping.CarriedNarrative;
+	if (UQinglanStorySubsystem* StorySubsystem = GameInstancePtr ? GameInstancePtr->GetSubsystem<UQinglanStorySubsystem>() : nullptr)
+	{
+		QinglanStoryRuntime::ExportNarrativeState(StorySubsystem, Snapshot.Narrative);
+	}
 	ProfileSubsystem->ExportStateForSave(Snapshot);
 	ApplySnapshotToSave(Save, Snapshot);
 	if (Save->ProfileId.IsNone())
@@ -832,6 +848,16 @@ void UQinglanSaveSubsystem::CreateNewProfile(int32 Slot)
 		Fresh.EquippedTechniques.Add(FName(TechniqueId));
 	}
 	ProfileSubsystem->ImportStateFromSave(Fresh);
+	// Reset the story subsystem to the same fresh narrative state so flags
+	// from a previously loaded profile cannot leak into the new profile's
+	// saves through the narrative export bridge.
+	if (UGameInstance* StoryGameInstance = GetGameInstance())
+	{
+		if (UQinglanStorySubsystem* StorySubsystem = StoryGameInstance->GetSubsystem<UQinglanStorySubsystem>())
+		{
+			QinglanStoryRuntime::ImportNarrativeState(StorySubsystem, Fresh.Narrative);
+		}
+	}
 	Bookkeeping.CarriedNarrative = Fresh.Narrative;
 
 	// Persist the fresh profile through the full durable protocol so the slot

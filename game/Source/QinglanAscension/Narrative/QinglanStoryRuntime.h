@@ -14,6 +14,7 @@
 #include "Core/QinglanCoreTypes.h"
 #include "Narrative/QinglanStorySubsystem.h"
 #include "Persistence/QinglanSaveGame.h"
+#include "UObject/StrongObjectPtr.h"
 #include "QinglanStoryRuntime.generated.h"
 
 class UQinglanStorySubsystem;

@@ -47,7 +47,7 @@ struct FQinglanNarrativeState
 
 /** Full profile save v1. */
 UCLASS()
-class UQinglanSaveGame : public USaveGame
+class QINGLANASCENSION_API UQinglanSaveGame : public USaveGame // QINGLANASCENSION_API: linkage-only export for the editor automation specs (NewObject in a transient package); public API unchanged.
 {
 	GENERATED_BODY()
 

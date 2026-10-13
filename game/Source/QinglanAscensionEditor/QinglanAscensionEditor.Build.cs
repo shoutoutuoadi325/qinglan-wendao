@@ -24,6 +24,7 @@ public class QinglanAscensionEditor : ModuleRules
 			"Json",
 			"JsonUtilities",
 			"AssetTools",
+			"AssetRegistry", // FAssetRegistryModule::AssetCreated (not transitively public via UnrealEd/AssetTools)
 			"PythonScriptPlugin"
 		});
 	}

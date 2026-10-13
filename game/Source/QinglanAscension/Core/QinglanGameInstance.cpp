@@ -222,10 +222,13 @@ void UQinglanGameInstance::ApplyEarlyPlatformSettings()
 		UE_LOG(LogQinglan, Warning, TEXT("ApplyEarlyPlatformSettings: graphics service unavailable"));
 		return;
 	}
-	// DetectInitialSettings returns the persisted preset when the platform
-	// settings exist and a conservative capability-class preset otherwise
-	// (docs/06 section 4); ApplySettings pushes it into GameUserSettings.
-	const FQinglanGraphicsSettings Initial = Graphics->DetectInitialSettings();
+	// GetCurrentSettings forces the service's lazy-load path: persisted
+	// platform-local settings when the ini section exists, or the conservative
+	// capability-class detection (applied AND persisted) on first launch
+	// (docs/06 section 4). Never call DetectInitialSettings() directly here:
+	// it always returns detected defaults and would clobber a returning
+	// player's saved preset at every boot.
+	const FQinglanGraphicsSettings Initial = Graphics->GetCurrentSettings();
 	Graphics->ApplySettings(Initial);
 	Extra.bEarlySettingsApplied = true;
 	UE_LOG(LogQinglan, Log, TEXT("Early platform settings applied (preset %d)"),

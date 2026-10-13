@@ -16,6 +16,9 @@ public class QinglanAscensionEditor : ModuleRules
 			"QinglanAscension"
 		});
 
+		// Allow "Folder/Header.h" includes rooted at the module directory.
+		PublicIncludePaths.Add(ModuleDirectory);
+
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
 			"Slate",
@@ -25,7 +28,10 @@ public class QinglanAscensionEditor : ModuleRules
 			"JsonUtilities",
 			"AssetTools",
 			"AssetRegistry", // FAssetRegistryModule::AssetCreated (not transitively public via UnrealEd/AssetTools)
-			"PythonScriptPlugin"
+			"PythonScriptPlugin",
+			"UMG",
+			"UMGEditor",
+			"Kismet"
 		});
 	}
 }

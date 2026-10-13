@@ -12,7 +12,5 @@ public class QinglanAscensionTarget : TargetRules
 		ExtraModuleNames.Add("QinglanAscension");
 
 		// Offline single-player game: no online subsystem, no signing integration here.
-		bUsesSteam = false;
-		bUsePackedFiles = true;
 	}
 }

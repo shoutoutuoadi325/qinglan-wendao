@@ -474,10 +474,8 @@ bool AQinglanAIController::IsTargetOutsideSafeArc(float SafeArcHalfWidthDeg) con
 	return Delta <= SafeArcHalfWidthDeg; // inside the gap: safe, no damage
 }
 
-const TArray<FVector>& AQinglanAIController::GetPendingStrikeCenters() const
-{
-	return PendingStrikeCenters;
-}
+// GetPendingStrikeCenters is inline in QinglanAIController.h; no out-of-line
+// definition here (a second definition would be a redefinition error).
 
 bool AQinglanAIController::SpawnPooledProjectileAtTarget(float Damage, float Range, FName TechniqueId,
 	FName CueId, float AimYawOffsetDeg)
@@ -585,20 +583,21 @@ bool AQinglanAIController::IsTargetOffscreenFromPlayerCamera() const
 		return false;
 	}
 	FVector2D ScreenPosition;
-	const bool bProjected = PC->PlayerCameraManager->ProjectWorldLocationToScreen(
+	// UE 5.8: projection lives on APlayerController, not APlayerCameraManager.
+	const bool bProjected = PC->ProjectWorldLocationToScreen(
 		Enemy->GetActorLocation(), ScreenPosition, /*bPlayerViewportPercentage*/ false);
 	if (!bProjected)
 	{
 		return true; // behind the camera or off-frustum
 	}
-	FIntPoint ViewportSize(0, 0);
+	FVector2D ViewportSize(0.f, 0.f);
 	if (GEngine && GEngine->GameViewport)
 	{
 		GEngine->GameViewport->GetViewportSize(ViewportSize);
 	}
 	return ScreenPosition.X < 0.f || ScreenPosition.Y < 0.f ||
-		(ViewportSize.X > 0 && ScreenPosition.X > static_cast<double>(ViewportSize.X)) ||
-		(ViewportSize.Y > 0 && ScreenPosition.Y > static_cast<double>(ViewportSize.Y));
+		(ViewportSize.X > 0 && ScreenPosition.X > ViewportSize.X) ||
+		(ViewportSize.Y > 0 && ScreenPosition.Y > ViewportSize.Y);
 }
 
 bool AQinglanAIController::TryAcquireMeleeWindupSlot()
@@ -775,10 +774,11 @@ void AQinglanAIController::ApproachTarget(ACharacter* Target, float AcceptanceRa
 	{
 		return;
 	}
-	const EPathFollowingRequestResultType::Type Result =
+	// UE 5.8: EPathFollowingRequestResult is a namespaced enum (::Type, ::Failed...).
+	const EPathFollowingRequestResult::Type Result =
 		MoveToLocation(Target->GetActorLocation(), AcceptanceRadius,
 			/*bStopOnOverlap*/ true, /*bUsePathfinding*/ true);
-	if (Result == EPathFollowingRequestResultType::Failed)
+	if (Result == EPathFollowingRequestResult::Failed)
 	{
 		// No navmesh (headless automation): fall back to direct steering.
 		bDirectMovement = true;

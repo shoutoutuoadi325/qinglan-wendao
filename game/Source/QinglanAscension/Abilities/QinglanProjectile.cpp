@@ -5,6 +5,7 @@
 #include "QinglanAscension.h" // LogQinglanCombat
 #include "Combat/QinglanCombatComponent.h"
 #include "Components/SphereComponent.h"
+#include "Engine/OverlapResult.h" // FOverlapResult full type (UE 5.8 split from EngineTypes)
 #include "Engine/World.h"
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
@@ -229,7 +230,7 @@ void AQinglanProjectile::ResetForPool()
 	// collision, lifetime.
 	if (UWorld* World = GetWorld())
 	{
-		World->GetTimerManager().ClearAllTimers(this); // defensive: no world timers are used, but the contract is explicit
+		World->GetTimerManager().ClearAllTimersForObject(this); // defensive: no world timers are used, but the contract is explicit
 	}
 
 	VictimHitOrdinals.Empty();

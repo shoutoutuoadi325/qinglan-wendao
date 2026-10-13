@@ -9,6 +9,7 @@
 // tunable definition here so data can replace it without code changes.
 #include "Abilities/QinglanBlessingLibrary.h"
 
+#include "Engine/Engine.h" // GEngine->GetWorldFromContextObject (UE 5.8)
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
@@ -73,12 +74,12 @@ namespace
 			Make("b_draining_edge", QinglanBlessingGroups::SwordOffense, 0.f, 2.f, 2.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f);
 			// --- Casting economy (docs/03 §4: min energy cost 1 rounded up) ---
 			Make("b_quiet_current", QinglanBlessingGroups::CastingEconomy, 0.f, 0.f, 0.f, -15.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f);
-			Make("b_still_water", QinglanBlessingGroups::CastingEconomy, 0.f, 0.f, 0.f, 0.f, -20.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f);
-			Make("b_focused_will", QinglanBlessingGroups::CastingEconomy, 0.f, 0.f, 0.f, 0.f, 0.f, 10.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f);
+			Make("b_still_water", QinglanBlessingGroups::CastingEconomy, 0.f, 0.f, 0.f, 0.f, -20.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f);
+			Make("b_focused_will", QinglanBlessingGroups::CastingEconomy, 0.f, 0.f, 0.f, 0.f, 0.f, 10.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f);
 			// --- Protection (docs/02 §6 barrier rules; docs/03 §5 expiry) ---
 			Make("b_jade_shell", QinglanBlessingGroups::Protection, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 10.f, 0.f, 0.f, 0.f, 0.f, 0.f);
-			Make("b_rooted_stance", QinglanBlessingGroups::Protection, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, -10.f, 0.f, 0.f, 0.f, 0.f, 0.f);
-			Make("b_second_wind", QinglanBlessingGroups::Protection, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 15.f, 0.f, 0.f, 0.f, 0.f);
+			Make("b_rooted_stance", QinglanBlessingGroups::Protection, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, -10.f, 0.f, 0.f, 0.f, 0.f);
+			Make("b_second_wind", QinglanBlessingGroups::Protection, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 15.f, 0.f, 0.f, 0.f);
 			// --- Elemental interactions (docs/03 §4: reaction mods affect Conduct only; docs/02 §7 durations) ---
 			Make("b_thunder_mandate", QinglanBlessingGroups::ElementalInteractions, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 25.f, 0.f, 0.f);
 			Make("b_lingering_ash", QinglanBlessingGroups::ElementalInteractions, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f);
@@ -134,10 +135,11 @@ void UQinglanBlessingLibrary::GetBlessingText(const FQinglanBlessingDef& Def, FT
 	OutDescription = FText::FromStringTable(GameStringTableId, Def.DescriptionTextKey.ToString());
 }
 
-void UQinglanBlessingLibrary::GetOwnedBlessings(const UObject* WorldContext, TArray<FName>& OutOwned)
+void UQinglanBlessingLibrary::GetOwnedBlessings(UObject* WorldContext, TArray<FName>& OutOwned)
 {
 	OutOwned.Reset();
-	const UWorld* World = WorldContext ? UGameplayStatics::GetWorldFromContextObject(WorldContext, EGetWorldErrorMode::LogAndReturnNull) : nullptr;
+	// UE 5.8: UGameplayStatics::GetWorldFromContextObject moved to UEngine (GEngine->...).
+	UWorld* World = WorldContext ? GEngine->GetWorldFromContextObject(WorldContext, EGetWorldErrorMode::LogAndReturnNull) : nullptr;
 	UGameInstance* GameInstance = World ? World->GetGameInstance() : nullptr;
 	if (!GameInstance)
 	{

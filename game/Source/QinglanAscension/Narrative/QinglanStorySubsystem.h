@@ -10,11 +10,6 @@
 
 class UQinglanStoryRegistry;
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FQinglanSceneLine, const struct FQinglanScriptLine&, Line);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FQinglanChoicesPresented, const TArray<FQinglanSceneChoice>&, Choices);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FQinglanSceneEvent, FName, SceneId);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQinglanObjectiveUpdated, FName, ObjectiveId, const FText&, Text);
-
 /** A single localized script line ready for the dialogue widget. */
 USTRUCT(BlueprintType)
 struct FQinglanScriptLine
@@ -27,6 +22,11 @@ struct FQinglanScriptLine
 	UPROPERTY(BlueprintReadOnly) FName SceneId = NAME_None;
 	UPROPERTY(BlueprintReadOnly) int32 LineIndex = 0;
 };
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FQinglanSceneLine, const FQinglanScriptLine&, Line);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FQinglanChoicesPresented, const TArray<FQinglanSceneChoice>&, Choices);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FQinglanSceneEvent, FName, SceneId);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQinglanObjectiveUpdated, FName, ObjectiveId, const FText&, Text);
 
 /**
  * Runtime narrative dispatcher. Owns pending scene playback, choice resolution,

@@ -4,6 +4,7 @@
 #include "Abilities/QinglanProjectile.h"
 #include "Combat/QinglanCombatComponent.h"
 #include "Engine/GameInstance.h"
+#include "Engine/OverlapResult.h" // FOverlapResult full type (UE 5.8 split from EngineTypes)
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
 #include "NiagaraFunctionLibrary.h"
@@ -428,7 +429,8 @@ void UQinglanTechniqueExecutors::PublishCue(const FQinglanTechniqueCastContext& 
 	UNiagaraSystem* System = ResolveStageCue(Context.Technique, Cue.StageId);
 	if (System)
 	{
-		UNiagaraFunctionLibrary::SpawnSystemAtWorld(World, System, Cue.SourceTransform.GetLocation(),
+		// UE 5.8: SpawnSystemAtWorld is SpawnSystemAtLocation (same argument order).
+		UNiagaraFunctionLibrary::SpawnSystemAtLocation(World, System, Cue.SourceTransform.GetLocation(),
 			Cue.SourceTransform.GetRotation().Rotator(), FVector::OneVector, false /*bAutoDestroy*/,
 			true /*bAutoActivate*/, ENCPoolMethod::AutoRelease, true /*bPreCullCheck*/);
 	}

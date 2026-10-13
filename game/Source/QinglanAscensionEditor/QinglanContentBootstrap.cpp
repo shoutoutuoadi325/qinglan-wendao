@@ -13,7 +13,7 @@
 #include "Engine/World.h"
 #include "GameFramework/PlayerStart.h"
 #include "GameFramework/WorldSettings.h"
-#include "GameFramework/TargetPoint.h"
+#include "Engine/TargetPoint.h"
 #include "EnhancedInput/Subsystem/IEnhancedInputModule.h"
 #include "FileHelper.h"
 #include "HAL/FileManager.h"
@@ -23,7 +23,9 @@
 #include "InputModifiers.h"
 #include "InputTriggers.h"
 #include "Materials/Material.h"
+#include "Materials/MaterialExpressionScalarParameter.h"
 #include "Materials/MaterialExpressionTextureSampleParameter2D.h"
+#include "Materials/MaterialExpressionVectorParameter.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
@@ -60,6 +62,7 @@ int32 UQinglanContentBootstrap::Main(const FString& Params)
 	bool bOk = true;
 	bOk &= BootstrapInput();
 	bOk &= BootstrapMaterials();
+	bOk &= BootstrapVFXMaterials();
 	bOk &= BootstrapMaps();
 	UE_LOG(LogTemp, Log, TEXT("QinglanContentBootstrap finished ok=%d"), bOk);
 	return bOk ? 0 : 1;

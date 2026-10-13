@@ -21,6 +21,9 @@ public class QinglanAscension : ModuleRules
 			"Json"
 		});
 
+		// Allow "Folder/Header.h" includes rooted at the module directory.
+		PublicIncludePaths.Add(ModuleDirectory);
+
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
 			"Slate",

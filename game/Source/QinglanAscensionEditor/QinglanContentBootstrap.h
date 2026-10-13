@@ -29,6 +29,8 @@ private:
 	bool BootstrapMaps();
 	/** Master material with BaseColor/Normal/Roughness/AO texture parameters. */
 	class UMaterial* CreateOrLoadMasterMaterial();
+	/** Unlit additive/decal/barrier cue materials for the VFX component. */
+	bool BootstrapVFXMaterials();
 	/** Saves a newly created in-memory object into its package on disk. */
 	bool SavePackage(UPackage* Package, UObject* Asset);
 };

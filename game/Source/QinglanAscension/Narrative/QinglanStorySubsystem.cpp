@@ -82,7 +82,7 @@ namespace
 
 	/**
 	 * Registry asset soft path /Game/Qinglan/Data/DA_StoryRegistry (module
-	 * brief; imported by the editor importer from data/story/*.json and
+	 * brief; imported by the editor importer from the data/story JSON files and
 	 * immutable at runtime).
 	 * FIXME-CONTRACT: the frozen scaffold header cannot declare an Initialize
 	 * override, so the load happens lazily on first access instead of at
@@ -97,8 +97,10 @@ namespace
 		{
 			bAttempted = true;
 			// FString wrap first: FSoftObjectPath's TCHAR* constructor is explicit
-			// in some engine versions, the FString one never is.
-			const TSoftObjectPtr<UQinglanStoryRegistry> Soft(FSoftObjectPath(FString(QinglanStoryRuntime::StoryRegistrySoftPath)));
+			// in some engine versions, the FString one never is. The named local
+			// also avoids the vexing parse of Soft(FSoftObjectPath(FString(X))).
+			const FString RegistrySoftPath(QinglanStoryRuntime::StoryRegistrySoftPath);
+			const TSoftObjectPtr<UQinglanStoryRegistry> Soft(FSoftObjectPath(RegistrySoftPath));
 			UQinglanStoryRegistry* Loaded = Soft.LoadSynchronous();
 			if (Loaded != nullptr)
 			{
@@ -773,7 +775,7 @@ TArray<FName> UQinglanStorySubsystem::GetPlayableMainScenes() const
 		{
 			continue;
 		}
-		if (HasAllFlags(*Session, Scene.Prerequisites))
+		if (::HasAllFlags(*Session, Scene.Prerequisites)) // :: bypasses UObject::HasAllFlags name hiding
 		{
 			Result.Add(Scene.SceneId);
 		}
@@ -792,7 +794,7 @@ TArray<FName> UQinglanStorySubsystem::GetAvailableSideQuests() const
 	}
 	for (const FQinglanRegistrySideQuest& Quest : Registry->SideQuests)
 	{
-		if (!HasAllFlags(*Session, Quest.Availability))
+		if (!::HasAllFlags(*Session, Quest.Availability)) // :: bypasses UObject::HasAllFlags name hiding
 		{
 			continue;
 		}
@@ -840,7 +842,7 @@ bool UQinglanStorySubsystem::BeginScene(FName SceneId)
 		return Session.CurrentSceneId == SceneId;
 	}
 	// Prerequisite gate: fail (do not defer) when the chain is unmet.
-	if (!HasAllFlags(Session, Scene->Prerequisites))
+	if (!::HasAllFlags(Session, Scene->Prerequisites)) // :: bypasses UObject::HasAllFlags name hiding
 	{
 		return false;
 	}
@@ -1086,7 +1088,9 @@ bool UQinglanStorySubsystem::IsEndingAvailable(FName EndingId, FText& OutRequire
 		return false;
 	}
 	const FQinglanStorySession* Session = FindStorySession(this);
-	TFunctionRef<bool(FName)> HasFlag = [&Session](FName Flag)
+	// Owned closure (auto), not TFunctionRef: binding TFunctionRef to the
+	// lambda temporary would dangle at the end of this statement.
+	auto HasFlag = [&Session](FName Flag)
 	{
 		return Session != nullptr && Session->Flags.Contains(Flag);
 	};
@@ -1151,7 +1155,8 @@ bool UQinglanStorySubsystem::ConfirmEnding(FName EndingId, bool bWarningAcknowle
 		return false;
 	}
 	TArray<FName> Missing;
-	TFunctionRef<bool(FName)> HasFlag = [&Session](FName Flag) { return Session.Flags.Contains(Flag); };
+	// Owned closure (auto), not TFunctionRef: see EvaluateAvailability call above.
+	auto HasFlag = [&Session](FName Flag) { return Session.Flags.Contains(Flag); };
 	if (!QinglanEnding::EvaluateAvailability(Ending, HasFlag, Missing))
 	{
 		OutError = QinglanEnding::RequirementText(Ending, Missing);
@@ -1503,7 +1508,7 @@ namespace QinglanStoryRuntime
 			Session.BarkRotationCursor = (Index + 1) % BarkCount;
 
 			FQinglanScriptLine Line;
-			Line.SpeakerName = TableText(Bark.SpeakerKey);
+			Line.SpeakerName = TableText(Bark.Speaker);
 			Line.Text = TableText(Bark.TextKey);
 			Line.SourceKind = EQinglanSourceKind::Live;
 			Line.SceneId = Bark.BarkId;

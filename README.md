@@ -2,7 +2,7 @@
 
 A completely free, offline, single-player **3D xianxia action game** for Windows and Apple Silicon macOS. Explore mountain sanctuaries, master the Five Elements, and survive Heavenly Tribulations with grounded materials and cinematic, scalable spell effects.
 
-**Project status:** design and development planning. This repository does not yet contain a playable game or an Unreal project. Content counts, frame rates, and schedules below are development targets, not shipped capabilities.
+**Project status:** in active development on Linux (UE 5.8 source build). The `game/` Unreal project implements the full gameplay modules, narrative data pipeline (8 chapters / 30 scenes, 8 side quests / 24 stages, 3 gated endings), headless content bootstrap (maps, materials, characters, montages, UI), durable 3-slot save system, and a 12-test automation suite (all green). Windows DX12 and Apple Silicon Metal remain compatibility targets pending validation on those platforms. See [docs/dev/build-and-run.md](docs/dev/build-and-run.md) to build/run and [docs/dev/test-report.md](docs/dev/test-report.md) for the current test status.
 
 ## Confirmed requirements
 

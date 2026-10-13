@@ -1,0 +1,107 @@
+# Test Report — Qinglan: Path of Ascension
+
+Date: 2026-10-13 · Engine: UE 5.8.3 (source build) · Platform: Linux (Ubuntu 22.04, Xeon Gold 6530, RTX 4090 x2, driver 570.195)
+
+## 1. Build
+
+| Target | Config | Result |
+|---|---|---|
+| QinglanAscensionEditor (Linux) | Development | ✅ compiles + links (runtime + editor modules, zero errors) |
+
+Build entry: `bash /inspire/hdd/project/qianghuaxuexi/s26044/build-game.sh` (log: `game-build.log`).
+
+Notable fixes required to reach green (recorded for posterity): ~40 UE 5.8 API
+compatibility corrections (removed/renamed engine APIs, TObjectPtr map access,
+TDereferenceWrapper sort predicates, TCheckedFormatString literals, UCommandlet
+members), duplicate-symbol and unity-collision cleanups from the parallel module
+pass, and missing module links (UMG runtime, InputCore editor).
+
+## 2. Automation suite — 12/12 ✅
+
+Run:
+```bash
+UnrealEditor-Cmd QinglanAscension.uproject -ExecCmds="Automation RunTests Qinglan" \
+  -unattended -nullrhi -TestExit="Automation Test Queue Empty"
+```
+
+| Test | Area | Covers |
+|---|---|---|
+| Qinglan.Combat.DamageMath | combat | raw→final damage formula, defense floor (docs/02 §5) |
+| Qinglan.Combat.HitKeyDedupe | combat | one damage per victim per swing/cast id |
+| Qinglan.Combat.ConductSingleApplication | elements | Conduct reaction applies once per wet window |
+| Qinglan.Combat.BurnThreeTickRefresh | elements | Burn 3-tick refresh semantics (docs/02 §7) |
+| Qinglan.Combat.BarrierReplaceAbsorb | combat | stronger barrier replaces, absorbs before health |
+| Qinglan.Economy.BankingMultipliers | economy | 100/70/50 % banking, per-stack floor |
+| Qinglan.Narrative.EndingGating | narrative | three-ending availability from narrative state |
+| Qinglan.Narrative.EndingRulesJsonDrift | narrative | hardcoded ending rules == data/story/main-late.json CH06_S04 payloads |
+| Qinglan.Persistence.SaveChecksumRoundtrip | save | checksummed container roundtrip, corrupt + future-schema rejection |
+| Qinglan.Persistence.TransactionIdempotency | save | grant/spend replay never double-applies |
+| Qinglan.Progression.RankCostsAndBreakthroughGates | progression | rank costs, boss/trial gates, breakthrough resets |
+| Qinglan.Blessings.Exclusion | run | one-stack-cap blessings never re-offered |
+
+Bug found and fixed by the suite itself: the save container writer hashed only
+the body while the parser verified header+body — every verified save failed its
+own checksum (Qinglan.Persistence.SaveChecksumRoundtrip).
+
+## 3. Content pipeline (headless commandlets) ✅
+
+All five commandlets run clean and idempotently (`docs/dev/build-and-run.md`):
+
+1. QinglanDataImportCommandlet — 30 main scenes (CH00–CH07), 24 side stages
+   (SQ01–SQ08), 24 records, 40 barks, 8 techniques, 2 realms, ST_Game (97 keys
+   per locale).
+2. QinglanContentBootstrapCommandlet — 15 input assets, 24 materials (21
+   PolyHaven surface sets + 3 VFX cue materials), 4 maps.
+3. QinglanMeshImportCommandlet — 6 skeletal characters + ~45 static
+   meshes/weapons/nature from CC0 Quaternius packs.
+4. QinglanAnimBootstrapCommandlet — 8 combat montages with hit-window
+   notifies, paired into all 8 technique assets.
+5. QinglanUIBootstrapCommandlet — 4 widget blueprints (HUD/Dialogue/Journal/Ending).
+
+## 4. Headless gameplay smoke (-nullrhi) ✅
+
+Boot via GameDefaultMap (L_Hub):
+
+- `Hub mode active (sanctuary)` — game mode boots
+- First launch: profile slot 0 created; `SaveNow: slot 0 sequence 1 committed`
+- Relaunch: `Continuing from profile slot 0`; `sequence N+1 committed` with
+  backup rotation (.bak1/.bak2) — full save lifecycle verified on disk
+  (`game/Saved/SaveGames/`)
+- Story registry resolves (StaticLoadObject path)
+
+Functional story-branch/save coverage additionally comes from the automation
+suite (ending gating + JSON drift guard + save roundtrip); interactive
+playthrough needs a display, see §6.
+
+## 5. Bilingual check ✅
+
+- `localization/en-US.json` / `zh-Hans.json`: 97/97 key parity; all story
+  chapter/side-quest/lore/bark files verified key-identical across locales
+  (audit 2026-10-13), first-launch locale auto-pick implemented
+  (zh-Hans when OS language matches).
+
+## 6. Pending on target machines (not verified here)
+
+This container has **no Vulkan loader (`libvulkan.so.1`) and no display**, so:
+
+- **GPU rendering / visual QA** of maps, materials, VFX, montages — needs a
+  display-capable Linux box with the NVIDIA Vulkan ICD (installed here, loader
+  missing).
+- **Frame-time performance pass** (docs/06 §5 budgets: 16.6 ms @ Medium) —
+  logic-side determinism is test-covered; frame stats need real rendering.
+- **Windows DX12 / Apple Silicon Metal** builds compile-configured
+  (DefaultEngine.ini sets D3D12/Metal/Vulkan per platform) but are **not built
+  or validated** on this machine — pending target-platform verification per
+  docs/09.
+- Interactive controller/keyboard play (Enhanced Input mappings authored and
+  assets generated; not drivable headless).
+
+## 7. Known deferred items
+
+- Benchmark frontend map (docs/06 §4) not authored; first launch goes straight
+  to the hub with profile auto-creation.
+- Profile-select menu (3 slots) — boot continues from slot 0 by default.
+- Equipped-talisman selection UI — slots seed from charged talismans in
+  catalog order (documented in QinglanTalismanComponent).
+- Herbal Knowledge healing percent applies to talisman heals and regen folds;
+  the projectile heal-tick path keeps its FIXME-CONTRACT.

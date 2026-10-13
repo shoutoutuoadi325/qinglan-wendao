@@ -31,3 +31,8 @@ __pycache__/
 Thumbs.db
 *.log
 core.*
+
+# Packaged builds are regenerable artifacts (bash /inspire/hdd/project/qianghuaxuexi/s26044/package-game.sh)
+packaging/Linux/Engine/
+packaging/Linux/QinglanAscension/
+packaging/windows/

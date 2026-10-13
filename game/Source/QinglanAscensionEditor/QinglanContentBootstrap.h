@@ -11,12 +11,12 @@
 #include "QinglanContentBootstrap.generated.h"
 
 UCLASS()
-class UQinglanContentBootstrap : public UCommandlet
+class UQinglanContentBootstrapCommandlet : public UCommandlet
 {
 	GENERATED_BODY()
 
 public:
-	UQinglanContentBootstrap();
+	UQinglanContentBootstrapCommandlet();
 
 	virtual int32 Main(const FString& Params) override;
 

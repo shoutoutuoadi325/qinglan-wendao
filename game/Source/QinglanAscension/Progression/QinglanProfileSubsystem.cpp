@@ -17,7 +17,7 @@
 namespace
 {
 	/** All player-facing strings resolve from the single game string table. */
-	FText TableText(const TCHAR* Key)
+	FText ProfileTableText(const TCHAR* Key)
 	{
 		return FText::FromStringTable(FName(QinglanProgression::GameStringTableId), Key);
 	}
@@ -757,12 +757,12 @@ bool UQinglanProfileSubsystem::CheckBreakthroughGate(FText& OutBlockingReason) c
 	case EQinglanStage::QiRefining:
 		if (Rank < QinglanProgression::RanksPerStage)
 		{
-			OutBlockingReason = TableText(TEXT("cultivation.blocked.ranks_incomplete"));
+			OutBlockingReason = ProfileTableText(TEXT("cultivation.blocked.ranks_incomplete"));
 			return false;
 		}
 		if (!IsBambooCleared())
 		{
-			OutBlockingReason = TableText(TEXT("cultivation.blocked.boss_required"));
+			OutBlockingReason = ProfileTableText(TEXT("cultivation.blocked.boss_required"));
 			return false;
 		}
 		return true;
@@ -770,24 +770,24 @@ bool UQinglanProfileSubsystem::CheckBreakthroughGate(FText& OutBlockingReason) c
 	case EQinglanStage::FoundationEstablishment:
 		if (Rank < QinglanProgression::RanksPerStage)
 		{
-			OutBlockingReason = TableText(TEXT("cultivation.blocked.ranks_incomplete"));
+			OutBlockingReason = ProfileTableText(TEXT("cultivation.blocked.ranks_incomplete"));
 			return false;
 		}
 		if (!IsAshenCleared())
 		{
-			OutBlockingReason = TableText(TEXT("cultivation.blocked.boss_required"));
+			OutBlockingReason = ProfileTableText(TEXT("cultivation.blocked.boss_required"));
 			return false;
 		}
 		if (!IsGoldenCoreTrialWon())
 		{
-			OutBlockingReason = TableText(TEXT("cultivation.blocked.trial_required"));
+			OutBlockingReason = ProfileTableText(TEXT("cultivation.blocked.trial_required"));
 			return false;
 		}
 		return true;
 
 	case EQinglanStage::GoldenCore:
 	default:
-		OutBlockingReason = TableText(TEXT("cultivation.blocked.stage_max"));
+		OutBlockingReason = ProfileTableText(TEXT("cultivation.blocked.stage_max"));
 		return false;
 	}
 }

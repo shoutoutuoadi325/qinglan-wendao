@@ -59,11 +59,11 @@ namespace
 	}
 }
 
-UQinglanContentBootstrap::UQinglanContentBootstrap()
+UQinglanContentBootstrapCommandlet::UQinglanContentBootstrapCommandlet()
 {
 }
 
-int32 UQinglanContentBootstrap::Main(const FString& Params)
+int32 UQinglanContentBootstrapCommandlet::Main(const FString& Params)
 {
 	UE_LOG(LogTemp, Log, TEXT("QinglanContentBootstrap starting"));
 	bool bOk = true;
@@ -75,7 +75,7 @@ int32 UQinglanContentBootstrap::Main(const FString& Params)
 	return bOk ? 0 : 1;
 }
 
-bool UQinglanContentBootstrap::SavePackage(UPackage* Package, UObject* Asset)
+bool UQinglanContentBootstrapCommandlet::SavePackage(UPackage* Package, UObject* Asset)
 {
 	FString PackageName = Package->GetName();
 	FString FileName = FPackageName::LongPackageNameToFilename(PackageName, FPackageName::GetAssetPackageExtension());
@@ -127,7 +127,7 @@ namespace
 	}
 }
 
-bool UQinglanContentBootstrap::BootstrapInput()
+bool UQinglanContentBootstrapCommandlet::BootstrapInput()
 {
 	UPackage* InputPkg = CreateOrFetchPackage(ContentRoot + TEXT("/Input/IA_Move"));
 	UInputAction* IA_Move = MakeAction(InputPkg, TEXT("IA_Move"), EInputActionValueType::Axis3D);
@@ -142,13 +142,13 @@ bool UQinglanContentBootstrap::BootstrapInput()
 	TArray<UInputAction*> TechniqueActions;
 	for (int32 i = 0; i < 4; ++i)
 	{
-		const FName Name(*FString::Printf(TEXT("IA_Technique%d"), i + 1));
+		const FName Name(*FString::Printf(TEXT("IA_Technique_%d"), i + 1)); // matches AQinglanCharacter CDO lookups
 		TechniqueActions.Add(MakeAction(CreateOrFetchPackage(ContentRoot + TEXT("/Input/") + Name.ToString()), Name, EInputActionValueType::Boolean));
 	}
 	TArray<UInputAction*> TalismanActions;
 	for (int32 i = 0; i < 2; ++i)
 	{
-		const FName Name(*FString::Printf(TEXT("IA_Talisman%d"), i + 1));
+		const FName Name(*FString::Printf(TEXT("IA_Talisman_%d"), i + 1)); // matches AQinglanCharacter CDO lookups
 		TalismanActions.Add(MakeAction(CreateOrFetchPackage(ContentRoot + TEXT("/Input/") + Name.ToString()), Name, EInputActionValueType::Boolean));
 	}
 
@@ -205,7 +205,7 @@ bool UQinglanContentBootstrap::BootstrapInput()
 // Materials
 //----------------------------------------------------------------------------
 
-UMaterial* UQinglanContentBootstrap::CreateOrLoadMasterMaterial()
+UMaterial* UQinglanContentBootstrapCommandlet::CreateOrLoadMasterMaterial()
 {
 	const FString Path = ContentRoot + TEXT("/Materials/M_QinglanSurface");
 	if (UMaterial* Existing = LoadObject<UMaterial>(nullptr, *Path))
@@ -246,7 +246,7 @@ UMaterial* UQinglanContentBootstrap::CreateOrLoadMasterMaterial()
 	return Mat;
 }
 
-bool UQinglanContentBootstrap::BootstrapVFXMaterials()
+bool UQinglanContentBootstrapCommandlet::BootstrapVFXMaterials()
 {
 	// The three cue materials UQinglanVFXCueComponent resolves by convention
 	// (VFX/QinglanVFXCueComponent.cpp MaterialKeyForCue): additive sprite
@@ -417,13 +417,20 @@ namespace
 		}
 		UPackage* Pkg = CreateOrFetchPackage(DestObjectPath);
 		const FName AssetName(*FPackageName::ObjectPathToObjectName(DestObjectPath));
+		// Rename Fatal-errors when the destination already holds an object of
+		// the same name (a half-finished prior pass); reuse it instead.
+		if (UTexture2D* InMemory = FindObject<UTexture2D>(Pkg, *AssetName.ToString()))
+		{
+			Tex->Rename(nullptr, GetTransientPackage(), REN_DontCreateRedirectors | REN_DoNotDirty);
+			return InMemory;
+		}
 		Tex->Rename(*AssetName.ToString(), Pkg, REN_DontCreateRedirectors | REN_DoNotDirty);
 		Tex->SetFlags(RF_Public | RF_Standalone);
 		Tex->LODGroup = LODGroup;
 		Tex->NeverStream = false;
 		Tex->SRGB = LODGroup != TEXTUREGROUP_WorldNormalMap;
 		Tex->PostEditChange();
-		UQinglanContentBootstrap* NullOuter = nullptr; (void)NullOuter;
+		UQinglanContentBootstrapCommandlet* NullOuter = nullptr; (void)NullOuter;
 		return Tex;
 	}
 
@@ -448,7 +455,7 @@ namespace
 	};
 }
 
-bool UQinglanContentBootstrap::BootstrapMaterials()
+bool UQinglanContentBootstrapCommandlet::BootstrapMaterials()
 {
 	UMaterial* Master = CreateOrLoadMasterMaterial();
 	if (!Master)
@@ -568,6 +575,7 @@ namespace
 	{
 		FActorSpawnParameters Params;
 		Params.Name = MakeUniqueObjectName(World, AStaticMeshActor::StaticClass(), Label);
+		Params.NameMode = FActorSpawnParameters::ESpawnActorNameMode::Requested; // re-runnable bootstrap
 		AStaticMeshActor* Actor = World->SpawnActor<AStaticMeshActor>(FVector::ZeroVector, FRotator::ZeroRotator, Params);
 		if (!Actor)
 		{
@@ -591,6 +599,9 @@ namespace
 	{
 		FActorSpawnParameters Params;
 		Params.Name = MakeUniqueObjectName(World, ATargetPoint::StaticClass(), Name);
+		// UE 5.8 defaults a named spawn to Required_Fatal; a repeated bootstrap
+		// pass would trip the unique-name fatal, so let the engine re-uniquify.
+		Params.NameMode = FActorSpawnParameters::ESpawnActorNameMode::Requested;
 		ATargetPoint* Point = World->SpawnActor<ATargetPoint>(ATargetPoint::StaticClass(), Location, FRotator::ZeroRotator, Params);
 		if (Point)
 		{
@@ -638,6 +649,12 @@ namespace
 		const FString PackagePath = ContentRoot + TEXT("/Maps/") + MapName + TEXT(".") + MapName;
 		UPackage* Package = CreateOrFetchPackage(PackagePath);
 		UWorld* World = UWorld::CreateWorld(EWorldType::Inactive, false, *MapName, Package);
+		if (World)
+		{
+			// SavePackage refuses worlds without the public-asset flags
+			// ("saving would cause data loss"); stamp them at creation.
+			World->SetFlags(RF_Public | RF_Standalone);
+		}
 		return World;
 	}
 
@@ -661,7 +678,7 @@ namespace
 	}
 }
 
-bool UQinglanContentBootstrap::BootstrapMaps()
+bool UQinglanContentBootstrapCommandlet::BootstrapMaps()
 {
 	bool bOk = true;
 

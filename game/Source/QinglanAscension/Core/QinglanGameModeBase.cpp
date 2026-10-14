@@ -12,6 +12,8 @@
 // (house pattern; see AI/QinglanEncounterDirector.cpp).
 #include "Core/QinglanGameModeBase.h"
 
+#include "Core/QinglanAudioSubsystem.h"
+
 #include "AI/QinglanEncounterDirector.h"
 #include "Combat/QinglanCharacter.h"
 #include "Combat/QinglanCombatComponent.h"
@@ -101,6 +103,12 @@ void AQinglanHubGameMode::BeginPlay()
 
 	UGameInstance* Instance = GetGameInstance();
 
+	// Sanctuary music (docs/04 audio pass); null-safe without imported audio.
+	if (UQinglanAudioSubsystem* Audio = Instance ? Instance->GetSubsystem<UQinglanAudioSubsystem>() : nullptr)
+	{
+		Audio->SetMusicState(EQinglanMusicState::Hub);
+	}
+
 	// First arrival with no profile in any slot creates profile 0. This runs
 	// here rather than in the game instance Init because subsystem creation
 	// may not be complete during Init on the GameDefaultMap boot path; without
@@ -184,6 +192,13 @@ AQinglanRealmGameMode::AQinglanRealmGameMode()
 void AQinglanRealmGameMode::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// Realm exploration starts on the prepare loop; the encounter director
+	// switches to Combat/Boss when waves begin (docs/04 audio pass).
+	if (UQinglanAudioSubsystem* Audio = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQinglanAudioSubsystem>() : nullptr)
+	{
+		Audio->SetMusicState(EQinglanMusicState::Explore);
+	}
 
 	TMap<TWeakObjectPtr<AQinglanRealmGameMode>, TWeakObjectPtr<AQinglanEncounterDirector>>& Directors = RealmDirectors();
 	for (auto It = Directors.CreateIterator(); It; ++It)

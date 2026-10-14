@@ -12,13 +12,16 @@
 #include "Combat/QinglanCharacter.h"
 #include "Combat/QinglanCombatComponent.h"
 #include "Combat/QinglanTechniqueComponent.h"
+#include "Core/QinglanTrialDirector.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "HAL/FileManager.h" // IFileManager for the one-shot load-failure diagnostic
 #include "Internationalization/StringTable.h" // UE 5.8 location (was Engine/StringTable.h)
 #include "Internationalization/StringTableCore.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "Blueprint/WidgetBlueprintLibrary.h" // UMG public root (UMG module in Build.cs)
+#include "Misc/PackageName.h" // FPackageName for the widget asset filename probe
 #include "Narrative/QinglanStorySubsystem.h"
 #include "QinglanAscension.h"
 #include "UObject/UObjectGlobals.h"
@@ -221,10 +224,28 @@ TSubclassOf<UUserWidget> UQinglanHUDStatics::ResolveWidgetClass(FName WidgetId)
 	UClass* Resolved = StaticLoadClass(UUserWidget::StaticClass(), nullptr, **Path);
 	if (!Resolved)
 	{
-		UE_LOG(LogQinglanUI, Warning, TEXT("ResolveWidgetClass: failed to load '%s' from %s"),
-			*WidgetId.ToString(), **Path);
+		// One-shot diagnostic per id (StaticLoadClass already logged its own
+		// load error above this line): distinguish a missing on-disk asset
+		// from a load-time failure so the remediation is obvious.
+		static TSet<FName> ReportedLoadFailures;
+		if (ReportedLoadFailures.Contains(WidgetId))
+		{
+			return nullptr;
+		}
+		ReportedLoadFailures.Add(WidgetId);
+		const FString PackageName = FPackageName::ObjectPathToPackageName(*Path);
+		const FString AssetFile = FPackageName::LongPackageNameToFilename(
+			PackageName, FPackageName::GetAssetPackageExtension());
+		const bool bFileExists = IFileManager::Get().FileSize(*AssetFile) >= 0;
+		const FString Notice = FString::Printf(
+			TEXT("ResolveWidgetClass: failed to load '%s' from %s (asset file %s: %s); regenerate with QinglanUIBootstrapCommandlet"),
+			*WidgetId.ToString(), **Path, *AssetFile,
+			bFileExists ? TEXT("exists, load failed") : TEXT("missing"));
+		UE_LOG(LogQinglanUI, Warning, TEXT("%s"), *Notice);
 		return nullptr;
 	}
+	UE_LOG(LogQinglanUI, Verbose, TEXT("ResolveWidgetClass: %s -> %s"),
+		*WidgetId.ToString(), *Resolved->GetPathName());
 	Cache.Add(WidgetId, Resolved);
 	return Resolved;
 }
@@ -294,4 +315,19 @@ float UQinglanHUDStatics::GetTechniqueCooldownRemaining(const UObject* WorldCont
 		UGameplayStatics::GetPlayerCharacter(WorldContextObject, 0));
 	const UQinglanTechniqueComponent* Techniques = Player ? Player->GetTechniques() : nullptr;
 	return Techniques ? Techniques->GetCooldownRemaining(TechniqueId) : 0.f;
+}
+
+bool UQinglanHUDStatics::GetTrialRemainingSeconds(const UObject* WorldContextObject, float& OutRemainingSeconds)
+{
+	// One trial director per arena world (spawned by the trial anchor's proof
+	// press); absent everywhere else - the query is a clean false, never a log.
+	OutRemainingSeconds = 0.f;
+	AQinglanTrialDirector* Director = Cast<AQinglanTrialDirector>(
+		UGameplayStatics::GetActorOfClass(WorldContextObject, AQinglanTrialDirector::StaticClass()));
+	if (Director == nullptr || !Director->IsTrialActive())
+	{
+		return false;
+	}
+	OutRemainingSeconds = Director->GetRemainingSeconds();
+	return true;
 }

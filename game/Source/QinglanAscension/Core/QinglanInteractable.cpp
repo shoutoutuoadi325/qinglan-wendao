@@ -17,6 +17,7 @@
 #include "AI/QinglanEncounterDirector.h"
 #include "Combat/QinglanCharacter.h"
 #include "Components/SphereComponent.h"
+#include "Core/QinglanTrialDirector.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -226,6 +227,146 @@ namespace
 		const bool bStory = Story != nullptr
 			&& Story->HasFlag(FName(QinglanProgression::AshenClearedStoryFlag));
 		return bCampaign || bStory;
+	}
+
+	// --- Timed trial proof (CH03_S02 foundation / CH06_S02 golden core) ---
+
+	/** Trial scenes: their choice-free objective is earned by surviving the timed wave trial. */
+	const FName GTrialFoundationSceneId(TEXT("CH03_S02"));
+	const FName GTrialGoldenCoreSceneId(TEXT("CH06_S02"));
+
+	bool IsTrialProofScene(FName SceneId)
+	{
+		return SceneId == GTrialFoundationSceneId || SceneId == GTrialGoldenCoreSceneId;
+	}
+
+	/**
+	 * Trial clock per scene. Foundation: docs/story/CH03.md S02 "Use the
+	 * existing 90-second Foundation trial" (data/story/main-early.json CH03_S02
+	 * authors no number). Golden core: docs/story/CH06.md S02 "three 50-second
+	 * storm phases for the established 150-second trial"; data/story/main-late.json
+	 * CH06_S02 encodes the same clock in its script triggers (storm_time_0,
+	 * storm_time_50, storm_time_100, storm_survived_150). Tier is a seed/balance
+	 * hook (1 = foundation, 2 = golden core).
+	 */
+	float TrialDurationSecondsFor(FName SceneId, int32& OutTier)
+	{
+		OutTier = 0;
+		if (SceneId == GTrialFoundationSceneId)
+		{
+			OutTier = 1;
+			return 90.f;
+		}
+		if (SceneId == GTrialGoldenCoreSceneId)
+		{
+			OutTier = 2;
+			return 150.f;
+		}
+		return 0.f;
+	}
+
+	AQinglanTrialDirector* FindTrialDirector(UWorld* World)
+	{
+		return World
+			? Cast<AQinglanTrialDirector>(UGameplayStatics::GetActorOfClass(World, AQinglanTrialDirector::StaticClass()))
+			: nullptr;
+	}
+
+	/**
+	 * True when every authored line of the scene's script is gameplay-gated
+	 * (CH06_S02 storm beats: storm_time_0/50/100, storm_survived_150, ...).
+	 * Such a script never delivers a line through dialogue alone, so dialogue
+	 * can never "exhaust" it the way WasSceneScriptExhausted requires - the
+	 * trial itself is the script's gameplay moment, and its stopped playback
+	 * counts as played out.
+	 */
+	bool SceneScriptIsEventDriven(const UQinglanStorySubsystem* Story, FName SceneId)
+	{
+		const UQinglanStoryRegistry* Registry = Story ? Story->GetRegistry() : nullptr;
+		const FQinglanRegistryScene* Main = Registry ? Registry->FindMainScene(SceneId) : nullptr;
+		if (Main == nullptr || Main->Script.IsEmpty())
+		{
+			return false;
+		}
+		for (const FQinglanRegistryLine& Line : Main->Script)
+		{
+			if (Line.Trigger == NAME_None && Line.Event == NAME_None)
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/** Trial proof gate: the script played out (or is gameplay-gated throughout). */
+	bool TrialProofReady(const AQinglanCharacter* Player, const UQinglanStorySubsystem* Story, FName ProofScene)
+	{
+		if (Player != nullptr && Player->WasSceneScriptExhausted(ProofScene))
+		{
+			return true;
+		}
+		return SceneScriptIsEventDriven(Story, ProofScene);
+	}
+
+	/**
+	 * Routes an exhausted trial scene into the timed trial system: finds (or
+	 * spawns, once per world) the trial director at this anchor, refuses while
+	 * a trial already runs, and keeps the v1 direct-complete fallback when no
+	 * director can exist. Returns true when the press was consumed.
+	 */
+	bool TryBeginTrialAtAnchor(AActor* Anchor, AQinglanCharacter* Player,
+		UQinglanStorySubsystem* Story, FName ProofScene, FName ProofObjective)
+	{
+		if (Story == nullptr || Player == nullptr || Anchor == nullptr)
+		{
+			return false;
+		}
+		int32 Tier = 0;
+		const float DurationSeconds = TrialDurationSecondsFor(ProofScene, Tier);
+		if (DurationSeconds <= 0.f)
+		{
+			return false; // not a trial scene: caller keeps the generic proof
+		}
+
+		// One trial director per arena world, positioned at the trial anchor
+		// (the storm platform center; both trial stages anchor there).
+		UWorld* World = Anchor->GetWorld();
+		AQinglanTrialDirector* Director = FindTrialDirector(World);
+		if (Director == nullptr && World != nullptr)
+		{
+			FActorSpawnParameters Params;
+			Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+			Params.Name = TEXT("QinglanTrialDirector");
+			Director = World->SpawnActor<AQinglanTrialDirector>(
+				AQinglanTrialDirector::StaticClass(), Anchor->GetActorLocation(), FRotator::ZeroRotator, Params);
+			if (Director)
+			{
+				UE_LOG(LogQinglan, Log, TEXT("Trial anchor spawned trial director for %s"), *ProofScene.ToString());
+			}
+		}
+
+		if (Director != nullptr && Director->IsTrialActive())
+		{
+			// One trial at a time; after a failure the defeat flow returns the
+			// player to the hub, and the next arena press restarts clean.
+			// FIXME-CONTRACT: no string-table key for the in-progress refusal.
+			Player->ShowGameMessage(NSLOCTEXT("Qinglan", "Trial.InProgress", "The trial is already underway."));
+			return true;
+		}
+		if (Director != nullptr && Director->BeginTrial(ProofScene, ProofObjective, DurationSeconds, Tier))
+		{
+			return true;
+		}
+
+		// Null-safe fallback (no director / wave engine unavailable): the
+		// pre-trial stand-in proof, so the objective never dead-ends.
+		if (Director == nullptr)
+		{
+			UE_LOG(LogQinglan, Warning, TEXT("Trial anchor: no trial director; committing %s directly"),
+				*ProofObjective.ToString());
+		}
+		Story->NotifyObjectiveCompleted(ProofObjective);
+		return true;
 	}
 } // namespace
 
@@ -552,6 +693,12 @@ void AQinglanInteractable::ExecuteInteraction(AQinglanCharacter* Player)
 			&& QinglanInteraction::FindObjectiveProofAtAnchor(Story, InteractionId, ProofScene, ProofObjective)
 			&& Player->WasSceneScriptExhausted(ProofScene))
 		{
+			if (IsTrialProofScene(ProofScene))
+			{
+				// Trial scenes (CH03_S02 sits at trial.foundation_arena): the
+				// proof is surviving the timed wave trial, not the re-press.
+				return TryBeginTrialAtAnchor(this, Player, Story, ProofScene, ProofObjective);
+			}
 			Story->NotifyObjectiveCompleted(ProofObjective);
 			return true;
 		}
@@ -806,21 +953,38 @@ void AQinglanInteractable::ExecuteInteraction(AQinglanCharacter* Player)
 		{
 			Chapters.Add(FName(TEXT("CH06"))); // golden core arena, governor + decision platforms
 		}
-		if (QinglanInteraction::BeginFirstSceneOfChapters(Story, Chapters))
+		// Any trial-stage press while a trial runs is a refusal, before the
+		// scene-begin path below could queue a deferred scene that a wave
+		// boundary would then play mid-trial.
+		if (AQinglanTrialDirector* Director = FindTrialDirector(GetWorld()))
 		{
-			return;
+			if (Director->IsTrialActive())
+			{
+				if (Player)
+				{
+					// FIXME-CONTRACT: no string-table key for the in-progress refusal.
+					Player->ShowGameMessage(NSLOCTEXT("Qinglan", "Trial.InProgress", "The trial is already underway."));
+				}
+				return;
+			}
 		}
-		// Trial proof: the trial scenes (CH03_S02/CH06_S02) sit at prose
-		// locations, so their objective is earned by re-pressing the trial
-		// stage after enduring the scene script (the trial-timer/wave system
-		// is a separate module; this is the v1 gameplay proof).
+		// Trial proof first, BEFORE the scene replay below would restart an
+		// already-exhausted script: the trial scenes' objectives (CH03_S02
+		// 90 s foundation, CH06_S02 150 s golden core) are earned by surviving
+		// the timed wave trial. The chapter scan covers the CH06 scene too,
+		// whose authored location is prose (no anchor match above).
 		FName ProofScene = NAME_None;
 		FName ProofObjective = NAME_None;
 		if (Player
 			&& QinglanInteraction::FindObjectiveProofInChapters(Story, Chapters, ProofScene, ProofObjective)
-			&& Player->WasSceneScriptExhausted(ProofScene))
+			&& IsTrialProofScene(ProofScene)
+			&& TrialProofReady(Player, Story, ProofScene))
 		{
-			Story->NotifyObjectiveCompleted(ProofObjective);
+			TryBeginTrialAtAnchor(this, Player, Story, ProofScene, ProofObjective);
+			return;
+		}
+		if (QinglanInteraction::BeginFirstSceneOfChapters(Story, Chapters))
+		{
 			return;
 		}
 		UE_LOG(LogQinglanNarrative, Verbose, TEXT("Trial anchor %s: no playable trial scene"), *Id);

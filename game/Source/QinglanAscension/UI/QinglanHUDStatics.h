@@ -119,4 +119,12 @@ public:
 	/** Remaining paused-game-time cooldown for one technique id. */
 	UFUNCTION(BlueprintPure, Category = "Qinglan|HUD", meta = (WorldContext = "WorldContextObject"))
 	static float GetTechniqueCooldownRemaining(const UObject* WorldContextObject, FName TechniqueId);
+
+	/**
+	 * Seconds left in the running arena trial (Core/QinglanTrialDirector),
+	 * formatted for display with FormatMinutesSeconds. False when no trial
+	 * runs; HUD widgets poll this every frame (no per-tick messages).
+	 */
+	UFUNCTION(BlueprintPure, Category = "Qinglan|HUD", meta = (WorldContext = "WorldContextObject"))
+	static bool GetTrialRemainingSeconds(const UObject* WorldContextObject, float& OutRemainingSeconds);
 };

@@ -360,6 +360,10 @@ void AQinglanEnemyCharacter::ResetForPool()
 	DecisionAccumulator = 0.f;
 	bAttackCommitted = false;
 	EnemyData = nullptr;
+	if (EnemyCombat)
+	{
+		EnemyCombat->ResetForPool(); // stale hit keys could reject fresh hits
+	}
 
 	Tags.Empty();
 	if (GetCapsuleComponent())

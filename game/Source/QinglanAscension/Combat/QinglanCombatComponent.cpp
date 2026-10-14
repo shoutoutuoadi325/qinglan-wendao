@@ -499,6 +499,28 @@ void UQinglanCombatComponent::NotifySwordHitTarget(AActor* Victim)
 	OnEnergyChanged.Broadcast(Attributes.SpiritualEnergy, Attributes.MaxSpiritualEnergy);
 }
 
+void UQinglanCombatComponent::NotifySwordSwingStarted()
+{
+	SwordSwingVictims.Reset();
+	SwordSwingEnergyGranted = 0;
+}
+
+void UQinglanCombatComponent::ResetForPool()
+{
+	AppliedHitKeys.Reset();
+	NotifySwordSwingStarted();
+}
+
+void UQinglanCombatComponent::Heal(float Amount)
+{
+	if (Amount <= 0.f || !IsAlive())
+	{
+		return;
+	}
+	Attributes.Health = FMath::Clamp(Attributes.Health + Amount, 0.f, Attributes.MaxHealth);
+	OnHealthChanged.Broadcast(Attributes.Health, Attributes.MaxHealth);
+}
+
 void UQinglanCombatComponent::ApplyStatus(EQinglanStatus Status, float Magnitude)
 {
 	UWorld* World = GetWorld();

@@ -93,10 +93,7 @@ namespace QinglanGraphics
 		case EQinglanQualityPreset::High:
 			return TEXT("preset.high");
 		case EQinglanQualityPreset::Ultra:
-			// FIXME-CONTRACT: no preset.ultra key exists in localization/*.json;
-			// Ultra currently displays through the High key until string tables
-			// gain a fourth tier.
-			return TEXT("preset.high");
+			return TEXT("preset.ultra"); // key present in both locale files
 		}
 		return TEXT("preset.balanced");
 	}

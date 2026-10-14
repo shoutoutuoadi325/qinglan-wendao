@@ -95,5 +95,6 @@
   "relic.mountain_token.name": "山岳令",
   "relic.mountain_token.desc": "携带时生命上限+20；令牌沉重，剑伤降低8%。",
   "relic.verdant_seed.name": "青木籽",
-  "relic.verdant_seed.desc": "受到的治疗效果提高15%；幼苗汲取真元——术法能耗增加5%。"
+  "relic.verdant_seed.desc": "受到的治疗效果提高15%；幼苗汲取真元——术法能耗增加5%。",
+  "preset.ultra": "极致"
 }

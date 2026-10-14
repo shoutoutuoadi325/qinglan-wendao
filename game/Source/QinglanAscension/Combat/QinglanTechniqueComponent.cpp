@@ -13,6 +13,7 @@
 #include "Combat/QinglanCharacter.h"
 #include "Combat/QinglanCombatComponent.h"
 #include "Combat/QinglanCombatState.h"
+#include "Core/QinglanAudioSubsystem.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "Progression/QinglanEconomyLibrary.h"
@@ -387,6 +388,15 @@ void UQinglanTechniqueComponent::ReleaseCurrentCast()
 		// Same fold as the validation site: permanent equipment joins the
 		// blessing totals so the release commit and the pre-check agree.
 		UQinglanEconomyLibrary::AppendPermanentModifiers(this, Blessings);
+	}
+
+	// Release chime rides the commit (docs/04 audio pass); null-safe.
+	if (UGameInstance* GameInstance = Owner->GetGameInstance())
+	{
+		if (UQinglanAudioSubsystem* Audio = GameInstance->GetSubsystem<UQinglanAudioSubsystem>())
+		{
+			Audio->PlaySfx(FName(TEXT("sfx_technique_release")));
+		}
 	}
 
 	// Commit energy exactly once; if energy dropped below cost during

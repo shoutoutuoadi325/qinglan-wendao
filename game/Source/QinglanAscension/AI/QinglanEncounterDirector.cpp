@@ -17,6 +17,7 @@
 
 #include "AI/QinglanAIController.h"
 #include "AI/QinglanEnemyCharacter.h"
+#include "Core/QinglanAudioSubsystem.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
@@ -214,6 +215,12 @@ void AQinglanEncounterDirector::BeginEncounter(const TArray<UQinglanEnemyDataAss
 	bActive = true;
 	bCompleted = false;
 
+	// Music state follows the encounter (docs/04 audio pass); null-safe.
+	if (UQinglanAudioSubsystem* Audio = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQinglanAudioSubsystem>() : nullptr)
+	{
+		Audio->SetMusicState(bIsBossRoom ? EQinglanMusicState::Boss : EQinglanMusicState::Combat);
+	}
+
 	Extra.WaveQueue.Reset();
 	for (UQinglanEnemyDataAsset* Data : Wave)
 	{
@@ -323,6 +330,12 @@ void AQinglanEncounterDirector::Tick(float DeltaTime)
 		ReleaseAttackSlots();
 		OnEncounterCompleted.Broadcast();
 		UE_LOG(LogQinglanAI, Log, TEXT("Encounter completed in room %d"), CurrentRoomIndex);
+
+		// Back to the exploration loop after a cleared room (docs/04 audio pass).
+		if (UQinglanAudioSubsystem* Audio = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQinglanAudioSubsystem>() : nullptr)
+		{
+			Audio->SetMusicState(EQinglanMusicState::Explore);
+		}
 
 		UQinglanRunSubsystem* Run = GetGameInstance()
 			? GetGameInstance()->GetSubsystem<UQinglanRunSubsystem>()

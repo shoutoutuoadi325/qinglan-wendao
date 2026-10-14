@@ -33,7 +33,8 @@ public class QinglanAscensionEditor : ModuleRules
 			"UMGEditor",
 			"Kismet",
 			"EnhancedInput", // UInputAction/UInputMappingContext bootstrap assets
-			"InputCore" // EKeys bindings authored by the content bootstrap
+			"InputCore", // EKeys bindings authored by the content bootstrap
+			"AudioEditor" // USoundFactory for the audio bootstrap commandlet
 		});
 	}
 }

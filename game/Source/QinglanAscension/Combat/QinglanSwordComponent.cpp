@@ -8,6 +8,7 @@
 #include "QinglanAscension.h"
 #include "Abilities/QinglanBlessingLibrary.h"
 #include "Combat/QinglanCombatComponent.h"
+#include "Core/QinglanAudioSubsystem.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -176,6 +177,14 @@ void UQinglanSwordComponent::StartSwing(int32 CutIndex)
 	SwingSwordDamagePercent = ResolveSwingSwordDamagePercent();
 	EnterPhase(EQinglanSwordPhase::Windup);
 	PlaySwingMontage();
+	// Swing whoosh (docs/04 audio pass); null-safe without imported audio.
+	if (UGameInstance* GameInstance = GetOwner() ? GetOwner()->GetGameInstance() : nullptr)
+	{
+		if (UQinglanAudioSubsystem* Audio = GameInstance->GetSubsystem<UQinglanAudioSubsystem>())
+		{
+			Audio->PlaySfx(FName(TEXT("sfx_sword_swing")));
+		}
+	}
 	OnSwingStarted.Broadcast(ComboIndex, GetSwingId());
 }
 

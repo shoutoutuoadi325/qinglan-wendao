@@ -30,7 +30,9 @@
 #include "Combat/QinglanCombatComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Core/QinglanAudioSubsystem.h"
 #include "Engine/Engine.h"
+#include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "NiagaraFunctionLibrary.h"
@@ -427,6 +429,13 @@ void AQinglanEnemyCharacter::UpdateDecisions(float DeltaSeconds)
 		}
 		// Telegraph broadcast: presentation renders cue ids and keeps the
 		// silhouette at Low quality (docs/06 section 6).
+		if (UGameInstance* GameInstance = GetGameInstance())
+		{
+			if (UQinglanAudioSubsystem* Audio = GameInstance->GetSubsystem<UQinglanAudioSubsystem>())
+			{
+				Audio->PlaySfx(FName(TEXT("sfx_telegraph_warn"))); // docs/04 audio pass
+			}
+		}
 		OnTelegraph.Broadcast(this, Windup);
 	};
 

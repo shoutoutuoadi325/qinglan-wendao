@@ -111,3 +111,23 @@ This container has **no Vulkan loader (`libvulkan.so.1`) and no display**, so:
 - Audio pass (2026-10-14): 4 music loops (Hub/Explore/Combat/Boss, crossfade
   state machine) + 4 combat SFX imported and wired; mix polish pending real
   speakers.
+
+### Playable-loop layer (2026-10-14)
+
+The "is it actually complete" audit found the systems all present and tested,
+but the glue that lets a player reach them was missing (interact stub, no HUD
+creation, no scene/travel/room/death callers, no Wet source, no boss proof
+banking, no objective completion callers). All landed and verified
+(12/12 suite, hub spawns 25 interactables, realm 11 + director):
+
+- interaction dispatch at every bootstrap anchor; synthesized gates and room
+  doors; blessing draft at doors; cultivation shrine purchases/breakthroughs;
+  workbench relic/passive shop; defeat banking + hub return
+- objective-proof dispatcher (14 choice-free scenes previously never
+  completed: the campaign stalled at CH00_S02)
+- remaining presentation gaps: WBP_HUD/WBP_Dialogue widget *assets* are
+  bootstrapped shells, so text currently renders through on-screen messages
+  (C++ setters + relay are in place for authored UMG fronts); trial
+  waves/timers (CH03_S02/CH06_S02) stand in as anchor re-press proofs until
+  the trial-storm system exists; five scaffold notices use NSLOCTEXT pending
+  string-table keys.

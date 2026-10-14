@@ -19,6 +19,8 @@
 // so headless automation drives identical room pipelines.
 #include "Progression/QinglanRunSubsystem.h"
 
+#include "Progression/QinglanProgressionTables.h"
+
 #include "Abilities/QinglanBlessingLibrary.h"
 #include "AI/QinglanEnemyCatalog.h"
 #include "AI/QinglanEncounterDirector.h"
@@ -524,6 +526,19 @@ void UQinglanRunSubsystem::EndExpedition(bool bVictory, bool bVoluntaryRetreat)
 				BonusOnly.VeinCrystal = Payout.VeinCrystal;
 				Profile->TryGrant(UQinglanEconomyLibrary::MakeFirstClearTransactionId(NAME_None, BossId), BonusOnly);
 			}
+		}
+
+		// Bank the combat proof for the breakthrough gate (docs/03 section 1:
+		// Foundation breakthrough requires the bamboo guardian proof; Golden
+		// Core requires ashen). The story path sets its own flag on scene
+		// completion; IsBambooCleared/IsAshenCleared accept either.
+		if (BossId == FName(UQinglanEconomyLibrary::GetBossIdForRealm(FName(UQinglanEconomyLibrary::BambooRealmIdText))))
+		{
+			Profile->SetCampaignFlag(FName(QinglanProgression::BambooClearedCampaignFlag));
+		}
+		else if (BossId == FName(UQinglanEconomyLibrary::GetBossIdForRealm(FName(UQinglanEconomyLibrary::AshenRealmIdText))))
+		{
+			Profile->SetCampaignFlag(FName(QinglanProgression::AshenClearedCampaignFlag));
 		}
 	}
 

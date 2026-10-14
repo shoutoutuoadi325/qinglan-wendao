@@ -103,5 +103,11 @@ This container has **no Vulkan loader (`libvulkan.so.1`) and no display**, so:
 - Profile-select menu (3 slots) — boot continues from slot 0 by default.
 - Equipped-talisman selection UI — slots seed from charged talismans in
   catalog order (documented in QinglanTalismanComponent).
-- Herbal Knowledge healing percent applies to talisman heals and regen folds;
-  the projectile heal-tick path keeps its FIXME-CONTRACT.
+- Niagara particle systems for technique cues — the soft references stay null
+  (material/decal VFX and the audio pass cover presentation); authoring
+  Niagara assets programmatically is not supported, needs an editor session.
+- Herbal Knowledge healing percent folds into talisman heals and regen; the
+  projectile heal-tick keeps its FIXME-CONTRACT note.
+- Audio pass (2026-10-14): 4 music loops (Hub/Explore/Combat/Boss, crossfade
+  state machine) + 4 combat SFX imported and wired; mix polish pending real
+  speakers.

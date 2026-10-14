@@ -300,6 +300,29 @@ void UQinglanTechniqueExecutors::ExecuteSelfDash(const FQinglanTechniqueCastCont
 		Combat->RemoveStatus(EQinglanStatus::Burn);
 	}
 
+	// mist_step is the "specified Water attack" that applies Wet (docs/02 §7):
+	// enemies touched by the dash path soak for the Conduct setup. Sample the
+	// dash segment at its checkpoints; the blessing WetDurationBonus folds in
+	// through ApplyStatus' magnitude (reaction mods affect Conduct only).
+	if (Context.Technique->Element == EQinglanElement::Water)
+	{
+		TArray<AActor*> Soaked;
+		const FVector Start = Character->GetActorLocation();
+		constexpr int32 PathSamples = 4;
+		for (int32 Sample = 0; Sample < PathSamples; ++Sample)
+		{
+			const FVector Point = Start + HorizontalDirection * DashDistance * (Sample + 1) / PathSamples;
+			GatherVictims(Context, Point, 220.f, Soaked); // generous capsule-side reach
+		}
+		for (AActor* Victim : Soaked)
+		{
+			if (UQinglanCombatComponent* VictimCombat = Victim ? Victim->FindComponentByClass<UQinglanCombatComponent>() : nullptr)
+			{
+				VictimCombat->ApplyStatus(EQinglanStatus::Wet);
+			}
+		}
+	}
+
 	FQinglanCueEvent Cue;
 	Cue.CastId = Context.CastId;
 	Cue.SourceTransform = Caster->GetActorTransform();

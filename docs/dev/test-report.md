@@ -80,15 +80,30 @@ playthrough needs a display, see §6.
   (audit 2026-10-13), first-launch locale auto-pick implemented
   (zh-Hans when OS language matches).
 
-## 6. Pending on target machines (not verified here)
+## 6. GPU rendering on this container (2026-10-14 status)
 
-This container has **no Vulkan loader (`libvulkan.so.1`) and no display**, so:
+Achieved from inside the container: installed the Vulkan loader, ran a
+headless Xorg on the idle 4090 (NVIDIA screen up at 1280x720), enumerated the
+GPU through the proprietary Vulkan driver (vulkaninfo full pass), and brought
+the game up on the Vulkan RHI — UE created a live swapchain on the 4090
+(AcquireNextImage cycle in the editor -game log). Fixes that came out of this
+and ship in the repo: `r.WarnOfBadDrivers=0` (the denylisted-driver modal
+dialog blocks forever under no window manager), XDG_RUNTIME_DIR ownership
+rule, zen-store recovery steps (docs/dev/build-and-run.md).
 
-- **GPU rendering / visual QA** of maps, materials, VFX, montages — needs a
-  display-capable Linux box with the NVIDIA Vulkan ICD (installed here, loader
-  missing).
-- **Frame-time performance pass** (docs/06 §5 budgets: 16.6 ms @ Medium) —
-  logic-side determinism is test-covered; frame stats need real rendering.
+Blocked at host level, not fixable in-container: mid-session the cluster
+re-assigned the GPUs and re-injected driver 570.124.06 userspace, zeroing the
+nvidia X driver files (`nvidia_drv.so` 0 bytes everywhere; Ubuntu archives
+ship doc-only stubs for NVIDIA blobs, and downloads.download.nvidia.com
+returns 403 through the cluster proxy). A full gameplay session with frame
+capture therefore needs either a host driver re-injection with a consistent
+userspace (rerun the steps in build-and-run.md — everything else is in place)
+or a display machine.
+
+Still pending on target machines:
+
+- **GPU frame-time pass** (docs/06 §5 budgets: 16.6 ms @ Medium) — the
+  swapchain ran; sustained frame stats need the stable-display session above.
 - **Windows DX12 / Apple Silicon Metal** builds compile-configured
   (DefaultEngine.ini sets D3D12/Metal/Vulkan per platform) but are **not built
   or validated** on this machine — pending target-platform verification per

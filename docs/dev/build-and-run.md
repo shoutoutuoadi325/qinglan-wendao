@@ -76,3 +76,29 @@ Maps: `L_Hub` (sanctuary), `L_BambooHollow`, `L_AshenVerge` (expedition realms),
   with the NVIDIA ICD present the packaged game should then run on the RTX 4090s.
   Until then, GPU-side performance numbers cannot be captured on this machine —
   recorded as pending for a display-capable Linux box (docs/09 distribution checklist).
+
+## GPU rendering on this container (2026-10-14)
+
+The container ships the NVIDIA userspace driver + ICD; enabling real GPU
+rendering required (all done, root):
+
+```bash
+apt-get install -y libvulkan1 vulkan-tools          # Vulkan loader (was missing)
+# Headless X on the idle GPU (PCI 49:00.0; BusID is DECIMAL in xorg.conf):
+Xorg :1 -config /tmp/xorg-headless.conf -noreset &  # config in this doc's history
+export DISPLAY=:1 XDG_RUNTIME_DIR=/tmp/xdg VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json
+vulkaninfo --summary   # RTX 4090 enumerates via the proprietary driver
+```
+
+Caveats found on this machine:
+
+- UE 5.8 denylists driver 570.195 and pops a MODAL dialog at boot — with no
+  window manager the process blocks forever. `r.WarnOfBadDrivers=0` is set in
+  DefaultEngine.ini [SystemSettings] (log-only warning); rebuild packages so
+  the cooked ini carries it.
+- The editor `-game` first boot stalls in VULKAN_SM5 global-shader autogen in
+  this environment (>20 min, unresolved); the PACKAGED Shipping build ships
+  precompiled shaders and avoids that stage entirely — use the package for
+  GPU runs here.
+- Driver-killed processes leak GPU memory until the host reaps them
+  (~600 MB per kill; harmless on 48 GB cards, visible via nvidia-smi).

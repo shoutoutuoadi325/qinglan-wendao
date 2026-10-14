@@ -5,6 +5,8 @@
 #include "GameFramework/Character.h"
 #include "InputActionValue.h"
 #include "Combat/QinglanCombatState.h"
+#include "Narrative/QinglanStorySubsystem.h"
+#include "Progression/QinglanRunSubsystem.h"
 #include "QinglanCharacter.generated.h"
 
 class UInputMappingContext;
@@ -14,6 +16,17 @@ class UQinglanTechniqueComponent;
 class UQinglanStatusComponent;
 class USpringArmComponent;
 class UCameraComponent;
+class UUserWidget;
+
+/** One purchasable sanctuary-shop entry (relic or passive manual). */
+struct FQinglanShopOfferEntry
+{
+	FName ItemId = NAME_None;
+	/** True: relic (Vein Crystal price); false: passive manual (study cost). */
+	bool bRelic = false;
+	FText Title;
+	FText CostSummary;
+};
 
 /**
  * Third-person player character. Owns no game rules; routes input to components.
@@ -64,6 +77,23 @@ public:
 	UFUNCTION(BlueprintPure) UQinglanStatusComponent* GetStatus() const { return StatusComponent; }
 	UFUNCTION(BlueprintPure) EQinglanCombatState GetCombatState() const;
 
+	// --- Playable-loop glue (interaction, HUD, menus, defeat) ---
+
+	/** Presents a 3-option blessing draft; technique keys 1-3 select (docs/03 section 5). */
+	void PresentBlessingOffer(const TArray<FQinglanBlessing>& Offers);
+	/** Presents up to four purchasable items; technique keys 1-4 buy. */
+	void PresentShopOffer(const TArray<FQinglanShopOfferEntry>& Entries);
+	/** Transient localized notice: dialogue widget when open, on-screen message otherwise. */
+	void ShowGameMessage(const FText& Message);
+	/**
+	 * True when SceneId began, delivered at least one line, is choice-free,
+	 * and its playback has ended: the script played out, so a follow-up
+	 * interaction is the gameplay proof that commits the scene (blueprint
+	 * section 1.9 dispatcher; choice-free scenes commit only through
+	 * UQinglanStorySubsystem::NotifyObjectiveCompleted).
+	 */
+	bool WasSceneScriptExhausted(FName SceneId) const;
+
 	UPROPERTY(VisibleAnywhere) USpringArmComponent* CameraBoom = nullptr;
 	UPROPERTY(VisibleAnywhere) UCameraComponent* FollowCamera = nullptr;
 
@@ -76,6 +106,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	UPROPERTY() UQinglanCombatComponent* CombatComponent = nullptr;
 	UPROPERTY() UQinglanTechniqueComponent* TechniqueComponent = nullptr;
@@ -100,4 +131,52 @@ protected:
 	void UpdateCameraObstruction(float DeltaSeconds);
 	/** Restores walk speed after a dodge finishes. */
 	UFUNCTION() void HandleDodgeFinished();
+
+	// --- Playable-loop glue state ---
+
+	/** Lazy combat-HUD creation on the first player-controlled tick. */
+	void EnsureHudCreated();
+	/** Creates (once) and returns the dialogue presenter; null until first shown. */
+	UUserWidget* EnsureDialogueWidget();
+	/** Story playback display: line, choices, records (widget or on-screen fallback). */
+	UFUNCTION() void HandleSceneLine(const FQinglanScriptLine& Line);
+	UFUNCTION() void HandleChoicesPresented(const TArray<FQinglanSceneChoice>& Choices);
+	UFUNCTION() void HandleSceneEntered(FName SceneId);
+	UFUNCTION() void HandleSceneCompleted(FName SceneId);
+	UFUNCTION() void HandleRecordOpened(FName RecordId, const FText& Title, const FText& Body);
+	/** Boss-room clear commits the realm's current choice-free scene (gameplay proof). */
+	UFUNCTION() void HandleRoomCompleted(int32 RoomIndex, int64 ShardsAwarded);
+	/** Story choice-action delegates (Narrative/QinglanStoryRuntime.h). */
+	UFUNCTION() void HandleEnterTrialRequested(FName IdempotencyKey, FName SceneId);
+	UFUNCTION() void HandleReturnToHub(FName IdempotencyKey, FName SceneId);
+	UFUNCTION() void HandleCampaignComplete(FName IdempotencyKey, FName SceneId);
+	/** Defeat: banks at 50% and returns to the hub after a short beat (docs/03 section 6). */
+	UFUNCTION() void HandleHealthChanged(float Current, float Maximum);
+	/** Delayed hub reload after the death beat (timer callback; OpenLevel off the input path). */
+	UFUNCTION() void HandleDefeatTravel();
+	void BindStoryDelegates();
+	void UnbindStoryDelegates();
+
+	FTimerHandle DefeatTravelTimer;
+
+	TWeakObjectPtr<UUserWidget> HudWidget;
+	TWeakObjectPtr<UUserWidget> DialogueWidget;
+	bool bHudCreated = false;
+	bool bStoryDelegatesBound = false;
+	bool bDefeatHandled = false;
+
+	/** Open key menus: technique keys 1-4 select while one is active (highest priority first). */
+	TArray<FQinglanSceneChoice> PendingSceneChoices;
+	TArray<FQinglanBlessing> PendingBlessingChoices;
+	TArray<FQinglanShopOfferEntry> PendingShopChoices;
+
+	/** Script-exhaustion tracking for the objective-proof dispatcher. */
+	FName LastEnteredSceneId = NAME_None;
+	bool bLastEnteredSceneChoiceDriven = false;
+	bool bSawLineForEnteredScene = false;
+
+	/** One technique-key press routed into the open menu, if any. */
+	bool ConsumeMenuSelection(int32 Slot);
+	/** Buys one pending shop entry; auto-equips into a free slot (docs/03 sections 4-5). */
+	void BuyShopEntry(const FQinglanShopOfferEntry& Entry);
 };

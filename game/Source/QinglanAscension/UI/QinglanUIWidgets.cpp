@@ -94,6 +94,25 @@ void UQinglanDialogueWidget::NativeConstruct()
 	Relay->SetupDialogue(this);
 }
 
+void UQinglanDialogueWidget::SetCurrentLine(const FText& SpeakerName, const FText& LineText)
+{
+	CurrentSpeaker = SpeakerName;
+	CurrentLineText = LineText;
+}
+
+void UQinglanDialogueWidget::SetChoiceEntries(const TArray<FQinglanSceneChoice>& Choices)
+{
+	CurrentChoices = Choices;
+}
+
+void UQinglanDialogueWidget::ShowRecordEntry(const FText& Title, const FText& Body)
+{
+	LastRecordTitle = Title;
+	LastRecordBody = Body;
+	// Records reuse the line presenter: the title reads as the speaker slot.
+	SetCurrentLine(Title, Body);
+}
+
 void UQinglanHUDWidget::NativeConstruct()
 {
 	Super::NativeConstruct();

@@ -18,11 +18,14 @@
 #include "Combat/QinglanCharacter.h"
 #include "Combat/QinglanCombatComponent.h"
 #include "Combat/QinglanStatusComponent.h"
+#include "Core/QinglanInteractable.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerStart.h"
 #include "Kismet/GameplayStatics.h"
+#include "Narrative/QinglanStoryDataTypes.h"
+#include "Narrative/QinglanStorySubsystem.h"
 #include "Persistence/QinglanSaveGame.h"
 #include "Persistence/QinglanSaveSubsystem.h"
 #include "Progression/QinglanProfileSubsystem.h"
@@ -178,6 +181,17 @@ void AQinglanHubGameMode::BeginPlay()
 			UE_LOG(LogQinglan, Warning, TEXT("Hub autosave did not commit"));
 		}
 	}
+
+	// Epilogue entry: the CH07 retrospective lives in the sanctuary (its
+	// locations are authored prose, so no hub anchor matches them); beginning
+	// the earliest uncompleted epilogue scene here keeps the chapter reachable
+	// after the ending decision. BeginScene itself validates the CH06
+	// prerequisites, so earlier visits are a Verbose no-op.
+	if (UQinglanStorySubsystem* Story = Instance ? Instance->GetSubsystem<UQinglanStorySubsystem>() : nullptr)
+	{
+		const TArray<FName> EpilogueChapters = { FName(TEXT("CH07")) };
+		QinglanInteraction::BeginFirstSceneOfChapters(Story, EpilogueChapters);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -240,6 +254,42 @@ void AQinglanRealmGameMode::BeginPlay()
 	else
 	{
 		UE_LOG(LogQinglan, Error, TEXT("Realm mode has no encounter director; rooms will not spawn encounters"));
+	}
+
+	UGameInstance* Instance = GetGameInstance();
+	UQinglanRunSubsystem* Run = Instance ? Instance->GetSubsystem<UQinglanRunSubsystem>() : nullptr;
+
+	// Arm the room pipeline: StartExpedition leaves the room index unset, and
+	// the room-0 door can only advance from the current room (blueprint 1.4
+	// "doors and rewards stay driven by exactly one trigger"). Room 0 is the
+	// entrance (no wave), so this never starts a fight on arrival.
+	if (Run && Run->IsInExpedition() && Run->GetCurrentRoomIndex() == INDEX_NONE)
+	{
+		Run->EnterRoom(0);
+	}
+
+	// Realm chapter entry: entering a realm map begins that realm's current
+	// chapter scene (task contract; docs/dev/implementation-blueprint.md 1.9).
+	// The active expedition names the realm; trial travel without an expedition
+	// (the arena) falls back to the map's chapter set. BeginScene defers while
+	// an encounter is active and validates prerequisites itself.
+	if (UQinglanStorySubsystem* Story = Instance ? Instance->GetSubsystem<UQinglanStorySubsystem>() : nullptr)
+	{
+		TArray<FName> Chapters;
+		const UQinglanRealmDataAsset* Realm = (Run && Run->IsInExpedition()) ? Run->GetCurrentRealm() : nullptr;
+		const FName RealmId = Realm ? Realm->RealmId : NAME_None;
+		if (RealmId != NAME_None)
+		{
+			Chapters = QinglanInteraction::ChaptersForRealm(RealmId);
+		}
+		if (Chapters.IsEmpty())
+		{
+			Chapters = QinglanInteraction::ChaptersForMapName(GetWorld() ? GetWorld()->GetMapName() : FString());
+		}
+		if (!Chapters.IsEmpty())
+		{
+			QinglanInteraction::BeginFirstSceneOfChapters(Story, Chapters);
+		}
 	}
 }
 

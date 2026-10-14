@@ -478,20 +478,17 @@ void AQinglanProjectile::ExecuteHealTick(float TickAmount)
 		return;
 	}
 
-	// FIXME-CONTRACT: the combat component scaffold has no Heal/AddHealth API;
-	// SetDerivedAttributes is the only authoritative attributes entry point.
-	// This bridge re-applies the current attributes with health incremented
-	// and clamped to MaxHealth ("Healing is bounded by maximum health",
-	// docs/02 §6). When a Heal function is added upstream, replace this call.
-	FQinglanAttributes Attributes = Combat->GetAttributes();
+	// Authoritative heal through the combat component (docs/02 §6 "healing
+	// is bounded by maximum health"); the tick stops early at full health
+	// with no refund semantics.
+	const FQinglanAttributes Attributes = Combat->GetAttributes();
 	const float Healed = FMath::Min(TickAmount, Attributes.MaxHealth - Attributes.Health);
 	if (Healed <= 0.f)
 	{
 		HealRemaining = 0.f; // already at full health: stop ticking, no refund semantics
 		return;
 	}
-	Attributes.Health = FMath::Clamp(Attributes.Health + Healed, 0.f, Attributes.MaxHealth);
-	Combat->SetDerivedAttributes(Attributes);
+	Combat->Heal(Healed);
 	HealRemaining -= Healed;
 }
 

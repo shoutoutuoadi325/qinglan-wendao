@@ -54,8 +54,22 @@ public:
 	UFUNCTION(BlueprintCallable) bool TrySpendStamina(float Amount);
 	UFUNCTION(BlueprintCallable) bool TrySpendEnergy(float Amount);
 	UFUNCTION(BlueprintCallable) void GrantEnergy(float Amount);
+	/**
+	 * Authoritative heal: clamps to max health, broadcasts OnHealthChanged.
+	 * The caller folds healing-percent modifiers (docs/03 section 4
+	 * Herbal Knowledge, Verdant Seed relic) into Amount.
+	 */
+	UFUNCTION(BlueprintCallable) void Heal(float Amount);
 	/** Sword-hit energy restore: 4 per unique target, capped 8 per swing. */
 	void NotifySwordHitTarget(AActor* Victim);
+	/**
+	 * Swing-boundary reset for the sword energy ledger: clears the per-swing
+	 * victim list and the 8-energy cap so every swing starts clean
+	 * (docs/02 section 4 "one damage/energy share per victim per swing").
+	 */
+	void NotifySwordSwingStarted();
+	/** Clears pooled-actor state (hit keys, swing ledger) for reuse. */
+	void ResetForPool();
 
 	// --- Statuses ---
 	UFUNCTION(BlueprintCallable) void ApplyStatus(EQinglanStatus Status, float Magnitude = 0.f);

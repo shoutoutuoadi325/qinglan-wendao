@@ -181,18 +181,12 @@ bool UQinglanTalismanComponent::ExecuteEffect(const FQinglanTalismanCatalogEntry
 		// Healing Talisman: heal the catalog magnitude, bounded by maximum
 		// health (docs/03 section 5; docs/02 section 6 healing bound) and
 		// scaled by the permanent healing percent (Herbal Knowledge, Verdant
-		// Seed). FIXME-CONTRACT: UQinglanCombatComponent exposes no Heal entry
-		// point (see AQinglanProjectile::ExecuteHealTick), so the same
-		// SetDerivedAttributes bridge applies the bounded heal here.
+		// Seed) through the authoritative Heal entry point.
 		float UnusedEnergyRegen = 0.f;
 		float UnusedStaminaRegen = 0.f;
 		float HealingPercent = 0.f;
 		UQinglanEconomyLibrary::AppendPermanentRegen(this, UnusedEnergyRegen, UnusedStaminaRegen, HealingPercent);
-		FQinglanAttributes Attributes = Combat.GetAttributes();
-		Attributes.Health = FMath::Clamp(
-			Attributes.Health + Entry.Magnitude * (1.f + HealingPercent / 100.f),
-			0.f, Attributes.MaxHealth);
-		Combat.SetDerivedAttributes(Attributes);
+		Combat.Heal(Entry.Magnitude * (1.f + HealingPercent / 100.f));
 		return true;
 	}
 	if (Entry.EffectKind == FName(TEXT("cleanse")))

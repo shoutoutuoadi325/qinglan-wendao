@@ -167,6 +167,10 @@ void UQinglanSwordComponent::StartSwing(int32 CutIndex)
 	++SwingSerialCounter; // deterministic serial; no gameplay RNG anywhere
 	SwingCastId = FQinglanCastId{ SwingSerialCounter, SwingSerialCounter };
 	SwingVictims.Reset();          // one damage per victim per *swing* (docs/02 §4)
+	if (UQinglanCombatComponent* const Combat = GetOwnerCombat())
+	{
+		Combat->NotifySwordSwingStarted(); // per-swing energy ledger resets with the swing
+	}
 	bHavePreviousSocketLocations = false;
 	CloseWindow();
 	bHasBufferedAttack = false;    // the buffer is consumed by starting this swing

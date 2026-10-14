@@ -33,10 +33,8 @@ namespace
 	// Cooldown display keeps one fractional digit (authored HUD readability).
 	constexpr int32 CooldownFractionDigits = 1;
 
-	// Clock key for room/buff timers: "hud.clock" = "{minutes}:{seconds}".
-	// FIXME-CONTRACT(data): "hud.clock" must be added to localization/en-US.json
-	// and zh-Hans.json by the string-table importer; the runtime key reference
-	// here follows the dotted-key contract.
+	// Clock key for room/buff timers: "hud.clock" = "{minutes}:{seconds}"
+	// (present in both localization locale files).
 	const TCHAR* GClockFormatKey = TEXT("hud.clock");
 
 	/**

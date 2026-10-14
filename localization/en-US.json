@@ -95,5 +95,6 @@
   "relic.mountain_token.name": "Mountain Token",
   "relic.mountain_token.desc": "+20 max health while carried; the stone's weight slows your blade by 8% sword damage.",
   "relic.verdant_seed.name": "Verdant Seed",
-  "relic.verdant_seed.desc": "Healing you receive is 15% stronger; the seedling draws on your qi — techniques cost 5% more energy."
+  "relic.verdant_seed.desc": "Healing you receive is 15% stronger; the seedling draws on your qi — techniques cost 5% more energy.",
+  "preset.ultra": "Ultra"
 }

@@ -12,7 +12,9 @@
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "Blueprint/WidgetTree.h" // complete UWidgetTree for RootWidget/ConstructWidget (UMG/Public/Blueprint)
+#include "Kismet2/CompilerResultsLog.h" // FCompilerResultsLog for loud headless compiles
 #include "Kismet2/KismetEditorUtilities.h"
+#include "Misc/FileHelper.h" // FFileHelper::LoadFileToArray for the disk verification pass
 #include "Misc/PackageName.h"
 #include "UI/QinglanUIWidgets.h"
 #include "UObject/Package.h"
@@ -30,7 +32,18 @@ namespace
 		// name must NOT carry the object suffix.
 		const int32 Dot = ObjectPath.Find(TEXT("."), ESearchCase::IgnoreCase, ESearchDir::FromStart);
 		const FString PackageName = Dot > 0 ? ObjectPath.Left(Dot) : ObjectPath;
-		UPackage* Package = CreatePackage(*PackageName);
+		// Force fully-loaded existing packages (asset discovery leaves them
+		// half-open and SavePackage refuses those).
+		UPackage* Package = FindPackage(nullptr, *PackageName);
+		if (Package == nullptr)
+		{
+			Package = CreatePackage(*PackageName);
+		}
+		else if (!Package->IsFullyLoaded())
+		{
+			FlushAsyncLoading();
+			Package = LoadPackage(nullptr, *PackageName, LOAD_None);
+		}
 		Package->SetPackageFlags(PKG_NewlyCreated);
 		UWidgetBlueprintFactory* Factory = NewObject<UWidgetBlueprintFactory>();
 		Factory->ParentClass = BaseClass; // UE 5.8: ParentClass replaced InitialWidgetClass
@@ -83,13 +96,72 @@ namespace
 
 	bool SaveWidget(UWidgetBlueprint* WBP)
 	{
-		FKismetEditorUtilities::CompileBlueprint(WBP);
+		// Compile through a FCompilerResultsLog so headless failures are loud:
+		// UE 5.8's FKismetEditorUtilities::CompileBlueprint returns void, and a
+		// silently failed compile leaves no generated class - the asset would
+		// then save as an uncompiled blueprint whose <Name>_C class can never
+		// load at runtime (same pattern as CompileAllBlueprintsCommandlet).
+		FCompilerResultsLog Results;
+		FKismetEditorUtilities::CompileBlueprint(WBP, EBlueprintCompileOptions::None, &Results);
+		// Post-compile proof: the generated (and skeleton) classes must exist
+		// in the package before saving, and the parent must be the requested
+		// C++ base (a parent mismatch recompiles against UUserWidget).
+		UE_LOG(LogTemp, Log,
+			TEXT("UIBootstrap: %s compiled with %d error(s), %d warning(s); parent %s, generated class %s, skeleton class %s"),
+			*WBP->GetName(), Results.NumErrors, Results.NumWarnings,
+			*GetNameSafe(WBP->ParentClass), *GetNameSafe(WBP->GeneratedClass),
+			*GetNameSafe(WBP->SkeletonGeneratedClass));
+		if (Results.NumErrors > 0 || !WBP->GeneratedClass || !WBP->SkeletonGeneratedClass)
+		{
+			return false;
+		}
+
 		UPackage* Package = WBP->GetOutermost();
+		Package->FullyLoad(); // discovery can leave packages half-open; saves refuse those
 		const FString FileName = FPackageName::LongPackageNameToFilename(
 			Package->GetName(), FPackageName::GetAssetPackageExtension());
 		FSavePackageArgs Args;
 		Args.TopLevelFlags = RF_Public | RF_Standalone;
-		return UPackage::SavePackage(Package, WBP, *FileName, Args);
+		if (!UPackage::SavePackage(Package, WBP, *FileName, Args))
+		{
+			return false;
+		}
+
+		// Disk verification (the in-memory checks above cannot prove the
+		// save): the package bytes must carry the generated class export name
+		// and its UClass type - the objects StaticLoadClass resolves through
+		// UQinglanHUDStatics::ResolveWidgetClass at runtime.
+		TArray<uint8> PackageBytes;
+		if (!FFileHelper::LoadFileToArray(PackageBytes, *FileName))
+		{
+			return false;
+		}
+		auto ContainsToken = [&PackageBytes](const char* Token)
+		{
+			const SIZE_T TokenLen = FPlatformString::Strlen(Token);
+			for (int32 Offset = 0; Offset + static_cast<SIZE_T>(TokenLen) <= static_cast<SIZE_T>(PackageBytes.Num()); ++Offset)
+			{
+				if (FMemory::Memcmp(PackageBytes.GetData() + Offset, Token, TokenLen) == 0)
+				{
+					return true;
+				}
+			}
+			return false;
+		};
+		const FTCHARToUTF8 GeneratedNameANSI(*(WBP->GetName() + TEXT("_C")));
+		const FTCHARToUTF8 GeneratedTypeANSI(TEXT("WidgetBlueprintGeneratedClass"));
+		const bool bClassOnDisk = ContainsToken(GeneratedNameANSI.Get()) && ContainsToken(GeneratedTypeANSI.Get());
+		if (bClassOnDisk)
+		{
+			UE_LOG(LogTemp, Log, TEXT("UIBootstrap: %s saved to %s (%d bytes); generated class present on disk: yes"),
+				*WBP->GetName(), *FileName, PackageBytes.Num());
+		}
+		else
+		{
+			UE_LOG(LogTemp, Error, TEXT("UIBootstrap: %s saved to %s (%d bytes); generated class present on disk: NO"),
+				*WBP->GetName(), *FileName, PackageBytes.Num());
+		}
+		return bClassOnDisk;
 	}
 }
 

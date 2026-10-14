@@ -62,6 +62,9 @@ namespace
 		TArray<TObjectPtr<UQinglanEnemyDataAsset>> WaveQueue;
 		TArray<TWeakObjectPtr<AQinglanEnemyCharacter>> EnemyPool;
 		FRandomStream EncounterStream;
+		/** Portal ring band around the director; expedition default above. */
+		float RingMinCm = PortalSpawnRingMinCm;
+		float RingMaxCm = PortalSpawnRingMaxCm;
 	};
 
 	TMap<TWeakObjectPtr<AQinglanEncounterDirector>, FQinglanDirectorExtra> GDirectorExtras;
@@ -157,14 +160,14 @@ namespace
 	}
 
 	/** Deterministic ring placement that respects the 4 m player exclusion (docs/01 section 6). */
-	FVector PickPortalLocation(FRandomStream& Stream, const FVector& Anchor, const ACharacter* Player)
+	FVector PickPortalLocation(FRandomStream& Stream, const FVector& Anchor, const ACharacter* Player,
+		float RingMinCm, float RingMaxCm)
 	{
 		for (int32 Attempt = 0; Attempt < PortalPlacementAttempts; ++Attempt)
 		{
 			// Deterministic ring position from the seeded stream (no RandRange).
 			const float AngleDeg = Stream.FRand() * 360.f;
-			const float Radius = PortalSpawnRingMinCm +
-				Stream.FRand() * (PortalSpawnRingMaxCm - PortalSpawnRingMinCm);
+			const float Radius = RingMinCm + Stream.FRand() * (RingMaxCm - RingMinCm);
 			const FVector Candidate = Anchor + FVector(
 				FMath::Cos(FMath::DegreesToRadians(AngleDeg)) * Radius,
 				FMath::Sin(FMath::DegreesToRadians(AngleDeg)) * Radius, 0.f);
@@ -276,7 +279,7 @@ void AQinglanEncounterDirector::Tick(float DeltaTime)
 			{
 				Extra.WaveQueue.RemoveAt(0);
 				SpawnThroughPortal(Next, PickPortalLocation(Extra.EncounterStream,
-					GetActorLocation(), GetPlayer(this)));
+					GetActorLocation(), GetPlayer(this), Extra.RingMinCm, Extra.RingMaxCm));
 			}
 		}
 	}
@@ -511,4 +514,18 @@ void AQinglanEncounterDirector::SpawnThroughPortal(UQinglanEnemyDataAsset* Data,
 	}
 	UE_LOG(LogQinglanAI, Log, TEXT("Portal opened for %s (%.1f s warning)"),
 		*Data->EnemyId.ToString(), PortalWarningDuration);
+}
+
+void SetEncounterSpawnRingOverride(AQinglanEncounterDirector* Director, float MinCm, float MaxCm)
+{
+	// Trial-only override (see the header); the expedition default band lives
+	// in the constants above. Clamped so a bad call can never invert the band
+	// or collapse it onto the anchor.
+	if (!Director)
+	{
+		return;
+	}
+	FQinglanDirectorExtra& Extra = ExtraFor(Director);
+	Extra.RingMinCm = FMath::Clamp(FMath::Min(MinCm, MaxCm), 100.f, 100000.f);
+	Extra.RingMaxCm = FMath::Max(Extra.RingMinCm, FMath::Clamp(FMath::Max(MinCm, MaxCm), 100.f, 100000.f));
 }

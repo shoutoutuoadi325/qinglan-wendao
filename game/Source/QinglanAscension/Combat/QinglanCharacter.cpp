@@ -1123,25 +1123,27 @@ void AQinglanCharacter::HandleSceneLine(const FQinglanScriptLine& Line)
 		}
 		if (UQinglanDialogueWidget* Dialogue = Cast<UQinglanDialogueWidget>(Widget))
 		{
-			Dialogue->SetCurrentLine(Line.SpeakerName, Line.Text);
-			return;
+			if (Dialogue->SetCurrentLine(Line.SpeakerName, Line.Text))
+			{
+				return; // rendered into Txt_Speaker/Txt_Line
+			}
 		}
 	}
-	// FIXME-CONTRACT: WBP_Dialogue is unauthored; the on-screen message is the
-	// sanctioned last-resort presenter until the UMG frontend lands.
+	// Unauthored-tree fallback: the keyed on-screen message stays the
+	// last-resort presenter when the widget lacks the named blocks.
 	ShowOnScreenMessage(FString::Printf(TEXT("%s: %s"), *Line.SpeakerName.ToString(), *Line.Text.ToString()));
 }
 
 void AQinglanCharacter::HandleChoicesPresented(const TArray<FQinglanSceneChoice>& Choices)
 {
 	PendingSceneChoices = Choices;
-	// Widget path first (stored entries + the BP_OnChoicesShown relay); the
-	// keyed on-screen list is the unauthored-frontend fallback only.
+	// Widget path first (stored entries + Box_Choices rebuild); the keyed
+	// on-screen list is the unauthored-frontend fallback only.
 	if (UUserWidget* Widget = DialogueWidget.Get())
 	{
-		if (UQinglanDialogueWidget* Dialogue = Cast<UQinglanDialogueWidget>(Widget); Dialogue && Widget->IsInViewport())
+		if (UQinglanDialogueWidget* Dialogue = Cast<UQinglanDialogueWidget>(Widget);
+			Dialogue && Widget->IsInViewport() && Dialogue->SetChoiceEntries(Choices))
 		{
-			Dialogue->SetChoiceEntries(Choices);
 			return;
 		}
 	}
@@ -1233,8 +1235,10 @@ void AQinglanCharacter::HandleRecordOpened(FName RecordId, const FText& Title, c
 		}
 		if (UQinglanDialogueWidget* Dialogue = Cast<UQinglanDialogueWidget>(Widget))
 		{
-			Dialogue->ShowRecordEntry(Title, Body);
-			return;
+			if (Dialogue->ShowRecordEntry(Title, Body))
+			{
+				return; // rendered into the speaker/line blocks
+			}
 		}
 	}
 	ShowOnScreenMessage(FString::Printf(TEXT("%s\n%s"), *Title.ToString(), *Body.ToString()));
@@ -1418,8 +1422,10 @@ void AQinglanCharacter::ShowGameMessage(const FText& Message)
 		{
 			if (UQinglanDialogueWidget* Dialogue = Cast<UQinglanDialogueWidget>(Widget))
 			{
-				Dialogue->SetCurrentLine(FText::GetEmpty(), Message);
-				return;
+				if (Dialogue->SetCurrentLine(FText::GetEmpty(), Message))
+				{
+					return; // notice rendered through the dialogue line block
+				}
 			}
 		}
 	}

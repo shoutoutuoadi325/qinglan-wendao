@@ -1224,7 +1224,19 @@ namespace
 			AddError(Errors, TEXT("import"), FString::Printf(TEXT("class for '%s' could not be resolved"), *PackagePath));
 			return nullptr;
 		}
-		UPackage* Package = CreatePackage(*PackagePath);
+		// Packages touched by asset-registry discovery can be half-open
+		// (!IsFullyLoaded) and SavePackage refuses those; force a full load of
+		// anything that already exists before reusing it.
+		UPackage* Package = FindPackage(nullptr, *PackagePath);
+		if (Package == nullptr)
+		{
+			Package = CreatePackage(*PackagePath);
+		}
+		else if (!Package->IsFullyLoaded())
+		{
+			FlushAsyncLoading();
+			Package = LoadPackage(nullptr, *PackagePath, LOAD_None);
+		}
 		if (Package == nullptr)
 		{
 			AddError(Errors, TEXT("import"), FString::Printf(TEXT("package '%s' could not be created"), *PackagePath));
@@ -1246,6 +1258,9 @@ namespace
 		if (Asset == nullptr) { return false; }
 		UPackage* Package = Cast<UPackage>(Asset->GetOuter());
 		if (Package == nullptr) { return false; }
+		// Same guard as the content bootstrap: half-open discovery packages
+		// refuse to save; FullyLoad() closes them.
+		Package->FullyLoad();
 		const FString FileName = FPackageName::LongPackageNameToFilename(Package->GetName(), FPackageName::GetAssetPackageExtension());
 		// UE 5.8 SavePackage API: the legacy uint32-flags overload is gone; the
 		// args struct keeps defaults (SAVE_None, error output to GError).

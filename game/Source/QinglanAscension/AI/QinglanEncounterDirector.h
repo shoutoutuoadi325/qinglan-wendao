@@ -56,3 +56,12 @@ private:
 	float PortalWarningDuration = 0.8f;
 	float SpawnTimer = 0.f;
 };
+
+/**
+ * Overrides one director's portal spawn ring around its anchor (cm). The
+ * expedition default stays the authored 600-1200 cm band (docs/01 section 6);
+ * the trial director widens its dedicated wave engine to the storm platform's
+ * outer band. Free function instead of a member because the scaffold header
+ * is frozen (see the FIXME-CONTRACT in the .cpp); same-module callers only.
+ */
+void SetEncounterSpawnRingOverride(AQinglanEncounterDirector* Director, float MinCm, float MaxCm);

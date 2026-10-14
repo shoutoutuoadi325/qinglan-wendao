@@ -19,7 +19,8 @@
 #include "Combat/QinglanCombatComponent.h"
 #include "Combat/QinglanStatusComponent.h"
 #include "Core/QinglanInteractable.h"
-#include "Engine/World.h"
+#include "Misc/CommandLine.h" // FParse
+#include "UnrealClient.h" // FScreenshotRequest
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerStart.h"
@@ -89,6 +90,52 @@ namespace
 	}
 }
 
+
+namespace
+{
+	/**
+	 * -QinglanShot=<id>: capture one gameplay screenshot after a short settle
+	 * and exit. Used for headless visual verification (docs/dev/build-and-run
+	 * "GPU rendering") and CI image regression; harmless without the flag.
+	 */
+	void SetupQinglanShotMode(AActor* Mode)
+	{
+		if (!FParse::Param(FCommandLine::Get(), TEXT("QinglanShot")))
+		{
+			return;
+		}
+		FString ShotId = TEXT("map");
+		FParse::Value(FCommandLine::Get(), TEXT("QinglanShot="), ShotId);
+		UWorld* World = Mode ? Mode->GetWorld() : nullptr;
+		if (!World)
+		{
+			return;
+		}
+		FTimerHandle Unused;
+		World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(Mode, [World, ShotId]()
+		{
+			// Second tick so the first rendered frame is complete, then shoot.
+			World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(World, [World, ShotId]()
+			{
+				const FString Path = FString::Printf(TEXT("/tmp/qinglan_shot_%s"), *ShotId);
+				FScreenshotRequest::RequestScreenshot(Path, /*bShowUI=*/true, /*bAddFilenameSuffix=*/false);
+				UE_LOG(LogQinglan, Log, TEXT("QinglanShot: requested %s.png"), *Path);
+				// Give the readback two frames, then quit so batch runs terminate.
+				World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(World, [World]()
+				{
+					World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(World, [World]()
+					{
+						if (APlayerController* PC = World->GetFirstPlayerController())
+						{
+							PC->ConsoleCommand(TEXT("quit"));
+						}
+					}));
+				}));
+			}));
+		}));
+	}
+}
+
 // ---------------------------------------------------------------------------
 // AQinglanHubGameMode
 // ---------------------------------------------------------------------------
@@ -103,6 +150,7 @@ void AQinglanHubGameMode::BeginPlay()
 {
 	Super::BeginPlay();
 	UE_LOG(LogQinglan, Log, TEXT("Hub mode active (sanctuary)"));
+	SetupQinglanShotMode(this);
 
 	UGameInstance* Instance = GetGameInstance();
 
@@ -206,6 +254,7 @@ AQinglanRealmGameMode::AQinglanRealmGameMode()
 void AQinglanRealmGameMode::BeginPlay()
 {
 	Super::BeginPlay();
+	SetupQinglanShotMode(this);
 
 	// Realm exploration starts on the prepare loop; the encounter director
 	// switches to Combat/Boss when waves begin (docs/04 audio pass).

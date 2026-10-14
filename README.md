@@ -4,6 +4,8 @@ A completely free, offline, single-player **3D xianxia action game** for Windows
 
 **Project status:** in active development on Linux (UE 5.8 source build). The `game/` Unreal project implements the full gameplay modules, narrative data pipeline (8 chapters / 30 scenes, 8 side quests / 24 stages, 3 gated endings), headless content bootstrap (maps, materials, characters, montages, UI), durable 3-slot save system, and a 12-test automation suite (all green). Windows DX12 and Apple Silicon Metal remain compatibility targets pending validation on those platforms. See [docs/dev/build-and-run.md](docs/dev/build-and-run.md) to build/run and [docs/dev/test-report.md](docs/dev/test-report.md) for the current test status.
 
+For the current repair and integration backlog, see the [Gameplay Bugfix TODO and Integration Acceptance](docs/dev/bugfix-todo.md). It records investigated progression defects, functional gaps, regression checks, and the gate for merging the game implementation into `main`.
+
 ## Confirmed requirements
 
 - Windows and Apple Silicon macOS at first release.

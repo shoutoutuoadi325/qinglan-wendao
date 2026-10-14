@@ -61,8 +61,8 @@ namespace
 	constexpr float QinglanRoomSpacing = 5500.f;
 	constexpr float QinglanRoomTeleportHeight = 150.f;
 
-	/** PlayerStart tag convention (Core/QinglanGameModeBase.cpp GRoomEntranceTagPrefix). */
-	const TCHAR* GRoomEntranceTagPrefix = TEXT("Qinglan.RoomEntrance");
+	/** PlayerStart tag convention (Core/QinglanGameModeBase.cpp GInteractableRoomEntranceTagPrefix). */
+	const TCHAR* GInteractableRoomEntranceTagPrefix = TEXT("Qinglan.RoomEntrance");
 
 	/** Cultivation transaction-id convention (deterministic, idempotent; mirrors the automation specs' "rank_qi_3"/"bt_foundation" style). */
 	FString StageToken(EQinglanStage Stage)
@@ -171,7 +171,7 @@ namespace
 		{
 			return nullptr;
 		}
-		const FString Prefix(GRoomEntranceTagPrefix);
+		const FString Prefix(GInteractableRoomEntranceTagPrefix);
 		APlayerStart* AnyEntrance = nullptr;
 		for (TActorIterator<APlayerStart> It(World); It; ++It)
 		{

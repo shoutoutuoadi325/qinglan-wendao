@@ -20,7 +20,7 @@
 namespace
 {
 	/** Room layout contract (QinglanContentBootstrap.cpp BootstrapMaps). */
-	constexpr float QinglanRoomSpacing = 5500.f;
+	constexpr float QinglanSpawnerRoomSpacing = 5500.f;
 	constexpr int32 QinglanRealmRoomCount = 7;
 	constexpr float QinglanDoorForwardOffset = 500.f; // corridor mouth, just inside the current room
 	constexpr float QinglanDoorHeight = 150.f;
@@ -47,12 +47,9 @@ namespace
 		{
 			return NAME_None;
 		}
-		FString Key = Point->GetName();
-		if (Key.StartsWith(TEXT("Default__")) || Key.IsEmpty())
-		{
-			Key = Point->GetActorLabel();
-		}
-		return FName(*Key);
+		// Anchors carry their interaction key as the object name (the
+		// bootstrap's SpawnActor names); GetActorLabel is editor-only.
+		return FName(*Point->GetName());
 	}
 } // namespace
 
@@ -173,7 +170,7 @@ void UQinglanInteractionSpawner::SynthesizeRealmDoors(UWorld* World)
 		// Corridor center, nudged back into the current room so the door is
 		// reachable before the corridor geometry.
 		const FVector Location(
-			FromRoom * QinglanRoomSpacing + QinglanRoomSpacing * 0.5f - QinglanDoorForwardOffset,
+			FromRoom * QinglanSpawnerRoomSpacing + QinglanSpawnerRoomSpacing * 0.5f - QinglanDoorForwardOffset,
 			0.f, QinglanDoorHeight);
 		SpawnInteractableAt(World, DoorId, Location);
 	}

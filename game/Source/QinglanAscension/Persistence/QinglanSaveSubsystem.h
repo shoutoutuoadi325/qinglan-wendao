@@ -7,6 +7,7 @@
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FQinglanSaveCompleted, FName, ProfileId);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQinglanSaveFailed, FName, ProfileId, FText, Reason);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FQinglanProfileChanged, FName, ProfileId);
 
 enum class EQinglanSavePhase : uint8
 {
@@ -33,6 +34,14 @@ public:
 	UFUNCTION(BlueprintCallable) bool LoadProfile(int32 Slot, FText& OutNotice);
 	/** Writes now (safe boundary only); see SaveGame docs for boundary rules. */
 	UFUNCTION(BlueprintCallable) bool SaveNow(FText& OutError);
+	/**
+	 * Save-before-travel form for map-travel callers (portals, exits, gates):
+	 * persists the active session's earned state before leaving the map. No
+	 * active session: true (nothing earned to persist).
+	 */
+	UFUNCTION(BlueprintCallable) bool SaveActiveSession(FText& OutError);
+	/** True once a profile was loaded or created in this process session. */
+	UFUNCTION(BlueprintPure) bool IsProfileSessionActive() const;
 	UFUNCTION(BlueprintCallable) bool HasProfile(int32 Slot) const;
 	UFUNCTION(BlueprintCallable) void CreateNewProfile(int32 Slot);
 	/** Removes checkpoint state (used on expedition end / return to hub). */
@@ -42,6 +51,18 @@ public:
 
 	UPROPERTY(BlueprintAssignable) FQinglanSaveCompleted OnSaveCompleted;
 	UPROPERTY(BlueprintAssignable) FQinglanSaveFailed OnSaveFailed;
+	/**
+	 * Broadcast after a profile load/creation fully replaced the session
+	 * state; story/UI subscribers drop stale per-profile caches here.
+	 */
+	UPROPERTY(BlueprintAssignable) FQinglanProfileChanged OnProfileChanged;
+
+protected:
+	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+
+private:
+	/** Commit-boundary autosave (hub purchases, rank unlocks): saves when a profile commit lands outside an expedition. */
+	UFUNCTION() void HandleProfileCommitted();
 
 	/** Serializes the checksummed body used by the atomic replace step. */
 	bool SerializeVerified(const class UQinglanSaveGame* Save, TArray<uint8>& OutBytes) const;

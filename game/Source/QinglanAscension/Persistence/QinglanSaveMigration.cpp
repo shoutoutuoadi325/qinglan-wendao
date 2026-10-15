@@ -358,6 +358,22 @@ namespace QinglanSave
 				OutError = Loc(TEXT("save.invalid"));
 				return false;
 			}
+			// Pending draft offer (docs/03 section 5): bounded, unique ids, and
+			// canonically paired with its owning room (an offer always carries a
+			// room, a room never lingers without an offer).
+			if (HasDuplicates(Checkpoint.PendingBlessingOffer) ||
+				!IsBoundedNameArray(Checkpoint.PendingBlessingOffer, MaxBlessingEntries, "pending blessing offer", OutError))
+			{
+				OutError = Loc(TEXT("save.invalid"));
+				return false;
+			}
+			if (Checkpoint.PendingBlessingRoom < INDEX_NONE || Checkpoint.PendingBlessingRoom >= MaxRoomEntries ||
+				Checkpoint.PendingBlessingOffer.IsEmpty() != (Checkpoint.PendingBlessingRoom == INDEX_NONE))
+			{
+				UE_LOG(LogQinglanSave, Error, TEXT("Save invariant 'pending offer/room pairing' failed"));
+				OutError = Loc(TEXT("save.invalid"));
+				return false;
+			}
 			if (Checkpoint.CommittedRoomIds.Num() > MaxRoomEntries)
 			{
 				UE_LOG(LogQinglanSave, Error, TEXT("Save invariant 'bounded committed rooms' failed"));

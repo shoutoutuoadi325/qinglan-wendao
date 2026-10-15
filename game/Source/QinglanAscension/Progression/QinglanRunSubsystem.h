@@ -11,6 +11,7 @@ class UQinglanRealmDataAsset;
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FQinglanRoomEntered, int32, RoomIndex);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQinglanRoomCompleted, int32, RoomIndex, int64, ShardsAwarded);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FQinglanExpeditionEnded);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FQinglanBankingFailed);
 
 /** One drafted temporary blessing. */
 USTRUCT(BlueprintType)
@@ -53,6 +54,11 @@ public:
 	/** Loot kept until banking; visible in the pause HUD. */
 	UFUNCTION(BlueprintPure) FQinglanInventory GetUnbankedLoot() const;
 
+	/** Clears every expedition-owned state (profile switch with no checkpoint; AUD-04). */
+	UFUNCTION(BlueprintCallable) void ResetRun();
+	/** Realm of the open checkpoint resume target; NAME_None when at the sanctuary (AUD-02). */
+	UFUNCTION(BlueprintPure) FName GetPendingCheckpointRealm() const;
+
 	/** Checkpoint capture for the save subsystem (pre-room snapshot). */
 	void ExportCheckpoint(struct FQinglanCheckpoint& Out) const;
 	void ImportCheckpoint(const struct FQinglanCheckpoint& In);
@@ -60,4 +66,6 @@ public:
 	UPROPERTY(BlueprintAssignable) FQinglanRoomEntered OnRoomEntered;
 	UPROPERTY(BlueprintAssignable) FQinglanRoomCompleted OnRoomCompleted;
 	UPROPERTY(BlueprintAssignable) FQinglanExpeditionEnded OnExpeditionEnded;
+	/** Banking could not allocate/commit its transaction; loot stays unbanked and retryable (AUD-07). */
+	UPROPERTY(BlueprintAssignable) FQinglanBankingFailed OnBankingFailed;
 };

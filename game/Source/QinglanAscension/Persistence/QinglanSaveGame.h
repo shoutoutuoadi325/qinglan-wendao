@@ -20,6 +20,10 @@ struct FQinglanCheckpoint
 	UPROPERTY() int32 RoomIndex = 0;
 	UPROPERTY() FName RealmId = NAME_None;
 	UPROPERTY() TArray<FName> AcquiredBlessings;
+	/** Un-accepted draft offer restored without rerolling; INDEX_NONE when no draft is pending. */
+	UPROPERTY() TArray<FName> PendingBlessingOffer;
+	/** Owning room of the pending draft (the room whose completion rolled it). */
+	UPROPERTY() int32 PendingBlessingRoom = INDEX_NONE;
 	UPROPERTY() FQinglanAttributes PlayerAttributes;
 	UPROPERTY() FQinglanInventory Loot;
 	UPROPERTY() TArray<int32> CommittedRoomIds;

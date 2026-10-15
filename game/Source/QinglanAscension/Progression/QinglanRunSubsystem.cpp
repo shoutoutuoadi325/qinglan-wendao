@@ -31,6 +31,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Narrative/QinglanStoryDataTypes.h"
 #include "Persistence/QinglanSaveGame.h"
+#include "Persistence/QinglanSaveSubsystem.h"
 #include "Progression/QinglanBlessingDrafting.h"
 #include "Progression/QinglanDeterminism.h"
 #include "Progression/QinglanEconomyLibrary.h"
@@ -118,6 +119,8 @@ namespace
 		TArray<FName> AcquiredBlessings;
 		/** Cached 1-of-3 draft rolled at draft-room completion (docs/03 section 5). */
 		TArray<FName> PendingBlessingOffer;
+		/** Room whose completion rolled the pending draft (checkpoint restore, AUD-06). */
+		int32 PendingOfferRoom = INDEX_NONE;
 		bool bDraftPending = false;
 
 		/** Room ids whose reward already committed; idempotency for crash-resume. */
@@ -313,8 +316,9 @@ namespace
 	/**
 	 * Unique, journal-stable banking transaction id. Repeat expeditions of the
 	 * same realm must never collide (a replayed id would silently skip the
-	 * payout), so the counter probes the profile journal until an uncommitted
-	 * id is found; the journal makes the probe stable across reloads.
+	 * payout), so the counter probes the profile journal upward without an
+	 * arbitrary cap (the journal's own 8192-entry invariant bound keeps the
+	 * search finite); the journal makes the probe stable across reloads.
 	 */
 	FName MakeBankingTransactionId(UQinglanProfileSubsystem* Profile, FName RealmId)
 	{
@@ -322,17 +326,69 @@ namespace
 		{
 			return NAME_None;
 		}
-		int32 Counter = 1;
-		while (Counter < 1000)
+		for (int32 Counter = 1; Counter < MAX_int32; ++Counter)
 		{
 			const FName Candidate(*FString::Printf(TEXT("tx.run.%s.%02d.bank"), *RealmId.ToString(), Counter));
 			if (!Profile->WasTransactionCommitted(Candidate))
 			{
 				return Candidate;
 			}
-			++Counter;
 		}
 		return NAME_None;
+	}
+
+	/**
+	 * Durable save at the run's safe boundaries (entrance, completed-room
+	 * reward, post-selection draft commit, banking; AUD-02). The save
+	 * subsystem broadcasts OnSaveFailed for the UI when a write does not
+	 * commit; the boundary caller only keeps a log breadcrumb.
+	 */
+	void CommitBoundarySave(const UQinglanRunSubsystem* Subsystem)
+	{
+		const UGameInstance* Instance = Subsystem->GetGameInstance();
+		UQinglanSaveSubsystem* Save = Instance ? const_cast<UGameInstance*>(Instance)->GetSubsystem<UQinglanSaveSubsystem>() : nullptr;
+		if (!Save)
+		{
+			return;
+		}
+		FText SaveError;
+		if (!Save->SaveNow(SaveError))
+		{
+			UE_LOG(LogQinglan, Warning, TEXT("Run boundary save did not commit: %s"), *SaveError.ToString());
+		}
+	}
+
+	/**
+	 * Victory material top-up (AUD-08): the economy table's repeat material
+	 * total is the guaranteed per-clear material payout; the elite room's
+	 * guaranteed material is one unit of it granted early at room completion,
+	 * so the banking grant tops the remainder up. Retreat/defeat keep only
+	 * the per-stack floored loot (ApplyBankingMultiplier ran before this).
+	 */
+	void AppendRepeatMaterialPayout(const FQinglanRunState& State, const UQinglanRealmDataAsset* Realm, FQinglanInventory& InOutGrant)
+	{
+		FQinglanInventory Repeat;
+		if (!UQinglanEconomyLibrary::GetExpeditionPayout(State.RealmId, /*bFirstClear*/ false, Repeat))
+		{
+			return; // tutorial/unknown realms: room rewards + elite drop already match the authored payout
+		}
+		int32 CommittedEliteRooms = 0;
+		for (const int32 RoomId : State.CommittedRoomIds)
+		{
+			if (Realm && Realm->Rooms.IsValidIndex(RoomId) && Realm->GetRoomKind(RoomId) == EQinglanRoomKind::Elite)
+			{
+				++CommittedEliteRooms;
+			}
+		}
+		if (State.RealmId == FName(UQinglanEconomyLibrary::AshenRealmIdText))
+		{
+			InOutGrant.VeinCrystal += FMath::Max<int64>(0, Repeat.VeinCrystal - CommittedEliteRooms);
+		}
+		else
+		{
+			InOutGrant.SpiritHerb += FMath::Max<int64>(0, Repeat.SpiritHerb - CommittedEliteRooms);
+			InOutGrant.VeinCrystal += Repeat.VeinCrystal;
+		}
 	}
 }
 
@@ -363,6 +419,7 @@ bool UQinglanRunSubsystem::StartExpedition(FName RealmId, int32 Seed)
 	State.UnbankedLoot = FQinglanInventory();
 	State.AcquiredBlessings.Reset();
 	State.PendingBlessingOffer.Reset();
+	State.PendingOfferRoom = INDEX_NONE;
 	State.bDraftPending = false;
 	State.CommittedRoomIds.Reset();
 	State.EntryAttributes = FQinglanAttributes();
@@ -425,6 +482,10 @@ bool UQinglanRunSubsystem::EnterRoom(int32 RoomIndex)
 			UE_LOG(LogQinglan, Verbose, TEXT("EnterRoom: no encounter director in the world; room %d armed without a wave"), RoomIndex);
 		}
 	}
+
+	// Room entrance is a safe checkpoint boundary (blueprint section 1.6);
+	// the durable write persists the pre-room snapshot for crash resume (AUD-02).
+	CommitBoundarySave(this);
 	return true;
 }
 
@@ -478,6 +539,16 @@ void UQinglanRunSubsystem::CompleteCurrentRoom(FName TransactionId)
 		State.PendingBlessingOffer.Reset();
 		QinglanBlessingDrafting::RollOffer(State.BlessingStream, State.AcquiredBlessings, State.PendingBlessingOffer);
 		State.bDraftPending = !State.PendingBlessingOffer.IsEmpty();
+		State.PendingOfferRoom = State.bDraftPending ? RoomIndex : INDEX_NONE;
+	}
+
+	// Completed-room reward screen is a safe checkpoint boundary (blueprint
+	// section 1.6), but a pending draft defers the durable write until the
+	// player selects: the offer itself rides the checkpoint (AUD-06), so the
+	// committed save must reflect the post-selection state (AUD-02).
+	if (!State.bDraftPending)
+	{
+		CommitBoundarySave(this);
 	}
 }
 
@@ -637,7 +708,12 @@ bool UQinglanRunSubsystem::AcceptBlessing(FName BlessingId)
 	State.AcquiredBlessings.Add(BlessingId);
 	// One pick consumes the draft; remaining options vanish (docs/03 section 5).
 	State.PendingBlessingOffer.Reset();
+	State.PendingOfferRoom = INDEX_NONE;
 	State.bDraftPending = false;
+	// The selection closes the draft room's deferred reward checkpoint: the
+	// chosen blessing is granted exactly once and must survive a quit now
+	// (AUD-06 acceptance: "a chosen blessing is granted once").
+	CommitBoundarySave(this);
 	return true;
 }
 

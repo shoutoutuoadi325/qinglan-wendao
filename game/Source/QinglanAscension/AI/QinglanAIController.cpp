@@ -9,6 +9,7 @@
 #include "AI/QinglanEnemyProjectile.h"
 #include "Combat/QinglanCharacter.h"
 #include "Combat/QinglanCombatComponent.h"
+#include "Combat/QinglanStatusComponent.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Engine/Engine.h"
 #include "Engine/GameViewportClient.h"
@@ -91,6 +92,8 @@ void AQinglanAIController::ResetForPool()
 	DeathWorldSeconds = -1.f;
 	CachedSpec = nullptr;
 	bDirectMovement = false;
+	bOrbiting = false;
+	OrbitRemaining = 0.f;
 	StopMoving();
 	ClearFocus(EAIFocusPriority::Gameplay);
 }
@@ -478,39 +481,57 @@ bool AQinglanAIController::IsTargetOutsideSafeArc(float SafeArcHalfWidthDeg) con
 // GetPendingStrikeCenters is inline in QinglanAIController.h; no out-of-line
 // definition here (a second definition would be a redefinition error).
 
-bool AQinglanAIController::SpawnPooledProjectileAtTarget(float Damage, float Range, FName TechniqueId,
-	FName CueId, float AimYawOffsetDeg)
+FQinglanCastId AQinglanAIController::NextAttackCastId()
+{
+	// Globally-unique release identity (AUD-33): two enemies attacking on the
+	// same frame can never collide, and pooled reuse keeps ids unique because
+	// the authority counter never resets.
+	return UQinglanCombatComponent::NextCastId();
+}
+
+AQinglanEnemyProjectile* AQinglanAIController::AcquirePooledProjectile()
 {
 	AQinglanEnemyCharacter* Enemy = GetEnemy();
-	ACharacter* Target = GetTargetCharacter();
 	UWorld* World = GetWorld();
-	if (!Enemy || !Target || !World)
+	if (!Enemy || !World)
 	{
-		return false;
+		return nullptr;
 	}
-
-	AQinglanEnemyProjectile* Shot = nullptr;
 	for (const TWeakObjectPtr<AQinglanEnemyProjectile>& Pooled : ProjectilePool)
 	{
 		AQinglanEnemyProjectile* Candidate = Pooled.Get();
 		if (Candidate && !Candidate->IsInFlight())
 		{
-			Shot = Candidate;
-			break;
+			return Candidate;
 		}
 	}
-	if (!Shot && ProjectilePool.Num() < QinglanAITunables::ProjectilePoolSize)
+	if (ProjectilePool.Num() < QinglanAITunables::ProjectilePoolSize)
 	{
 		FActorSpawnParameters Params;
 		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 		Params.Owner = Enemy;
-		Shot = World->SpawnActor<AQinglanEnemyProjectile>(AQinglanEnemyProjectile::StaticClass(),
-			Enemy->GetActorLocation(), FRotator::ZeroRotator, Params);
+		AQinglanEnemyProjectile* Shot = World->SpawnActor<AQinglanEnemyProjectile>(
+			AQinglanEnemyProjectile::StaticClass(), Enemy->GetActorLocation(),
+			FRotator::ZeroRotator, Params);
 		if (Shot)
 		{
 			ProjectilePool.Add(Shot);
 		}
+		return Shot;
 	}
+	return nullptr;
+}
+
+bool AQinglanAIController::SpawnPooledProjectileAtTarget(float Damage, float Range, FName TechniqueId,
+	FName CueId, float AimYawOffsetDeg)
+{
+	AQinglanEnemyCharacter* Enemy = GetEnemy();
+	ACharacter* Target = GetTargetCharacter();
+	if (!Enemy || !Target)
+	{
+		return false;
+	}
+	AQinglanEnemyProjectile* Shot = AcquirePooledProjectile();
 	if (!Shot)
 	{
 		return false;
@@ -526,7 +547,26 @@ bool AQinglanAIController::SpawnPooledProjectileAtTarget(float Damage, float Ran
 		Aim = Aim.RotateAngleAxis(AimYawOffsetDeg, FVector::UpVector);
 	}
 	Shot->SetOwner(Enemy);
-	Shot->LaunchFrom(Enemy, Aim, ProjectileSpeed, Damage, Range, NextAttackSerial(), TechniqueId, CueId);
+	Shot->LaunchFrom(Enemy, Aim, ProjectileSpeed, Damage, Range, NextAttackCastId(), TechniqueId, CueId);
+	return true;
+}
+
+bool AQinglanAIController::SpawnPooledProjectileInDirection(float Damage, float Range, FName TechniqueId,
+	FName CueId, const FVector& Direction, float Speed)
+{
+	AQinglanEnemyCharacter* Enemy = GetEnemy();
+	if (!Enemy)
+	{
+		return false;
+	}
+	AQinglanEnemyProjectile* Shot = AcquirePooledProjectile();
+	if (!Shot)
+	{
+		return false;
+	}
+	Shot->SetOwner(Enemy);
+	Shot->LaunchFrom(Enemy, Direction.GetSafeNormal(), Speed, Damage, Range,
+		NextAttackCastId(), TechniqueId, CueId);
 	return true;
 }
 
@@ -659,6 +699,22 @@ void AQinglanAIController::UpdateMovement(float DeltaSeconds)
 		return;
 	}
 
+	// Status-driven locomotion speed (AUD-36 AI side): the boss Root downgrade
+	// (10% slow) and any future slow actually change movement. Hard Root
+	// suppression stays in IsMovementSuppressed (preserved); the multiplier is
+	// layered on top so the two paths agree.
+	if (UQinglanStatusComponent* StatusComp = Enemy->FindComponentByClass<UQinglanStatusComponent>())
+	{
+		if (UCharacterMovementComponent* MoveComp = Enemy->GetCharacterMovement())
+		{
+			const float TargetSpeed = FMath::Max(StatusComp->GetMoveSpeedMultiplier() * Data->MoveSpeed, 1.f);
+			if (!FMath::IsNearlyEqual(MoveComp->MaxWalkSpeed, TargetSpeed))
+			{
+				MoveComp->MaxWalkSpeed = TargetSpeed;
+			}
+		}
+	}
+
 	switch (Enemy->GetAIState())
 	{
 	case EQinglanAIState::Idle:
@@ -735,12 +791,28 @@ void AQinglanAIController::UpdateMovement(float DeltaSeconds)
 		if (CachedSpec && CachedSpec->bCircleBeforeAttack && CachedSpec->OrbitRadius > 0.f &&
 			Distance < CachedSpec->OrbitRadius && Distance > Data->AttackRange)
 		{
-			StopMoving();
-			const FVector ToTarget = (Target->GetActorLocation() - Enemy->GetActorLocation()).GetSafeNormal2D();
-			const FVector Tangent = FVector(-ToTarget.Y, ToTarget.X, 0.f) * StrafeSign;
-			Enemy->AddMovementInput(Tangent, QinglanAITunables::OrbitSpeedFraction);
+			// Bounded orbit phase (AUD-40): circling is an approach flavor, so
+			// it gets a finite budget; after MaxOrbitSeconds the enemy turns
+			// inward and the normal windup->lunge cycle takes over, keeping the
+			// time-to-attack bounded for a stationary target too.
+			if (!bOrbiting)
+			{
+				bOrbiting = true;
+				OrbitRemaining = QinglanAITunables::MaxOrbitSeconds;
+			}
+			if (OrbitRemaining > 0.f)
+			{
+				OrbitRemaining -= DeltaSeconds; // paused-game-time accumulation
+				StopMoving();
+				const FVector ToTarget = (Target->GetActorLocation() - Enemy->GetActorLocation()).GetSafeNormal2D();
+				const FVector Tangent = FVector(-ToTarget.Y, ToTarget.X, 0.f) * StrafeSign;
+				Enemy->AddMovementInput(Tangent, QinglanAITunables::OrbitSpeedFraction);
+				break;
+			}
+			ApproachTarget(Target, Data->AttackRange * 0.5f); // expired: commit inward
 			break;
 		}
+		bOrbiting = false;
 		ApproachTarget(Target, Data->AttackRange * 0.8f);
 		break;
 	}

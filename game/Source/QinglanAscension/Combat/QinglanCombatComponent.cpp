@@ -12,6 +12,7 @@
 #include "Combat/QinglanStatusComponent.h"
 #include "Progression/QinglanEconomyLibrary.h"
 #include "QinglanAscension.h"
+#include "HAL/ThreadSafeCounter.h"
 
 namespace
 {
@@ -107,6 +108,16 @@ void UQinglanCombatComponent::TickComponent(float DeltaTime, enum ELevelTick Tic
 		TickEvent.Timestamp = Now;
 		TickEvent.bBlockedByBarrier = bBlockedByBarrier;
 		OnDamageResolved.Broadcast(TickEvent); // cue stage last
+
+		// Accepted burn tick: same resolved-result notification as direct hits
+		// so Burn kills drive the victim's death lifecycle too (AUD-28).
+		FQinglanResolvedDamage TickResult;
+		TickResult.Victim = GetOwner();
+		TickResult.HitOrdinal = TickOrdinal;
+		TickResult.AppliedMagnitude = QinglanCombatTunables::BurnTickDamage;
+		TickResult.bBlockedByBarrier = bBlockedByBarrier;
+		TickResult.bLethal = Attributes.Health <= 0.f;
+		OnDamageResultResolved.Broadcast(TickResult);
 
 		--BurnTicksRemaining;
 		BurnNextTickAt = BurnNextTickAt + QinglanCombatTunables::BurnTickIntervalSeconds;
@@ -288,11 +299,17 @@ bool UQinglanCombatComponent::ApplyDamage(const FQinglanDamageEvent& Request)
 	// A damage event is resolved once; a visual emitter never applies damage
 	// (docs/02 §3, §5). The victim is this component's owner; the key binds
 	// cast id + ordinal to it. Status ticks carry invalid CastIds and are not
-	// keyed.
+	// keyed. The attacker joins the key (AUD-33) so independent attackers
+	// whose cast ids collide both resolve, while one attack's repeats still
+	// dedupe: same attacker + cast + victim + ordinal is still one key.
+	uint64 HitKey = 0;
 	if (Event.CastId.IsValid())
 	{
 		const uint32 VictimKey = static_cast<uint32>(Owner->GetUniqueID());
-		const uint64 HitKey = QinglanDamageMath::MakeHitKey(Event.CastId, VictimKey, Event.HitOrdinal);
+		const uint32 AttackerKey = Event.Attacker.IsValid()
+			? static_cast<uint32>(Event.Attacker->GetUniqueID()) : 0u;
+		HitKey = QinglanDamageMath::MakeHitKey(Event.CastId,
+			HashCombine(VictimKey, AttackerKey), Event.HitOrdinal);
 		if (AppliedHitKeys.Contains(HitKey))
 		{
 			UE_LOG(LogQinglanCombat, Verbose, TEXT("Rejected duplicate hit key (ordinal %d)"), Event.HitOrdinal);
@@ -380,7 +397,34 @@ bool UQinglanCombatComponent::ApplyDamage(const FQinglanDamageEvent& Request)
 	// precedence order immunity -> barrier/health -> reaction -> status -> cue
 	// (docs/02 §7). The cue stage is this broadcast.
 	OnDamageResolved.Broadcast(Event);
+
+	// Resolved-result notification for accepted hits only (AUD-28): victims
+	// drive stagger/death from this, and delivery layers gate trailing status
+	// application on ApplyDamage's return while presentation reads the final
+	// magnitude here.
+	FQinglanResolvedDamage Result;
+	Result.Attacker = Event.Attacker;
+	Result.Victim = Event.Target;
+	Result.CastId = Event.CastId;
+	Result.HitOrdinal = Event.HitOrdinal;
+	Result.AppliedMagnitude = Final;
+	Result.bBlockedByBarrier = Event.bBlockedByBarrier;
+	Result.bLethal = Attributes.Health <= 0.f;
+	Result.HitKey = HitKey;
+	OnDamageResultResolved.Broadcast(Result);
 	return true;
+}
+
+FQinglanCastId UQinglanCombatComponent::NextCastId()
+{
+	// One process-wide counter: independent attackers can never mint
+	// colliding serials, and pooled actors reuse without resets, so an id
+	// stays unique for the whole session (AUD-33).
+	static FThreadSafeCounter GlobalCastSerial;
+	FQinglanCastId Id;
+	Id.Serial = GlobalCastSerial.Increment();
+	Id.FrameNumber = static_cast<int32>(GFrameNumber);
+	return Id;
 }
 
 void UQinglanCombatComponent::SetDerivedAttributes(const FQinglanAttributes& NewAttributes)

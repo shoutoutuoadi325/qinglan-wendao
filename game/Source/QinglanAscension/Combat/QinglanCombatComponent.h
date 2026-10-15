@@ -6,7 +6,35 @@
 #include "Core/QinglanCoreTypes.h"
 #include "QinglanCombatComponent.generated.h"
 
+/**
+ * One accepted damage resolution, published after barrier/health were applied
+ * (AUD-28). Dodged, duplicate, and dead-victim requests return from
+ * ApplyDamage without broadcasting; subscribers may treat every notification
+ * as an accepted hit. AppliedMagnitude is the post-mitigation/reaction/rounding
+ * number the victim's barrier+health actually absorbed.
+ */
+USTRUCT(BlueprintType)
+struct FQinglanResolvedDamage
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly) TWeakObjectPtr<AActor> Attacker;
+	UPROPERTY(BlueprintReadOnly) TWeakObjectPtr<AActor> Victim;
+	UPROPERTY(BlueprintReadOnly) FQinglanCastId CastId;
+	/** Per-victim hit ordinal of the resolved event. */
+	UPROPERTY(BlueprintReadOnly) int32 HitOrdinal = 0;
+	UPROPERTY(BlueprintReadOnly) float AppliedMagnitude = 0.f;
+	/** Always true on this delegate; kept explicit so rejection paths can join later without a new signature. */
+	UPROPERTY(BlueprintReadOnly) bool bAccepted = true;
+	UPROPERTY(BlueprintReadOnly) bool bBlockedByBarrier = false;
+	/** Health reached zero on this hit (Burn ticks included). */
+	UPROPERTY(BlueprintReadOnly) bool bLethal = false;
+	/** Dedupe key of the resolved hit; 0 when the request carried no cast id. */
+	UPROPERTY(BlueprintReadOnly) uint64 HitKey = 0;
+};
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FQinglanDamageResolved, const FQinglanDamageEvent&, Event);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FQinglanDamageResultResolved, const FQinglanResolvedDamage&, Result);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQinglanBarrierChanged, float, Current, float, Maximum);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQinglanHealthChanged, float, Current, float, Maximum);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQinglanEnergyChanged, float, Current, float, Maximum);
@@ -42,6 +70,14 @@ public:
 	// --- Damage (single entry point) ---
 	/** Applies one audited damage event; returns true when health/barrier actually changed. */
 	bool ApplyDamage(const FQinglanDamageEvent& Request);
+	/**
+	 * Globally-unique, frame-stable cast identity for one attack release
+	 * (AUD-33). The serial comes from one process-wide counter, so two
+	 * attackers can never mint colliding ids; FrameNumber is the release
+	 * frame and must travel unchanged through projectiles (never be
+	 * reconstructed at the impact frame).
+	 */
+	static FQinglanCastId NextCastId();
 	bool IsAlive() const { return Attributes.Health > 0.f; }
 	/** True while inside the dodge i-frame window (paused-game-time based). */
 	UFUNCTION(BlueprintPure) bool IsInvulnerable() const;
@@ -78,6 +114,8 @@ public:
 	void RemoveStatus(EQinglanStatus Status);
 
 	UPROPERTY(BlueprintAssignable) FQinglanDamageResolved OnDamageResolved;
+	/** Accepted-hit resolution results (AUD-28); fires once per applied hit, Burn ticks included. */
+	UPROPERTY(BlueprintAssignable) FQinglanDamageResultResolved OnDamageResultResolved;
 	UPROPERTY(BlueprintAssignable) FQinglanBarrierChanged OnBarrierChanged;
 	UPROPERTY(BlueprintAssignable) FQinglanHealthChanged OnHealthChanged;
 	UPROPERTY(BlueprintAssignable) FQinglanEnergyChanged OnEnergyChanged;

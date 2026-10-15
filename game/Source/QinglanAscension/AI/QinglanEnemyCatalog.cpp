@@ -22,6 +22,41 @@ namespace QinglanPatternIds
 
 namespace
 {
+	// Bounded cache for transient catalog assets (AUD-46): the spec id space is
+	// fixed (six archetypes + three bosses), so keying by EnemyId caps the
+	// instance count at that size; repeated rooms, expeditions, and trials
+	// reuse the same assets instead of rooting a new one per encounter.
+	// Entries stay rooted while cached because several holders (wave queues,
+	// weak data mirrors, the director's TU-local registry) are not
+	// GC-visible; the size cap evicts oldest-first with RemoveFromRoot so the
+	// rooted set stays bounded even if the spec list ever grows.
+	constexpr int32 MaxCachedCatalogAssets = 16;
+	TMap<FName, TObjectPtr<UQinglanEnemyDataAsset>> GCatalogAssetCache;
+	TArray<FName> GCatalogAssetCacheOrder;
+
+	void TouchCatalogAsset(FName EnemyId)
+	{
+		GCatalogAssetCacheOrder.Remove(EnemyId);
+		GCatalogAssetCacheOrder.Add(EnemyId);
+	}
+
+	void EvictOverflowCatalogAssets()
+	{
+		while (GCatalogAssetCache.Num() > MaxCachedCatalogAssets)
+		{
+			const FName Oldest = GCatalogAssetCacheOrder[0];
+			GCatalogAssetCacheOrder.RemoveAt(0);
+			if (UQinglanEnemyDataAsset** Found = GCatalogAssetCache.Find(Oldest))
+			{
+				if (*Found)
+				{
+					(*Found)->RemoveFromRoot();
+				}
+				GCatalogAssetCache.Remove(Oldest);
+			}
+		}
+	}
+
 	FQinglanBossPattern MakePattern(FName PatternId, float Weight, float TelegraphSeconds,
 		float Damage, float RangeCm, bool bGroundMarker, FName ChargeCue, FName ReleaseCue)
 	{
@@ -344,6 +379,18 @@ namespace QinglanEnemyCatalog
 			return nullptr;
 		}
 
+		// Cached reuse first (AUD-46): spec assets are read-only configuration,
+		// so every consumer may share one instance per archetype.
+		if (UQinglanEnemyDataAsset* const* Cached = GCatalogAssetCache.Find(Spec.EnemyId))
+		{
+			if (*Cached)
+			{
+				TouchCatalogAsset(Spec.EnemyId);
+				return *Cached;
+			}
+			GCatalogAssetCache.Remove(Spec.EnemyId);
+		}
+
 		UClass* AssetClass = Spec.bBoss
 			? UQinglanBossDataAsset::StaticClass()
 			: UQinglanEnemyDataAsset::StaticClass();
@@ -416,9 +463,13 @@ namespace QinglanEnemyCatalog
 			BossAsset->ArenaDiameter = Spec.ArenaDiameter;
 		}
 
-		// Transient catalog assets live for the whole session; rooting prevents
-		// GC from collecting references held only by the encounter director.
+		// Cached catalog assets stay rooted while resident (see the cache
+		// comment above); the size cap is the release path (AUD-46), so the
+		// rooted set is bounded instead of growing per encounter.
 		Asset->AddToRoot();
+		GCatalogAssetCache.Add(Spec.EnemyId, Asset);
+		TouchCatalogAsset(Spec.EnemyId);
+		EvictOverflowCatalogAssets();
 		return Asset;
 	}
 

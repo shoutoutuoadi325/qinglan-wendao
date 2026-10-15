@@ -45,12 +45,12 @@ AQinglanEnemyProjectile::AQinglanEnemyProjectile()
 }
 
 void AQinglanEnemyProjectile::LaunchFrom(AQinglanEnemyCharacter* InOwner, const FVector& Direction,
-	float Speed, float InDamage, float InRange, int32 InCastSerial, FName InTechniqueId, FName InCueId)
+	float Speed, float InDamage, float InRange, const FQinglanCastId& InCastId, FName InTechniqueId, FName InCueId)
 {
 	OwningEnemy = InOwner;
 	Damage = InDamage;
 	RemainingRange = InRange;
-	OwnerSerial = InCastSerial;
+	CastId = InCastId;
 	TechniqueId = InTechniqueId;
 	CueId = InCueId;
 	Victim = nullptr;
@@ -87,7 +87,7 @@ void AQinglanEnemyProjectile::ResetForPool()
 	Damage = 0.f;
 	RemainingRange = 0.f;
 	FlightSeconds = 0.f;
-	OwnerSerial = 0;
+	CastId = FQinglanCastId();
 	TechniqueId = NAME_None;
 	CueId = NAME_None;
 	Tags.Empty();
@@ -160,17 +160,18 @@ void AQinglanEnemyProjectile::HandleBeginOverlap(UPrimitiveComponent* /*Overlapp
 	FQinglanDamageEvent Event;
 	Event.Attacker = OwnerRef;
 	Event.Target = PlayerVictim;
-	Event.CastId.Serial = OwnerSerial;
-	Event.CastId.FrameNumber = static_cast<int32>(GFrameNumber);
+	Event.CastId = CastId; // release identity, never the impact frame (AUD-33)
 	Event.HitOrdinal = 0;
 	Event.TechniqueId = TechniqueId;
 	Event.Element = Element;
 	Event.RawMagnitude = Damage;
 	Event.Timestamp = GetWorld()->GetTimeSeconds();
-	VictimCombat->ApplyDamage(Event);
-	// Status application follows damage per the central precedence chain
-	// (code-contracts: immunity -> barrier/health -> reaction -> status -> cue).
-	if (StatusOnHit != EQinglanStatus::None)
+	const bool bAccepted = VictimCombat->ApplyDamage(Event);
+	// Status application follows an accepted hit per the central precedence
+	// chain (code-contracts: immunity -> barrier/health -> reaction -> status
+	// -> cue). Dodged and duplicate-rejected hits never apply or refresh the
+	// status (AUD-31).
+	if (bAccepted && StatusOnHit != EQinglanStatus::None)
 	{
 		VictimCombat->ApplyStatus(StatusOnHit);
 	}

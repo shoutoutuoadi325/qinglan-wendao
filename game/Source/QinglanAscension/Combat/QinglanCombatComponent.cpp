@@ -410,7 +410,7 @@ bool UQinglanCombatComponent::ApplyDamage(const FQinglanDamageEvent& Request)
 	Result.AppliedMagnitude = Final;
 	Result.bBlockedByBarrier = Event.bBlockedByBarrier;
 	Result.bLethal = Attributes.Health <= 0.f;
-	Result.HitKey = HitKey;
+	Result.HitKey = static_cast<int64>(HitKey); // bit-exact reinterpret for the Blueprint-visible field
 	OnDamageResultResolved.Broadcast(Result);
 	return true;
 }

@@ -46,7 +46,7 @@ namespace
 		{
 			const FName Oldest = GCatalogAssetCacheOrder[0];
 			GCatalogAssetCacheOrder.RemoveAt(0);
-			if (UQinglanEnemyDataAsset** Found = GCatalogAssetCache.Find(Oldest))
+			if (TObjectPtr<UQinglanEnemyDataAsset>* Found = GCatalogAssetCache.Find(Oldest))
 			{
 				if (*Found)
 				{
@@ -381,7 +381,7 @@ namespace QinglanEnemyCatalog
 
 		// Cached reuse first (AUD-46): spec assets are read-only configuration,
 		// so every consumer may share one instance per archetype.
-		if (UQinglanEnemyDataAsset* const* Cached = GCatalogAssetCache.Find(Spec.EnemyId))
+		if (const TObjectPtr<UQinglanEnemyDataAsset>* Cached = GCatalogAssetCache.Find(Spec.EnemyId))
 		{
 			if (*Cached)
 			{

@@ -240,8 +240,8 @@ bool UQinglanProfileSubsystem::TryBankExpedition(FName BankingId, const FQinglan
 	// Match the save validator's journal bound; refuse before awarding anything.
 	// TODO(AUD-07): share the bound across all mutation APIs and define journal
 	// compaction/versioning for very long-lived profiles instead of losing saves.
-	constexpr int32 MaxTransactionEntries = 8192;
-	if (CommittedTransactionIds.Num() > MaxTransactionEntries - (bFirstClear ? 2 : 1))
+	constexpr int32 MaxProfileTransactionEntries = 8192;
+	if (CommittedTransactionIds.Num() > MaxProfileTransactionEntries - (bFirstClear ? 2 : 1))
 	{
 		return false;
 	}

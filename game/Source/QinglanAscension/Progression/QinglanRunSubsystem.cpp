@@ -31,7 +31,6 @@
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
-#include "Misc/GuardValue.h"
 #include "Narrative/QinglanStoryDataTypes.h"
 #include "Persistence/QinglanSaveGame.h"
 #include "Persistence/QinglanProfileSnapshot.h"

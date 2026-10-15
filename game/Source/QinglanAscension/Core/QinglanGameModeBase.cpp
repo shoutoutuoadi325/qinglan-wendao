@@ -66,7 +66,7 @@ namespace
 	 * entrance-tagged start, then null (caller falls back to the default
 	 * start selection).
 	 */
-	APlayerStart* FindRoomEntranceStart(UWorld* World, int32 RoomIndex)
+	static APlayerStart* FindRoomEntranceStart(UWorld* World, int32 RoomIndex)
 	{
 		if (!World)
 		{

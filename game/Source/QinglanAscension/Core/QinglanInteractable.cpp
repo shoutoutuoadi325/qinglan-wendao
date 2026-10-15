@@ -166,7 +166,7 @@ namespace
 	 * then any entrance-tagged start). Maps authored by the bootstrap carry no
 	 * tagged starts, so callers fall back to the layout-contract position.
 	 */
-	APlayerStart* FindRoomEntranceStart(UWorld* World, int32 RoomIndex)
+	static APlayerStart* FindRoomEntranceStart(UWorld* World, int32 RoomIndex)
 	{
 		if (World == nullptr)
 		{

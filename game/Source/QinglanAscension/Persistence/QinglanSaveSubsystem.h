@@ -59,16 +59,18 @@ public:
 	 */
 	UPROPERTY(BlueprintAssignable) FQinglanProfileChanged OnProfileChanged;
 
+	/** Serializes the checksummed body used by the atomic replace step.
+	 * Public so the editor automation specs can roundtrip and corrupt real
+	 * containers without duplicating the checksum format in tests. */
+	bool SerializeVerified(const class UQinglanSaveGame* Save, TArray<uint8>& OutBytes) const;
+	bool DeserializeVerified(const TArray<uint8>& Bytes, UQinglanSaveGame*& OutSave, FText& OutError) const;
+
 protected:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 
 private:
 	/** Commit-boundary autosave (hub purchases, rank unlocks): saves when a profile commit lands outside an expedition. */
 	UFUNCTION() void HandleProfileCommitted();
-
-	/** Serializes the checksummed body used by the atomic replace step. */
-	bool SerializeVerified(const class UQinglanSaveGame* Save, TArray<uint8>& OutBytes) const;
-	bool DeserializeVerified(const TArray<uint8>& Bytes, UQinglanSaveGame*& OutSave, FText& OutError) const;
 
 private:
 	EQinglanSavePhase Phase = EQinglanSavePhase::Idle;

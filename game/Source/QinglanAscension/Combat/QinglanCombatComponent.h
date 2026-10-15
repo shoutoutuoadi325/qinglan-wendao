@@ -29,8 +29,10 @@ struct FQinglanResolvedDamage
 	UPROPERTY(BlueprintReadOnly) bool bBlockedByBarrier = false;
 	/** Health reached zero on this hit (Burn ticks included). */
 	UPROPERTY(BlueprintReadOnly) bool bLethal = false;
-	/** Dedupe key of the resolved hit; 0 when the request carried no cast id. */
-	UPROPERTY(BlueprintReadOnly) uint64 HitKey = 0;
+	/** Dedupe key of the resolved hit; 0 when the request carried no cast id.
+	 * Blueprint has no uint64, so the 64-bit key is reinterpreted as int64;
+	 * equality is bit-exact, only the display sign differs. */
+	UPROPERTY(BlueprintReadOnly) int64 HitKey = 0;
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FQinglanDamageResolved, const FQinglanDamageEvent&, Event);

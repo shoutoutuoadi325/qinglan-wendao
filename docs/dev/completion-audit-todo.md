@@ -4,6 +4,31 @@ Audit date: 2026-10-14 (Asia/Shanghai). Reviewed branch: `develop`.
 Reviewed revision: `e94be12ee39826a6fba73f57534b06bbf0c73db8`, matching
 `origin/develop` after fetch. The working tree was clean before this review.
 
+## Repair progress log
+
+- 2026-10-15: Repair work started on branch `fix/audit-repairs` (off `develop`
+  at `de3447a`). Baseline verification before any edit: incremental editor
+  build succeeded (UBT Linux Development, 28 s); working tree clean.
+  A four-wave repair plan was scheduled with disjoint file ownership per wave
+  (1: persistence/economy + AI lifecycle + abilities + config/bootstrap;
+  2: narrative + trials/rooms + UI/localization; 3: Character integration +
+  combat components + VFX/animation; 4: tests, asset regeneration, platform
+  evidence, dispositions). Wave 1 agents were dispatched, interrupted by a
+  transient API outage, resumed, then **halted by user request while still in
+  their read/analysis phase — no code edit landed**. All 60 items below remain
+  unrepaired and unchecked; no disposition is recorded yet.
+- 2026-10-15 documentation defect fixed in this file: AUD-59 referenced
+  `../../packaging/Windows/README.md`, but the tracked directory is
+  `packaging/windows/` (lowercase), so `tools/validate_repository.py` failed on
+  a broken link. The link now uses the tracked path; all three planning
+  validators pass again.
+- Evidence note for AUD-59 (Linux side): the untracked `packaging/Linux/`
+  directory in the working tree contains a complete prior Linux Shipping
+  package (Shipping binary, pak/utoc/ucas, staged engine files, manifests,
+  dated 2026-10-13) produced by the previous session. It is not yet committed;
+  committing it (or its manifests/checksums) belongs to the AUD-57/AUD-59
+  evidence work.
+
 ## Decision
 
 **Development is not complete.** The repository has substantial gameplay code
@@ -1081,7 +1106,7 @@ a complete keyboard/controller new-profile playthrough without debug grants.
 [The existing test report](test-report.md) explicitly leaves Windows/Metal
 builds and interactive play pending. Linux compilation/headless tests and a
 swapchain attempt cannot establish target compatibility. The
-[Windows packaging directory](../../packaging/Windows/README.md) contains an
+[Windows packaging directory](../../packaging/windows/README.md) contains an
 incomplete template rather than a proven package/runbook; no completed Mac
 signing/notarization/install record exists. Release certification/account actions
 are separate owner-controlled steps; this audit request authorizes a TODO and

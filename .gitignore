@@ -36,3 +36,6 @@ core.*
 packaging/Linux/Engine/
 packaging/Linux/QinglanAscension/
 packaging/windows/
+
+# Portable build entry points are tracked despite the global build/ ignore
+!tools/build/

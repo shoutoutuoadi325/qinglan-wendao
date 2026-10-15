@@ -85,6 +85,19 @@ namespace
 		return static_cast<int64>(Memory.TotalPhysical / (1024ULL * 1024ULL * 1024ULL));
 	}
 
+	/**
+	 * Dedicated GPU memory in GiB through the engine RHI globals
+	 * (GRHIGlobals.GpuInfo.DedicatedVideoMemory; populated for D3D11/D3D12).
+	 * 0 means unknown (or a unified-memory part): never a downgrade signal.
+	 */
+	int64 GetDedicatedVramGB()
+	{
+		return static_cast<int64>(GRHIGlobals.GpuInfo.DedicatedVideoMemory / (1024ULL * 1024ULL * 1024ULL));
+	}
+
+	/** Dedicated VRAM below this selects the Low preset (docs/06 §1 matrix has no sub-4GB tier). */
+	constexpr int64 MinDedicatedVramGB = 4;
+
 	void SetIntCvar(const TCHAR* CvarName, int32 Value)
 	{
 		IConsoleVariable* Cvar = IConsoleManager::Get().FindConsoleVariable(CvarName);
@@ -105,7 +118,26 @@ namespace
 		// Internal resolution (docs/06 §4 "resolution scale"); TSR/dynamic
 		// resolution adapts within user-selected bounds (docs/06 §4).
 		SetIntCvar(TEXT("r.ScreenPercentage"), FMath::RoundToInt(Settings.ResolutionScale * 100.f));
-		SetIntCvar(TEXT("r.DynamicRes"), Settings.bDynamicResolution ? 1 : 0);
+		// Engine contract: r.DynamicRes.OperationMode gates the system
+		// (0 disabled, 1 follows the game user settings flag), and the
+		// user-side enable state lives in UGameUserSettings. "r.DynamicRes"
+		// alone is not a console variable.
+		SetIntCvar(TEXT("r.DynamicRes.OperationMode"), Settings.bDynamicResolution ? 1 : 0);
+	}
+
+	/**
+	 * Preset feature policy made real in the renderer: Low drops Lumen GI and
+	 * Nanite and falls back to screen-space reflections (IsFeatureAllowed
+	 * mirrors this table; "lumen/nanite off at Low", docs/06 §3).
+	 */
+	void ApplyFeaturePolicy(const FQinglanGraphicsSettings& Settings)
+	{
+		const bool bReduced = Settings.Preset == EQinglanQualityPreset::Low;
+		// 0 none / 1 Lumen / 2 SSGI for r.DynamicGlobalIlluminationMethod;
+		// 0 none / 1 Lumen / 2 SSR for r.ReflectionMethod; r.Nanite 0/1.
+		SetIntCvar(TEXT("r.DynamicGlobalIlluminationMethod"), bReduced ? 0 : 1);
+		SetIntCvar(TEXT("r.ReflectionMethod"), bReduced ? 2 : 1);
+		SetIntCvar(TEXT("r.Nanite"), bReduced ? 0 : 1);
 	}
 
 	/** Full engine application: scalability + VSync + frame limit, then cvars. */
@@ -121,6 +153,9 @@ namespace
 				GameUserSettings->SetViewDistanceQuality(Settings.ViewDistance);
 				GameUserSettings->SetVSyncEnabled(Settings.bVSync);
 				GameUserSettings->SetFrameRateLimit(static_cast<float>(Settings.FrameRateLimit));
+				// User-side enable for r.DynamicRes.OperationMode=1 (engine
+				// keeps both sides in sync through its own status query).
+				GameUserSettings->SetDynamicResolutionEnabled(Settings.bDynamicResolution);
 				GameUserSettings->ApplySettings(/*bValidateForPlatform=*/false); // sanitized already
 			}
 			else
@@ -129,6 +164,7 @@ namespace
 			}
 		}
 		ApplyResolutionScaleAndDynamicRes(Settings);
+		ApplyFeaturePolicy(Settings);
 	}
 
 	void PersistToIni(const FQinglanGraphicsSettings& Settings)
@@ -267,9 +303,10 @@ namespace
 		{
 			// The engine re-applied the persisted GameUserSettings (scalability,
 			// VSync, frame limit) during boot; only refresh the console
-			// variables it does not persist.
+			// variables it does not persist (screen percentage, dynamic-res
+			// operation mode, GI/reflection/Nanite feature policy).
 			Bookkeeping.Current = Loaded;
-			ApplyResolutionScaleAndDynamicRes(Loaded);
+			ApplyToEngine(Loaded, /*bIncludeGameUserSettings=*/false);
 		}
 		else
 		{
@@ -349,6 +386,9 @@ FQinglanGraphicsSettings UQinglanGraphicsSettingsService::DetectInitialSettings(
 	// characteristics ... through engine/platform APIs").
 	const bool bUnified = IsUnifiedMemoryPlatform();
 	const int64 TotalPhysicalGB = GetTotalPhysicalGB();
+	// GPU capability, not just system memory: the RHI-reported dedicated VRAM
+	// pool (0/unknown on unified parts and backends that do not report it).
+	const int64 DedicatedVramGB = GetDedicatedVramGB();
 
 	FQinglanGraphicsSettings Out;
 	if (bUnified && TotalPhysicalGB <= QinglanGraphics::LowMemoryUnifiedGB)
@@ -362,9 +402,11 @@ FQinglanGraphicsSettings UQinglanGraphicsSettingsService::DetectInitialSettings(
 		// Base M2/M3-class tier: Performance/Balanced target (docs/06 §1).
 		Out = QinglanGraphics::MakePresetSettings(EQinglanQualityPreset::Balanced);
 	}
-	else if (TotalPhysicalGB < QinglanGraphics::WindowsBaselineSystemGB)
+	else if (TotalPhysicalGB < QinglanGraphics::WindowsBaselineSystemGB
+		|| (DedicatedVramGB > 0 && DedicatedVramGB < MinDedicatedVramGB))
 	{
-		// Below the Windows reference matrix floor (16 GB RAM): conservative Low.
+		// Below the Windows reference matrix floor (16 GB RAM), or a reported
+		// dedicated VRAM pool under the reference matrix tier: conservative Low.
 		Out = QinglanGraphics::MakePresetSettings(EQinglanQualityPreset::Low);
 	}
 	else
@@ -397,6 +439,9 @@ FQinglanGraphicsSettings UQinglanGraphicsSettingsService::DetectInitialSettings(
 	{
 		Out.FrameRateLimit = QinglanGraphics::WindowsDefaultFrameRateLimit;
 	}
+	UE_LOG(LogQinglanGraphics, Log, TEXT("Detection: adapter '%s', RHI '%s', dedicated VRAM %d GiB, system %d GiB, unified=%d -> preset %d"),
+		*FString(GRHIAdapterName), *GetRhiNameString(), static_cast<int32>(DedicatedVramGB),
+		static_cast<int32>(TotalPhysicalGB), bUnified ? 1 : 0, static_cast<int32>(Out.Preset));
 	return Out;
 }
 
@@ -492,7 +537,9 @@ bool UQinglanGraphicsSettingsService::IsFeatureAllowed(FName FeatureId) const
 	if (FeatureId == FeatureLumenName)
 	{
 		// Lumen / scalable GI is off at Low (docs/06 §3 "evaluated scalable
-		// GI"; module contract "lumen off at Low").
+		// GI"; module contract "lumen off at Low"). ApplyFeaturePolicy enforces
+		// this in the renderer whenever settings are applied; this query only
+		// reports it.
 		return Settings.Preset != EQinglanQualityPreset::Low;
 	}
 	if (FeatureId == FeatureNaniteName)

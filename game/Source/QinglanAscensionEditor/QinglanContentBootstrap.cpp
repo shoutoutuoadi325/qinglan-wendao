@@ -130,14 +130,19 @@ namespace
 bool UQinglanContentBootstrapCommandlet::BootstrapInput()
 {
 	UPackage* InputPkg = CreateOrFetchPackage(ContentRoot + TEXT("/Input/IA_Move"));
-	UInputAction* IA_Move = MakeAction(InputPkg, TEXT("IA_Move"), EInputActionValueType::Axis3D);
+	// Consumer contract (AQinglanCharacter::InputMove reads FVector2D): X right,
+	// Y forward. Axis3D here would mismatch the typed Get<FVector2D>() access.
+	UInputAction* IA_Move = MakeAction(InputPkg, TEXT("IA_Move"), EInputActionValueType::Axis2D);
 	UInputAction* IA_Look = MakeAction(CreateOrFetchPackage(ContentRoot + TEXT("/Input/IA_Look")), TEXT("IA_Look"), EInputActionValueType::Axis2D);
 	UInputAction* IA_Attack = MakeAction(CreateOrFetchPackage(ContentRoot + TEXT("/Input/IA_Attack")), TEXT("IA_Attack"), EInputActionValueType::Boolean);
 	UInputAction* IA_Dodge = MakeAction(CreateOrFetchPackage(ContentRoot + TEXT("/Input/IA_Dodge")), TEXT("IA_Dodge"), EInputActionValueType::Boolean);
 	UInputAction* IA_Lock = MakeAction(CreateOrFetchPackage(ContentRoot + TEXT("/Input/IA_Lock")), TEXT("IA_Lock"), EInputActionValueType::Boolean);
 	UInputAction* IA_Cycle = MakeAction(CreateOrFetchPackage(ContentRoot + TEXT("/Input/IA_CycleTarget")), TEXT("IA_CycleTarget"), EInputActionValueType::Boolean);
 	UInputAction* IA_Interact = MakeAction(CreateOrFetchPackage(ContentRoot + TEXT("/Input/IA_Interact")), TEXT("IA_Interact"), EInputActionValueType::Boolean);
+	// Pause must keep firing while the world is paused (UInputAction::
+	// bTriggerWhenPaused), otherwise Escape pauses and nothing can resume.
 	UInputAction* IA_Pause = MakeAction(CreateOrFetchPackage(ContentRoot + TEXT("/Input/IA_Pause")), TEXT("IA_Pause"), EInputActionValueType::Boolean);
+	IA_Pause->bTriggerWhenPaused = true;
 
 	TArray<UInputAction*> TechniqueActions;
 	for (int32 i = 0; i < 4; ++i)
@@ -155,11 +160,14 @@ bool UQinglanContentBootstrapCommandlet::BootstrapInput()
 	UPackage* ImcPkg = CreateOrFetchPackage(ContentRoot + TEXT("/Input/IMC_Default"));
 	UInputMappingContext* IMC = NewObject<UInputMappingContext>(ImcPkg, TEXT("IMC_Default"), RF_Public | RF_Standalone | RF_Transactional);
 
-	// Movement: WASD on a 2-plane (docs/02 section 1).
-	Map2DAxis(IMC, IA_Move, EKeys::W, false, false, false);
-	Map2DAxis(IMC, IA_Move, EKeys::S, true, false, false);
-	Map2DAxis(IMC, IA_Move, EKeys::D, false, false, true);
-	Map2DAxis(IMC, IA_Move, EKeys::A, false, true, true);
+	// Movement: WASD on a 2-plane (docs/02 section 1). Contract (matches
+	// InputMove's FVector2D read: X right, Y forward):
+	// W=(0,+1) S=(0,-1) A=(-1,0) D=(+1,0). A bare key feeds its 1.0 into X,
+	// so the Y-axis keys swizzle first; swizzle is applied before negation.
+	Map2DAxis(IMC, IA_Move, EKeys::W, false, false, true);
+	Map2DAxis(IMC, IA_Move, EKeys::S, false, true, true);
+	Map2DAxis(IMC, IA_Move, EKeys::D, false, false, false);
+	Map2DAxis(IMC, IA_Move, EKeys::A, true, false, false);
 
 	// Look: mouse deltas (X yaw, Y pitch come through as Axis2D).
 	{
@@ -185,6 +193,37 @@ bool UQinglanContentBootstrapCommandlet::BootstrapInput()
 	{
 		IMC->MapKey(TalismanActions[i], *TalismanKeys[i]).Triggers.Add(PressedTrigger(IMC));
 	}
+
+	// Gamepad: left stick move / right stick camera with the same axis
+	// convention as WASD/mouse (stick 2D keys are already X right, Y up, so
+	// the sticks map without swizzles).
+	Map2DAxis(IMC, IA_Move, EKeys::Gamepad_Left2D, false, false, false);
+	{
+		FEnhancedActionKeyMapping& M = IMC->MapKey(IA_Look, EKeys::Gamepad_Right2D);
+		UInputModifierNegate* NegateY = NewObject<UInputModifierNegate>(IMC);
+		NegateY->bY = true;
+		M.Modifiers.Add(NegateY);
+	}
+	// Face buttons: X attack, A dodge, Y interact, B cycle target.
+	IMC->MapKey(IA_Attack, EKeys::Gamepad_FaceButton_Left).Triggers.Add(PressedTrigger(IMC));
+	IMC->MapKey(IA_Dodge, EKeys::Gamepad_FaceButton_Bottom).Triggers.Add(PressedTrigger(IMC));
+	IMC->MapKey(IA_Interact, EKeys::Gamepad_FaceButton_Top).Triggers.Add(PressedTrigger(IMC));
+	IMC->MapKey(IA_Cycle, EKeys::Gamepad_FaceButton_Right).Triggers.Add(PressedTrigger(IMC));
+	// Shoulder/trigger: left shoulder lock-on, right shoulder talisman 1,
+	// left trigger talisman 2, right trigger attack (analog keys cross the
+	// pressed threshold as digital inputs for Boolean actions).
+	IMC->MapKey(IA_Lock, EKeys::Gamepad_LeftShoulder).Triggers.Add(PressedTrigger(IMC));
+	IMC->MapKey(TalismanActions[0], EKeys::Gamepad_RightShoulder).Triggers.Add(PressedTrigger(IMC));
+	IMC->MapKey(TalismanActions[1], EKeys::Gamepad_LeftTrigger).Triggers.Add(PressedTrigger(IMC));
+	IMC->MapKey(IA_Attack, EKeys::Gamepad_RightTrigger).Triggers.Add(PressedTrigger(IMC));
+	// D-pad technique slots 1-4.
+	static const FKey* TechniquePadKeys[] = { &EKeys::Gamepad_DPad_Up, &EKeys::Gamepad_DPad_Right, &EKeys::Gamepad_DPad_Down, &EKeys::Gamepad_DPad_Left };
+	for (int32 i = 0; i < 4; ++i)
+	{
+		IMC->MapKey(TechniqueActions[i], *TechniquePadKeys[i]).Triggers.Add(PressedTrigger(IMC));
+	}
+	// Menu/Start pauses (IA_Pause triggers while paused, so it also resumes).
+	IMC->MapKey(IA_Pause, EKeys::Gamepad_Special_Right).Triggers.Add(PressedTrigger(IMC));
 
 	bool bOk = true;
 	bOk &= SavePackage(InputPkg, IA_Move);
@@ -684,6 +723,17 @@ namespace
 		Args.SaveFlags = SAVE_NoError;
 		return UPackage::SavePackage(Package, World, *FileName, Args);
 	}
+
+	void ConfigureKillZ(UWorld* World, float KillZ)
+	{
+		// Falls off any exposed edge must cross KillZ so the engine kills the
+		// pawn (routed through the health-defeat flow) instead of falling
+		// forever below the walkable surface.
+		if (AWorldSettings* Settings = World ? World->GetWorldSettings() : nullptr)
+		{
+			Settings->KillZ = KillZ;
+		}
+	}
 }
 
 bool UQinglanContentBootstrapCommandlet::BootstrapMaps()
@@ -713,40 +763,43 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaps()
 		SpawnShape(Hub, EngineCube(), HallCenter + FVector(0, 0, 640), FVector(3400, 2400, 160), Roof, TEXT("Hub_Hall_Roof"));
 
 		StandardLighting(Hub, FLinearColor(1.0f, 0.96f, 0.88f), 6.0f, -50.f, 35.f);
+		ConfigureKillZ(Hub, -5000.f); // terrace stack reaches -2000; falls route to defeat
 
-		// Interaction anchors (docs/dev/level-layout.md).
+		// Interaction anchors (docs/dev/level-layout.md). Z=600 is the courtyard
+		// floor surface (slab center 400, thickness 400); anchors below it would
+		// spawn/focus inside the floor.
 		const TArray<TPair<FName, FVector>> HubAnchors = {
-			{TEXT("hub.courtyard"), FVector(0, 0, 500)},
-			{TEXT("hub.training_yard"), FVector(3000, 2500, 500)},
-			{TEXT("hub.cultivation_shrine"), FVector(-3200, 2500, 500)},
-			{TEXT("hub.shrine"), FVector(0, 3200, 500)},
-			{TEXT("hub.workbench"), FVector(2500, -2000, 500)},
-			{TEXT("hub.lamp_workbench"), FVector(2500, -2600, 500)},
-			{TEXT("hub.bamboo_gate"), FVector(0, -4800, 500)},
-			{TEXT("hub.handover_table"), FVector(-1200, -3400, 500)},
-			{TEXT("hub.archive_shelf"), FVector(-2400, -3000, 500)},
-			{TEXT("hub.archive_table"), FVector(-2600, -2200, 500)},
-			{TEXT("hub.courier_board"), FVector(1600, 3000, 500)},
-			{TEXT("hub.inspection_board"), FVector(-1600, 3000, 500)},
-			{TEXT("hub.water_table"), FVector(3200, -400, 500)},
-			{TEXT("hub.stonewright_crate"), FVector(3600, 800, 500)},
-			{TEXT("hub.old_table"), FVector(-3800, 800, 500)},
-			{TEXT("hub.training_mat"), FVector(3000, 3300, 500)},
-			{TEXT("record.hub.apprentice_quarters"), FVector(2200, 1600, 500)},
-			{TEXT("record.hub.courier_shelf"), FVector(1400, 3400, 500)},
-			{TEXT("record.hub.dry_bell"), FVector(0, 600, 500)},
-			{TEXT("record.hub.governor_reader"), FVector(-3000, 1400, 500)},
-			{TEXT("record.hub.post_ending_noticeboard"), FVector(600, 3600, 500)},
-			{TEXT("record.hub.post_ending_workshop"), FVector(4200, 200, 500)},
-			{TEXT("record.hub.practice_rack"), FVector(3800, 3000, 500)},
-			{TEXT("record.hub.sealed_dispatch_packet"), FVector(800, -3600, 500)},
-			{TEXT("record.hub.workshop"), FVector(2800, -1200, 500)},
+			{TEXT("hub.courtyard"), FVector(0, 0, 600)},
+			{TEXT("hub.training_yard"), FVector(3000, 2500, 600)},
+			{TEXT("hub.cultivation_shrine"), FVector(-3200, 2500, 600)},
+			{TEXT("hub.shrine"), FVector(0, 3200, 600)},
+			{TEXT("hub.workbench"), FVector(2500, -2000, 600)},
+			{TEXT("hub.lamp_workbench"), FVector(2500, -2600, 600)},
+			{TEXT("hub.bamboo_gate"), FVector(0, -4800, 600)},
+			{TEXT("hub.handover_table"), FVector(-1200, -3400, 600)},
+			{TEXT("hub.archive_shelf"), FVector(-2400, -3000, 600)},
+			{TEXT("hub.archive_table"), FVector(-2600, -2200, 600)},
+			{TEXT("hub.courier_board"), FVector(1600, 3000, 600)},
+			{TEXT("hub.inspection_board"), FVector(-1600, 3000, 600)},
+			{TEXT("hub.water_table"), FVector(3200, -400, 600)},
+			{TEXT("hub.stonewright_crate"), FVector(3600, 800, 600)},
+			{TEXT("hub.old_table"), FVector(-3800, 800, 600)},
+			{TEXT("hub.training_mat"), FVector(3000, 3300, 600)},
+			{TEXT("record.hub.apprentice_quarters"), FVector(2200, 1600, 600)},
+			{TEXT("record.hub.courier_shelf"), FVector(1400, 3400, 600)},
+			{TEXT("record.hub.dry_bell"), FVector(0, 600, 600)},
+			{TEXT("record.hub.governor_reader"), FVector(-3000, 1400, 600)},
+			{TEXT("record.hub.post_ending_noticeboard"), FVector(600, 3600, 600)},
+			{TEXT("record.hub.post_ending_workshop"), FVector(4200, 200, 600)},
+			{TEXT("record.hub.practice_rack"), FVector(3800, 3000, 600)},
+			{TEXT("record.hub.sealed_dispatch_packet"), FVector(800, -3600, 600)},
+			{TEXT("record.hub.workshop"), FVector(2800, -1200, 600)},
 		};
 		for (const auto& A : HubAnchors)
 		{
 			SpawnAnchor(Hub, A.Value, A.Key);
 		}
-		APlayerStart* Start = Hub->SpawnActor<APlayerStart>(APlayerStart::StaticClass(), FVector(0, 1000, 500), FRotator(0, 180, 0), FActorSpawnParameters());
+		APlayerStart* Start = Hub->SpawnActor<APlayerStart>(APlayerStart::StaticClass(), FVector(0, 1000, 600), FRotator(0, 180, 0), FActorSpawnParameters());
 		if (Start) { Start->SetActorLabel(TEXT("PlayerStart")); }
 
 		bOk &= SaveWorldMap(Hub);
@@ -780,6 +833,7 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaps()
 			}
 		}
 		StandardLighting(Bamboo, FLinearColor(0.85f, 0.95f, 0.85f), 4.5f, -65.f, 20.f);
+		ConfigureKillZ(Bamboo, -3000.f); // room/corridor floors top at Z=0
 
 		const TArray<TPair<FName, FVector>> BambooAnchors = {
 			{TEXT("bamboo.room_0"), FVector(0, 0, 100)},
@@ -825,6 +879,7 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaps()
 			}
 		}
 		StandardLighting(Ashen, FLinearColor(1.0f, 0.75f, 0.6f), 5.0f, -40.f, -60.f);
+		ConfigureKillZ(Ashen, -3000.f);
 
 		const TArray<TPair<FName, FVector>> AshenAnchors = {
 			{TEXT("ashen.room_0"), FVector(0, 0, 100)},
@@ -841,7 +896,9 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaps()
 			{TEXT("record.ashen.cooled_forge_station"), FVector(13000, -1500, 100)},
 			{TEXT("record.ashen.governor_reader"), FVector(16600, -800, 100)},
 			{TEXT("record.ashen.outer_archive"), FVector(16000, -1600, 100)},
-			{TEXT("record.ashen.shelter_wall"), FVector(19500, 1700, 100)},
+			// On room 3's floor near its north edge; the old (19500,1700) sat
+			// in the void between rooms, outside the corridor's 400 cm half-width.
+			{TEXT("record.ashen.shelter_wall"), FVector(19000, 1800, 100)},
 		};
 		for (const auto& A : AshenAnchors)
 		{
@@ -860,12 +917,18 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaps()
 		UMaterialInterface* Stone = Mat(TEXT("M_StonePath"));
 		SpawnShape(Arena, EngineCube(), FVector(0, 0, -50), FVector(6000, 6000, 100), Stone, TEXT("Arena_Platform"));
 		SpawnShape(Arena, EngineCube(), FVector(0, -4500, -50), FVector(1400, 1400, 100), Stone, TEXT("Decision_Platform"));
+		// Walkable bridge across the 800 cm gap between the arena edge (Y=-3000)
+		// and the decision platform edge (Y=-3800); there is no jump input.
+		SpawnShape(Arena, EngineCube(), FVector(0, -3400, -50), FVector(800, 800, 100), Stone, TEXT("Arena_Decision_Bridge"));
 		SpawnShape(Arena, EngineCube(), FVector(2600, 2600, 0), FVector(400, 400, 200), Stone, TEXT("Governor_Platform"));
 		StandardLighting(Arena, FLinearColor(0.7f, 0.75f, 1.0f), 3.0f, -70.f, 90.f);
+		ConfigureKillZ(Arena, -3000.f);
 
 		const TArray<TPair<FName, FVector>> ArenaAnchors = {
 			{TEXT("trial.foundation_arena"), FVector(0, 0, 100)},
-			{TEXT("trial.golden_core_arena"), FVector(0, 0, 100)},
+			// Distinct from the foundation arena: aim selection keeps only the
+			// strictly-better dot score, so equal positions never disambiguate.
+			{TEXT("trial.golden_core_arena"), FVector(0, -1500, 100)},
 			{TEXT("trial.decision_platform"), FVector(0, -4500, 100)},
 			{TEXT("trial.quiet_governor_platform"), FVector(2600, 2600, 200)},
 			{TEXT("trial.preparation_shrine"), FVector(-2600, 2600, 100)},

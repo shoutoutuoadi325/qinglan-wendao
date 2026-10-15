@@ -61,6 +61,16 @@ Reviewed revision: `e94be12ee39826a6fba73f57534b06bbf0c73db8`, matching
     complete. The only pushed commit on the branch is the documentation
     update `ae2ece2`. Detailed per-item repair reports from the repair
     agents are not yet persisted in this repository.
+- 2026-10-15 (third update): the Wave 1 working-tree edits above were
+  committed to `fix/audit-repairs` in four group commits at user request
+  and pushed: `3bf6c98` (abilities: AUD-30/31/35/38/39),
+  `917b3bf` (platform/config/tools: AUD-23/24/25/47/53/54/57),
+  `447abee` (AI: AUD-28/29/31/33/36/40/41/46 — verification pass was
+  interrupted), `160ebd1` (persistence WIP: AUD-01..08 partial, expected
+  incomplete, possibly non-compiling). **The code remains unbuilt and
+  untested**; commit messages carry the per-group caveats. The 1.6 GB
+  untracked `packaging/Linux/` output stays out of Git on purpose; only
+  manifests/checksums belong in the repository (AUD-57/59 evidence).
 
 ## Decision
 

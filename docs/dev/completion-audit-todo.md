@@ -28,6 +28,39 @@ Reviewed revision: `e94be12ee39826a6fba73f57534b06bbf0c73db8`, matching
   dated 2026-10-13) produced by the previous session. It is not yet committed;
   committing it (or its manifests/checksums) belongs to the AUD-57/AUD-59
   evidence work.
+- 2026-10-15 (second update): repair work resumed after the halt recorded
+  above, then was stopped again by user request. This entry supersedes the
+  "no code edit landed" statement: Wave 1 edits DID land and remain in the
+  working tree (branch `fix/audit-repairs`, **uncommitted, unbuilt, untested**;
+  24 files, +1262/−281). State by group:
+  - Edits complete per repair-agent reports (statically self-consistent, not
+    compiled or tested): AUD-23 geometry/KillZ authoring, AUD-24, AUD-25,
+    AUD-47, AUD-53, AUD-54, AUD-57 (`game/Config/DefaultEngine.ini`,
+    `QinglanContentBootstrap`, `QinglanGraphicsSettingsService`, new
+    `tools/build/{build-game,package-game,regenerate-content}.sh`) and
+    AUD-30 (player side), AUD-31 (player-projectile callsite), AUD-35,
+    AUD-38, AUD-39 (`QinglanProjectile`, `QinglanTechniqueExecutors`,
+    `QinglanTalismanComponent`).
+  - Edits interrupted mid-task, expected incomplete/inconsistent: AUD-01..08
+    (`QinglanSaveSubsystem`, `QinglanSaveMigration`, `QinglanSaveGame.h`,
+    `QinglanRunSubsystem`, `QinglanEconomyLibrary`, `QinglanGameModeBase`;
+    the agent was stopped while editing `QinglanRunSubsystem`
+    room/expedition functions).
+  - Edits believed complete but the final whole-file verification pass was
+    interrupted: AUD-28 (enemy side), AUD-29, AUD-31 (enemy callsites),
+    AUD-33, AUD-36 (AI side), AUD-40, AUD-41, AUD-46 (`AI/*` plus additive
+    `QinglanCombatComponent` changes).
+  - Generator-side changes (input assets, maps, string table) additionally
+    require an editor-commandlet regeneration
+    (`tools/build/regenerate-content.sh`) before runtime behavior changes;
+    not yet run.
+  - The remaining ~31 items (AUD-09..22, 26..29, 32, 34, 37, 42..45,
+    48..52, 55, 56, 58..60) have no edits. No checkbox below is ticked and
+    no disposition is recorded — nothing has passed compile, test, or
+    acceptance, so per this document's closure rule no item may be marked
+    complete. The only pushed commit on the branch is the documentation
+    update `ae2ece2`. Detailed per-item repair reports from the repair
+    agents are not yet persisted in this repository.
 
 ## Decision
 

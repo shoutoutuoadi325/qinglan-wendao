@@ -1,6 +1,7 @@
-// Pooled gameplay-effect actor for the techniques module. Hosts three
+// Pooled gameplay-effect actor for the techniques module. Hosts four
 // tick-driven delivery modes: linear projectile (jade_sword_arc, ember_lance),
-// orbiting pulse aura (orbiting_blades), and heal-over-time (verdant_pulse).
+// orbiting pulse aura (orbiting_blades), heal-over-time (verdant_pulse), and
+// the mist-step Wet trail that follows the owner's actual dodge sweeps.
 // All hit detection is CPU-authoritative swept shape queries each Tick; the
 // collision component never blocks and never generates overlaps as a damage
 // source (code-contracts: "CPU-authoritative damage"; blueprint §1.2 "spawn/
@@ -36,7 +37,10 @@ enum class EQinglanEffectMode : uint8
 	/** Pulses around the owning actor on a fixed interval (orbiting_blades). */
 	OrbitPulses,
 	/** Periodic heal ticks on the owning actor (verdant_pulse). */
-	HealOverTime
+	HealOverTime,
+	/** Samples the owner's actual dodge path each tick, applying Wet once per
+	 *  victim (mist_step); ends with the dodge. */
+	WetTrail
 };
 
 /**
@@ -75,9 +79,16 @@ public:
 		float InPulseRadiusCm, int32 InMaxTargetsPerPulse, float RawDamageMultiplier);
 
 	/** Configures heal-over-time on the owner (verdant_pulse: heal 20 over 4 s
-	 *  bounded by max health, docs/02 §6). */
+	 *  bounded by max health, docs/02 §6). The first tick lands after one full
+	 *  interval; total magnitude divides across the authored tick count. */
 	void SetupHealOverTime(const FQinglanCastId& InCastId, FName InTechniqueId,
 		AActor* InOwner, float InTotalHeal, float InDurationSeconds, float HealMultiplier);
+
+	/** Configures the Wet trail behind the owner's active dodge (mist_step):
+	 *  samples the actual swept position each tick with one deduplicated
+	 *  victim set and returns to the pool when the dodge ends. */
+	void SetupWetTrail(const FQinglanCastId& InCastId, FName InTechniqueId,
+		AActor* InOwner, float InTrailRadiusCm, float InWetDurationBonus);
 
 	/** Pooling contract: clears timers, victims, owner, tags, collision,
 	 *  lifetime. Called on return to pool; also safe to call repeatedly. */
@@ -93,6 +104,7 @@ protected:
 	void TickLinear(float DeltaSeconds);
 	void TickOrbitPulses(float DeltaSeconds);
 	void TickHealOverTime(float DeltaSeconds);
+	void TickWetTrail(float DeltaSeconds);
 
 	/** Sweeps from PreviousLocation to ProposedLocation in substeps; resolves
 	 *  damage through victim combat components with per-victim hit ordinals
@@ -145,7 +157,13 @@ private:
 	// --- Heal-over-time state ---
 	float HealRemaining = 0.f;
 	float HealTickInterval = 1.f;      // 4 ticks over 4 s (docs/02 §6: heal 20 over 4 s)
-	float HealTimer = 0.f;
+	float HealPerTick = 0.f;           // total / tick count; final tick carries the remainder
+	float HealTimer = 0.f;             // 0 at setup: no heal at cast time
+
+	// --- Wet-trail state (mist_step) ---
+	float WetTrailRadiusCm = 220.f;    // capsule-side reach along the dodge path; FIXME-CONTRACT: tunable
+	float WetTrailDurationBonus = 0.f; // blessing WetDurationBonus (docs/03 §4)
+	TSet<TWeakObjectPtr<AActor>> WetTrailVictims;
 
 	// --- Lifetime (paused-game-time via Tick DeltaSeconds) ---
 	float LifetimeRemaining = 3.f;     // safety expiry; normal exits are range/pulse/heal completion

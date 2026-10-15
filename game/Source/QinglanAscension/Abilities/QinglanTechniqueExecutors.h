@@ -136,8 +136,10 @@ public:
 	static constexpr float BarrierDurationFlowingWard = 5.f; // docs/02 §6 flowing_ward "5 seconds"
 	static constexpr float BarrierDurationStoneAegis = 6.f;  // FIXME-CONTRACT: stone_aegis duration unspecified; tunable
 	static constexpr float GroundStrikeRadiusCm = 300.f;     // docs/02 §6 thunder_seal
+	static constexpr float DashDistanceCm = 600.f;           // docs/02 §6 mist_step travel
 	static constexpr float DashDurationSeconds = 0.45f;      // docs/02 §2 dodge duration
 	static constexpr float DashHeightVelocityCmPerSec = 50.f;// FIXME-CONTRACT: unspecified minor lift, tunable
+	static constexpr float DashWetRadiusCm = 220.f;          // FIXME-CONTRACT: capsule-side Wet reach, tunable
 	static constexpr int32 OrbitPulseCount = 6;              // docs/02 §6 orbiting_blades
 	static constexpr float OrbitPulseInterval = 0.5f;        // FIXME-CONTRACT: cadence unspecified; tunable
 	static constexpr float OrbitPulseRadiusCm = 350.f;       // FIXME-CONTRACT: unspecified; tunable

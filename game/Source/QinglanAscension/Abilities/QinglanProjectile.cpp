@@ -4,6 +4,7 @@
 #include "Abilities/QinglanTechniqueExecutors.h"
 #include "QinglanAscension.h" // LogQinglanCombat
 #include "Combat/QinglanCombatComponent.h"
+#include "Combat/QinglanDodgeComponent.h"
 #include "Components/SphereComponent.h"
 #include "Engine/OverlapResult.h" // FOverlapResult full type (UE 5.8 split from EngineTypes)
 #include "Engine/World.h"
@@ -17,6 +18,22 @@ namespace
 	// radius is not specified in docs/02; tunable default.
 	constexpr float KSweepRadiusCm = 30.f;
 	constexpr int32 KMaxSubsteps = 16;
+	// Forward spawn offset from the casting origin (cast socket offset;
+	// FIXME-CONTRACT: socket name unspecified in scaffold data).
+	constexpr float KSpawnOffsetCm = 60.f;
+	// Gap kept in front of a blocker when the spawn placement is clamped.
+	constexpr float KSpawnWallStandoffCm = 5.f;
+
+	/** True when the hit component is static/dynamic level geometry: the
+	 *  blocker class projectiles must stop at (they never carry a combat
+	 *  component, so the victim filter alone would silently skip them). */
+	bool IsWorldBlocker(const FHitResult& Hit)
+	{
+		const ECollisionChannel ObjectType = Hit.Component.IsValid()
+			? Hit.Component->GetCollisionObjectType()
+			: ECC_MAX;
+		return ObjectType == ECC_WorldStatic || ObjectType == ECC_WorldDynamic;
+	}
 }
 
 // --- Pool (per-world free list; never destroys actors mid-flight) ---
@@ -134,6 +151,9 @@ void AQinglanProjectile::Tick(float DeltaSeconds)
 	case EQinglanEffectMode::HealOverTime:
 		TickHealOverTime(DeltaSeconds);
 		break;
+	case EQinglanEffectMode::WetTrail:
+		TickWetTrail(DeltaSeconds);
+		break;
 	default:
 		ReturnToPool();
 		break;
@@ -168,8 +188,26 @@ void AQinglanProjectile::SetupLinear(const FQinglanCastId& InCastId, FName InTec
 	{
 		// Spawn ahead of the caster along the fire direction (cast socket
 		// offset; FIXME-CONTRACT: socket name unspecified in scaffold data).
-		const FVector SpawnLocation = InOwner->GetActorLocation() + SafeDirection * 60.f;
-		SetActorLocation(SpawnLocation, false);
+		// The placement segment is validated against world blockers so a
+		// point-blank or shoulder-aimed shot can never materialize across a
+		// wall: clamp to just short of the first blocking hit.
+		const FVector CastingOrigin = InOwner->GetActorLocation();
+		const FVector UncheckedSpawn = CastingOrigin + SafeDirection * KSpawnOffsetCm;
+		float SpawnDistanceCm = KSpawnOffsetCm;
+		if (UWorld* World = InOwner->GetWorld())
+		{
+			FCollisionObjectQueryParams ObjectParams;
+			ObjectParams.AddObjectTypesToQuery(ECC_WorldStatic);
+			ObjectParams.AddObjectTypesToQuery(ECC_WorldDynamic);
+			FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(QinglanProjectileSpawn), false, InOwner);
+			FHitResult BlockHit;
+			if (World->SweepSingleByObjectType(BlockHit, CastingOrigin, UncheckedSpawn, FQuat::Identity,
+				ObjectParams, FCollisionShape::MakeSphere(KSweepRadiusCm), QueryParams))
+			{
+				SpawnDistanceCm = FMath::Max(0.f, BlockHit.Time * KSpawnOffsetCm - KSpawnWallStandoffCm);
+			}
+		}
+		SetActorLocation(CastingOrigin + SafeDirection * SpawnDistanceCm, false);
 	}
 }
 
@@ -208,10 +246,34 @@ void AQinglanProjectile::SetupHealOverTime(const FQinglanCastId& InCastId, FName
 	EffectOwner = InOwner;
 	Mode = EQinglanEffectMode::HealOverTime;
 	HealRemaining = InTotalHeal * HealMultiplier;
-	// docs/02 §6: heal 20 over 4 s -> 4 one-second ticks of 5.
+	// docs/02 §6: heal 20 over 4 s -> 4 one-second ticks of 5. Total magnitude
+	// divides across the authored tick count, so tier/blessing bonuses raise
+	// the per-tick amount inside the same window; the final tick carries any
+	// float remainder.
 	const int32 TickCount = FMath::Max(1, FMath::RoundToInt(InDurationSeconds));
 	HealTickInterval = InDurationSeconds / static_cast<float>(TickCount);
-	HealTimer = HealTickInterval;
+	HealPerTick = HealRemaining / static_cast<float>(TickCount);
+	HealTimer = 0.f; // no heal at cast time: the first tick lands after one full interval
+
+	bActive = true;
+	SetActorHiddenInGame(true);
+	SetActorTickEnabled(true);
+	if (InOwner)
+	{
+		SetActorLocation(InOwner->GetActorLocation(), false);
+	}
+}
+
+void AQinglanProjectile::SetupWetTrail(const FQinglanCastId& InCastId, FName InTechniqueId,
+	AActor* InOwner, float InTrailRadiusCm, float InWetDurationBonus)
+{
+	CastId = InCastId;
+	TechniqueId = InTechniqueId;
+	Element = EQinglanElement::Water; // mist_step, docs/02 §7
+	EffectOwner = InOwner;
+	Mode = EQinglanEffectMode::WetTrail;
+	WetTrailRadiusCm = FMath::Max(50.f, InTrailRadiusCm);
+	WetTrailDurationBonus = FMath::Max(0.f, InWetDurationBonus);
 
 	bActive = true;
 	SetActorHiddenInGame(true);
@@ -255,7 +317,11 @@ void AQinglanProjectile::ResetForPool()
 	PulsesRemaining = 0;
 	PulseTimer = 0.f;
 	HealRemaining = 0.f;
+	HealPerTick = 0.f;
 	HealTimer = 0.f;
+	WetTrailRadiusCm = 220.f;
+	WetTrailDurationBonus = 0.f;
+	WetTrailVictims.Empty();
 	bAppliesBurn = false;
 	CastId = FQinglanCastId();
 	TechniqueId = NAME_None;
@@ -306,7 +372,13 @@ bool AQinglanProjectile::SweepProjectilePath(const FVector& ProposedLocation)
 	const int32 SubstepCount = FMath::Clamp(FMath::CeilToInt(Distance / KSweepRadiusCm), 1, KMaxSubsteps);
 	const FVector Step = Delta / static_cast<float>(SubstepCount);
 
-	FCollisionObjectQueryParams ObjectParams(ECC_Pawn);
+	// Pawns plus world blockers in one query: static/dynamic geometry stops
+	// the shot (docs/02 §2 projectiles never pass through level geometry),
+	// while piercing may skip pawns only.
+	FCollisionObjectQueryParams ObjectParams;
+	ObjectParams.AddObjectTypesToQuery(ECC_Pawn);
+	ObjectParams.AddObjectTypesToQuery(ECC_WorldStatic);
+	ObjectParams.AddObjectTypesToQuery(ECC_WorldDynamic);
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(QinglanProjectileSweep), false /*bTraceComplex*/);
 	QueryParams.AddIgnoredActor(EffectOwner.Get());
 
@@ -334,6 +406,15 @@ bool AQinglanProjectile::SweepProjectilePath(const FVector& ProposedLocation)
 
 		for (const FHitResult& Hit : Hits)
 		{
+			// Level geometry consumes the shot regardless of piercing: pierce
+			// may skip pawns, never blockers.
+			if (IsWorldBlocker(Hit))
+			{
+				PublishImpactCue(Hit.ImpactPoint, nullptr);
+				ReturnToPool();
+				return false;
+			}
+
 			AActor* Victim = Hit.GetActor();
 			if (!Victim || Victim == EffectOwner.Get() || ProcessedVictims.Contains(Victim))
 			{
@@ -460,12 +541,56 @@ void AQinglanProjectile::TickHealOverTime(float DeltaSeconds)
 	{
 		HealTimer -= HealTickInterval;
 		// Evenly split ticks; the final tick clears any float remainder.
-		const float TickAmount = FMath::Min(HealRemaining, 5.f); // 20 over 4 s -> 5/tick (docs/02 §6)
+		const float TickAmount = FMath::Min(HealRemaining, HealPerTick); // 20 over 4 s -> 5/tick (docs/02 §6)
 		ExecuteHealTick(TickAmount);
 	}
 	if (HealRemaining <= 0.f)
 	{
 		ReturnToPool();
+	}
+}
+
+void AQinglanProjectile::TickWetTrail(float DeltaSeconds)
+{
+	AActor* Owner = EffectOwner.Get();
+	if (!Owner)
+	{
+		ReturnToPool();
+		return;
+	}
+	// The trail follows the owner's actual dodge: capsule-driven movement
+	// stops at blockers, so sampling the real position each tick can never
+	// soak wall-separated or unreachable targets (docs/02 §2 dodge rule).
+	const UQinglanDodgeComponent* Dodge = Owner->FindComponentByClass<UQinglanDodgeComponent>();
+	if (!Dodge || !Dodge->IsDodging())
+	{
+		ReturnToPool(); // dash finished (or wall-stopped early)
+		return;
+	}
+
+	FCollisionObjectQueryParams ObjectParams(ECC_Pawn);
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(QinglanWetTrail), false, Owner);
+
+	TArray<FOverlapResult> Overlaps;
+	GetWorld()->OverlapMultiByObjectType(Overlaps, Owner->GetActorLocation(), FQuat::Identity,
+		ObjectParams, FCollisionShape::MakeSphere(WetTrailRadiusCm), QueryParams);
+
+	for (const FOverlapResult& Overlap : Overlaps)
+	{
+		AActor* Victim = Overlap.GetActor();
+		if (!Victim || Victim == Owner || WetTrailVictims.Contains(Victim))
+		{
+			continue;
+		}
+		UQinglanCombatComponent* VictimCombat = ResolveVictimCombat(Victim);
+		if (!VictimCombat || !VictimCombat->IsAlive())
+		{
+			continue;
+		}
+		// One deduplicated accumulated set across every sample: start, middle,
+		// and end targets soak exactly once, none beyond actual movement.
+		VictimCombat->ApplyStatus(EQinglanStatus::Wet, WetTrailDurationBonus);
+		WetTrailVictims.Add(Victim);
 	}
 }
 
@@ -519,7 +644,11 @@ bool AQinglanProjectile::ApplyHitToVictim(AActor* Victim, float EffectiveRawMagn
 	Event.Timestamp = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f; // paused-game-time seconds
 	const bool bChanged = VictimCombat->ApplyDamage(Event);
 
-	if (bAppliesBurn && Element == EQinglanElement::Fire && VictimCombat->IsAlive())
+	// Statuses ride only an accepted authoritative result: the pipeline's
+	// precedence runs immunity/barrier/duplicate rejection before status, so a
+	// dodged or duplicate-rejected hit must never apply or refresh Burn
+	// (docs/02 §5, §7).
+	if (bChanged && bAppliesBurn && Element == EQinglanElement::Fire && VictimCombat->IsAlive())
 	{
 		// docs/02 §7 Burn: 3 s, three 4-damage ticks, refresh not stack.
 		VictimCombat->ApplyStatus(EQinglanStatus::Burn, BurnDurationSeconds);

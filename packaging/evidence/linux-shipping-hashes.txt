@@ -1,0 +1,12 @@
+Linux Shipping package evidence (prior session output, packaged 2026-10-13)
+Date recorded: 2026-10-15T06:32:52+00:00
+Commit at packaging time: pre-audit (develop lineage; see docs/dev/test-report.md)
+
+11dd9be2a681f52a480a38f73f4cb9c117de045624793a0f501d7ccd4f4ba997  packaging/Linux/QinglanAscension/Binaries/Linux/QinglanAscension-Linux-Shipping
+669e7393ebbcfe00ff1bd70426df5809d0ed4da0014bf04736019e7021971f0b  packaging/Linux/QinglanAscension/Content/Paks/QinglanAscension-Linux.pak
+
+Staged file counts:
+     4 packaging/Linux/Manifest_DebugFiles_Linux.txt
+    10 packaging/Linux/Manifest_NonUFSFiles_Linux.txt
+  2371 packaging/Linux/Manifest_UFSFiles_Linux.txt
+  2385 total

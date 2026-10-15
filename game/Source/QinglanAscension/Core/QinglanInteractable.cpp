@@ -18,6 +18,8 @@
 #include "Combat/QinglanCharacter.h"
 #include "Components/SphereComponent.h"
 #include "Core/QinglanTrialDirector.h"
+#include "Core/QinglanTrialAdmission.h"
+#include "Core/QinglanRoomLayout.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -27,6 +29,7 @@
 #include "Narrative/QinglanStoryDataTypes.h"
 #include "Narrative/QinglanStoryRuntime.h"
 #include "Narrative/QinglanStorySubsystem.h"
+#include "Persistence/QinglanSaveSubsystem.h"
 #include "Progression/QinglanDeterminism.h"
 #include "Progression/QinglanEconomyLibrary.h"
 #include "Progression/QinglanProfileSubsystem.h"
@@ -58,8 +61,6 @@ namespace
 	 * Room layout contract (QinglanContentBootstrap.cpp BootstrapMaps): seven
 	 * 45 m rooms spaced 55 m apart along +X, corridor centered between rooms.
 	 */
-	constexpr float QinglanRoomSpacing = 5500.f;
-	constexpr float QinglanRoomTeleportHeight = 150.f;
 
 	/** PlayerStart tag convention (Core/QinglanGameModeBase.cpp GInteractableRoomEntranceTagPrefix). */
 	const TCHAR* GInteractableRoomEntranceTagPrefix = TEXT("Qinglan.RoomEntrance");
@@ -199,7 +200,7 @@ namespace
 		{
 			return;
 		}
-		const FVector LayoutPosition(RoomIndex * QinglanRoomSpacing, 0.f, QinglanRoomTeleportHeight);
+		const FVector LayoutPosition = QinglanRoomLayout::RoomEntrance(RoomIndex);
 		if (APlayerStart* Entrance = FindRoomEntranceStart(Player->GetWorld(), RoomIndex))
 		{
 			Player->SetActorLocationAndRotation(
@@ -216,16 +217,6 @@ namespace
 			&& Profile->HasCampaignFlag(FName(QinglanProgression::BambooClearedCampaignFlag));
 		const bool bStory = Story != nullptr
 			&& Story->HasFlag(FName(QinglanProgression::BambooClearedStoryFlag));
-		return bCampaign || bStory;
-	}
-
-	/** Ashen proof for trial access: the pair the Golden Core breakthrough gate reads. */
-	bool IsAshenCleared(const UQinglanProfileSubsystem* Profile, const UQinglanStorySubsystem* Story)
-	{
-		const bool bCampaign = Profile != nullptr
-			&& Profile->HasCampaignFlag(FName(QinglanProgression::AshenClearedCampaignFlag));
-		const bool bStory = Story != nullptr
-			&& Story->HasFlag(FName(QinglanProgression::AshenClearedStoryFlag));
 		return bCampaign || bStory;
 	}
 
@@ -311,8 +302,8 @@ namespace
 	/**
 	 * Routes an exhausted trial scene into the timed trial system: finds (or
 	 * spawns, once per world) the trial director at this anchor, refuses while
-	 * a trial already runs, and keeps the v1 direct-complete fallback when no
-	 * director can exist. Returns true when the press was consumed.
+	 * a trial already runs. Initialization failure leaves the objective pending
+	 * so the player can retry or return safely. Returns true when the press was consumed.
 	 */
 	bool TryBeginTrialAtAnchor(AActor* Anchor, AQinglanCharacter* Player,
 		UQinglanStorySubsystem* Story, FName ProofScene, FName ProofObjective)
@@ -326,6 +317,15 @@ namespace
 		if (DurationSeconds <= 0.f)
 		{
 			return false; // not a trial scene: caller keeps the generic proof
+		}
+		const UGameInstance* Instance = Anchor->GetGameInstance();
+		const UQinglanProfileSubsystem* Profile = Instance ? Instance->GetSubsystem<UQinglanProfileSubsystem>() : nullptr;
+		const QinglanTrialAdmission::FResult Admission = QinglanTrialAdmission::EvaluateScene(
+			ProofScene, ProofObjective, Profile, Story);
+		if (!Admission.IsAllowed())
+		{
+			Player->ShowGameMessage(UQinglanHUDStatics::GameText(Admission.ReasonKey));
+			return true;
 		}
 
 		// One trial director per arena world, positioned at the trial anchor
@@ -349,8 +349,7 @@ namespace
 		{
 			// One trial at a time; after a failure the defeat flow returns the
 			// player to the hub, and the next arena press restarts clean.
-			// FIXME-CONTRACT: no string-table key for the in-progress refusal.
-			Player->ShowGameMessage(NSLOCTEXT("Qinglan", "Trial.InProgress", "The trial is already underway."));
+			Player->ShowGameMessage(UQinglanHUDStatics::GameText(FName(TEXT("trial.in_progress"))));
 			return true;
 		}
 		if (Director != nullptr && Director->BeginTrial(ProofScene, ProofObjective, DurationSeconds, Tier))
@@ -358,14 +357,8 @@ namespace
 			return true;
 		}
 
-		// Null-safe fallback (no director / wave engine unavailable): the
-		// pre-trial stand-in proof, so the objective never dead-ends.
-		if (Director == nullptr)
-		{
-			UE_LOG(LogQinglan, Warning, TEXT("Trial anchor: no trial director; committing %s directly"),
-				*ProofObjective.ToString());
-		}
-		Story->NotifyObjectiveCompleted(ProofObjective);
+		UE_LOG(LogQinglan, Warning, TEXT("Trial %s could not start; objective remains pending"), *ProofScene.ToString());
+		Player->ShowGameMessage(UQinglanHUDStatics::GameText(FName(TEXT("trial.unavailable"))));
 		return true;
 	}
 } // namespace
@@ -374,7 +367,7 @@ namespace
 // QinglanInteraction helpers
 // ---------------------------------------------------------------------------
 
-void QinglanInteraction::TravelToMap(UObject* WorldContext, const TCHAR* MapPath)
+bool QinglanInteraction::TravelToMap(UObject* WorldContext, const TCHAR* MapPath)
 {
 	UWorld* World = GEngine
 		? GEngine->GetWorldFromContextObject(WorldContext, EGetWorldErrorMode::LogAndReturnNull)
@@ -382,9 +375,22 @@ void QinglanInteraction::TravelToMap(UObject* WorldContext, const TCHAR* MapPath
 	if (!World)
 	{
 		UE_LOG(LogQinglan, Warning, TEXT("TravelToMap: no world context; travel to %s dropped"), MapPath);
-		return;
+		return false;
+	}
+	// AUD-01/02: persist the current session before leaving its safe boundary.
+	// A failed write keeps the player here and SaveNow broadcasts OnSaveFailed.
+	if (UQinglanSaveSubsystem* Save = World->GetGameInstance() ? World->GetGameInstance()->GetSubsystem<UQinglanSaveSubsystem>() : nullptr)
+	{
+		FText Error;
+		if (!Save->SaveActiveSession(Error))
+		{
+			UE_LOG(LogQinglan, Warning, TEXT("Travel blocked by save failure: %s"), *Error.ToString());
+			// TODO(AUD-02/51): bind failure notice to localized retry/cancel UI.
+			return false;
+		}
 	}
 	UGameplayStatics::OpenLevel(World, FName(MapPath), /*bAbsolute=*/true, TEXT(""));
+	return true;
 }
 
 int32 QinglanInteraction::MakeExpeditionSeed(FName RealmId, const UObject* WorldContext)
@@ -699,7 +705,7 @@ void AQinglanInteractable::ExecuteInteraction(AQinglanCharacter* Player)
 				// proof is surviving the timed wave trial, not the re-press.
 				return TryBeginTrialAtAnchor(this, Player, Story, ProofScene, ProofObjective);
 			}
-			Story->NotifyObjectiveCompleted(ProofObjective);
+			Story->NotifySceneObjectiveCompleted(ProofScene, ProofObjective);
 			return true;
 		}
 		return false;
@@ -797,6 +803,10 @@ void AQinglanInteractable::ExecuteInteraction(AQinglanCharacter* Player)
 		if (Run != nullptr && Run->IsInExpedition())
 		{
 			Run->EndExpedition(/*bVictory=*/true, /*bVoluntaryRetreat=*/true); // 100% banking, docs/03 section 6
+			if (Run->IsInExpedition())
+			{
+				return; // AUD-07: banking failed; do not abandon retryable loot.
+			}
 		}
 		QinglanInteraction::TravelToMap(this, QinglanInteraction::HubMapPath);
 		return;
@@ -824,20 +834,37 @@ void AQinglanInteractable::ExecuteInteraction(AQinglanCharacter* Player)
 			if (Run->StartExpedition(FName(UQinglanEconomyLibrary::TutorialRealmIdText),
 					QinglanInteraction::MakeExpeditionSeed(FName(UQinglanEconomyLibrary::TutorialRealmIdText), this)))
 			{
-				QinglanInteraction::TravelToMap(this, QinglanInteraction::BambooMapPath);
+				if (!QinglanInteraction::TravelToMap(this, QinglanInteraction::BambooMapPath))
+				{
+					Run->ResetRun(); // Failed departure must allow the hub gate to retry.
+				}
 			}
 			return;
 		}
 		if (Run->StartExpedition(FName(UQinglanEconomyLibrary::BambooRealmIdText),
 				QinglanInteraction::MakeExpeditionSeed(FName(UQinglanEconomyLibrary::BambooRealmIdText), this)))
 		{
-			QinglanInteraction::TravelToMap(this, QinglanInteraction::BambooMapPath);
+			if (!QinglanInteraction::TravelToMap(this, QinglanInteraction::BambooMapPath))
+			{
+				Run->ResetRun();
+			}
 		}
 		return;
 	}
 
 	if (InteractionId == GHubAshenGateId)
 	{
+		// Ashen follows Foundation and its hub debrief; Bamboo proof alone
+		// must not bypass the first trial or its chapter transition.
+		if (!Profile || Profile->GetCultivationStage() == EQinglanStage::QiRefining
+			|| !Story || !Story->HasFlag(FName(TEXT("mq_ch03_complete"))))
+		{
+			if (Player)
+			{
+				Player->ShowGameMessage(UQinglanHUDStatics::GameText(FName(TEXT("trial.blocked.story_required"))));
+			}
+			return;
+		}
 		if (!IsBambooCleared(Profile, Story))
 		{
 			// Same proof the Foundation breakthrough gate reads (docs/03 section 1).
@@ -851,20 +878,26 @@ void AQinglanInteractable::ExecuteInteraction(AQinglanCharacter* Player)
 		if (Run != nullptr && Run->StartExpedition(FName(UQinglanEconomyLibrary::AshenRealmIdText),
 				QinglanInteraction::MakeExpeditionSeed(FName(UQinglanEconomyLibrary::AshenRealmIdText), this)))
 		{
-			QinglanInteraction::TravelToMap(this, QinglanInteraction::AshenMapPath);
+			if (!QinglanInteraction::TravelToMap(this, QinglanInteraction::AshenMapPath))
+			{
+				Run->ResetRun();
+			}
 		}
 		return;
 	}
 
 	if (InteractionId == GHubTrialGateId)
 	{
-		if (!IsAshenCleared(Profile, Story))
+		const QinglanTrialAdmission::ETrial Trial = Profile
+			? QinglanTrialAdmission::SelectForStage(Profile->GetCultivationStage())
+			: QinglanTrialAdmission::ETrial::Foundation;
+		const QinglanTrialAdmission::FResult Admission = QinglanTrialAdmission::EvaluateEntry(Trial, Profile, Story);
+		if (!Admission.IsAllowed())
 		{
-			// Same proof the Golden Core breakthrough gate reads (docs/03 section 1).
-			UE_LOG(LogQinglan, Log, TEXT("Trial gate locked: ashen guardian not cleared"));
+			UE_LOG(LogQinglan, Log, TEXT("Trial gate refused: %s"), *Admission.ReasonKey.ToString());
 			if (Player)
 			{
-				Player->ShowGameMessage(UQinglanHUDStatics::GameText(FName(TEXT("cultivation.blocked.boss_required"))));
+				Player->ShowGameMessage(UQinglanHUDStatics::GameText(Admission.ReasonKey));
 			}
 			return;
 		}
@@ -962,8 +995,7 @@ void AQinglanInteractable::ExecuteInteraction(AQinglanCharacter* Player)
 			{
 				if (Player)
 				{
-					// FIXME-CONTRACT: no string-table key for the in-progress refusal.
-					Player->ShowGameMessage(NSLOCTEXT("Qinglan", "Trial.InProgress", "The trial is already underway."));
+					Player->ShowGameMessage(UQinglanHUDStatics::GameText(FName(TEXT("trial.in_progress"))));
 				}
 				return;
 			}

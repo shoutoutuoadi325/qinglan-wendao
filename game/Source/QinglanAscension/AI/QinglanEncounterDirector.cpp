@@ -18,6 +18,8 @@
 #include "AI/QinglanAIController.h"
 #include "AI/QinglanEnemyCharacter.h"
 #include "Core/QinglanAudioSubsystem.h"
+#include "Core/QinglanRoomLayout.h"
+#include "Components/SceneComponent.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
@@ -65,6 +67,7 @@ namespace
 		/** Portal ring band around the director; expedition default above. */
 		float RingMinCm = PortalSpawnRingMinCm;
 		float RingMaxCm = PortalSpawnRingMaxCm;
+		bool bConfineToRealmRoom = false;
 	};
 
 	TMap<TWeakObjectPtr<AQinglanEncounterDirector>, FQinglanDirectorExtra> GDirectorExtras;
@@ -161,29 +164,38 @@ namespace
 
 	/** Deterministic ring placement that respects the 4 m player exclusion (docs/01 section 6). */
 	FVector PickPortalLocation(FRandomStream& Stream, const FVector& Anchor, const ACharacter* Player,
-		float RingMinCm, float RingMaxCm)
+		float RingMinCm, float RingMaxCm, bool bConfineToRealmRoom)
 	{
+		auto Confine = [&](FVector Candidate)
+		{
+			if (bConfineToRealmRoom)
+			{
+				Candidate.X = FMath::Clamp(Candidate.X, Anchor.X - QinglanRoomLayout::PortalHalfExtentCm, Anchor.X + QinglanRoomLayout::PortalHalfExtentCm);
+				Candidate.Y = FMath::Clamp(Candidate.Y, Anchor.Y - QinglanRoomLayout::PortalHalfExtentCm, Anchor.Y + QinglanRoomLayout::PortalHalfExtentCm);
+			}
+			return Candidate;
+		};
 		for (int32 Attempt = 0; Attempt < PortalPlacementAttempts; ++Attempt)
 		{
 			// Deterministic ring position from the seeded stream (no RandRange).
 			const float AngleDeg = Stream.FRand() * 360.f;
 			const float Radius = RingMinCm + Stream.FRand() * (RingMaxCm - RingMinCm);
-			const FVector Candidate = Anchor + FVector(
+			const FVector Candidate = Confine(Anchor + FVector(
 				FMath::Cos(FMath::DegreesToRadians(AngleDeg)) * Radius,
-				FMath::Sin(FMath::DegreesToRadians(AngleDeg)) * Radius, 0.f);
+				FMath::Sin(FMath::DegreesToRadians(AngleDeg)) * Radius, 0.f));
 			if (!Player ||
-				FVector::Dist(Candidate, Player->GetActorLocation()) >= QinglanAITunables::PortalMinPlayerDistanceCm)
+				FVector::Dist2D(Candidate, Player->GetActorLocation()) >= QinglanAITunables::PortalMinPlayerDistanceCm)
 			{
 				return Candidate;
 			}
 		}
-		// Tiny room fallback: push straight out of the 4 m exclusion sphere.
+		// Stay on the floor: choose the ring point opposite the player. Pushing
+		// outward from the player's position could land outside the room entirely.
 		if (Player)
 		{
-			const FVector Away = (Anchor - Player->GetActorLocation()).GetSafeNormal2D();
-			const FVector Base = Player->GetActorLocation() +
-				Away * (QinglanAITunables::PortalMinPlayerDistanceCm + 25.f);
-			return FVector(Base.X, Base.Y, Anchor.Z);
+			FVector Away = (Anchor - Player->GetActorLocation()).GetSafeNormal2D();
+			if (Away.IsNearlyZero()) { Away = FVector::ForwardVector; }
+			return Confine(Anchor + Away * FMath::Max(RingMaxCm, QinglanAITunables::PortalMinPlayerDistanceCm + 25.f));
 		}
 		return Anchor;
 	}
@@ -191,9 +203,16 @@ namespace
 
 AQinglanEncounterDirector::AQinglanEncounterDirector()
 {
+	SetRootComponent(CreateDefaultSubobject<USceneComponent>(TEXT("EncounterRoot")));
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.bStartWithTickEnabled = true;
 	PortalWarningDuration = 0.8f; // "0.8-second warning" (docs/01 section 6)
+}
+
+void AQinglanEncounterDirector::SetRoomOrigin(const FVector& Origin)
+{
+	SetActorLocation(Origin);
+	ExtraFor(this).bConfineToRealmRoom = true;
 }
 
 void AQinglanEncounterDirector::BeginEncounter(const TArray<UQinglanEnemyDataAsset*>& Wave,
@@ -279,7 +298,8 @@ void AQinglanEncounterDirector::Tick(float DeltaTime)
 			{
 				Extra.WaveQueue.RemoveAt(0);
 				SpawnThroughPortal(Next, PickPortalLocation(Extra.EncounterStream,
-					GetActorLocation(), GetPlayer(this), Extra.RingMinCm, Extra.RingMaxCm));
+					GetActorLocation() + (Extra.bConfineToRealmRoom ? FVector(0.f, 0.f, QinglanRoomLayout::PortalHeightCm) : FVector::ZeroVector),
+					GetPlayer(this), Extra.RingMinCm, Extra.RingMaxCm, Extra.bConfineToRealmRoom));
 			}
 		}
 	}
@@ -442,18 +462,9 @@ void AQinglanEncounterDirector::SpawnThroughPortal(UQinglanEnemyDataAsset* Data,
 	}
 	FQinglanDirectorExtra& Extra = ExtraFor(this);
 
-	// Enforce the 4 m rule at the final location as well (docs/01 section 6).
-	FVector SpawnLocation = Location;
-	if (ACharacter* Player = GetPlayer(this))
-	{
-		const float Distance = FVector::Dist(SpawnLocation, Player->GetActorLocation());
-		if (Distance < QinglanAITunables::PortalMinPlayerDistanceCm)
-		{
-			const FVector Away = (SpawnLocation - Player->GetActorLocation()).GetSafeNormal2D();
-			SpawnLocation = Player->GetActorLocation() +
-				Away * (QinglanAITunables::PortalMinPlayerDistanceCm + 25.f);
-		}
-	}
+	// PickPortalLocation already enforces exclusion and floor bounds in this
+	// same tick. Never displace outward again after that validated selection.
+	const FVector SpawnLocation = Location;
 
 	// Reuse a pooled enemy when one fits; otherwise spawn fresh.
 	AQinglanEnemyCharacter* Enemy = nullptr;

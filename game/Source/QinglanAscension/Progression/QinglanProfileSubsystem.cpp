@@ -225,6 +225,49 @@ bool UQinglanProfileSubsystem::TryGrant(FName TransactionId, const FQinglanInven
 	return true;
 }
 
+bool UQinglanProfileSubsystem::TryBankExpedition(FName BankingId, const FQinglanInventory& Grant,
+	FName FirstClearId, const FQinglanInventory& FirstClearBonus)
+{
+	if (BankingId.IsNone() || BankingId == FirstClearId)
+	{
+		return false;
+	}
+	if (WasTransactionCommitted(BankingId))
+	{
+		return true;
+	}
+	const bool bFirstClear = !FirstClearId.IsNone() && !WasTransactionCommitted(FirstClearId);
+	// Match the save validator's journal bound; refuse before awarding anything.
+	// TODO(AUD-07): share the bound across all mutation APIs and define journal
+	// compaction/versioning for very long-lived profiles instead of losing saves.
+	constexpr int32 MaxTransactionEntries = 8192;
+	if (CommittedTransactionIds.Num() > MaxTransactionEntries - (bFirstClear ? 2 : 1))
+	{
+		return false;
+	}
+	FQinglanInventory Candidate = Inventory;
+	const auto AddGrant = [&Candidate](const FQinglanInventory& Delta)
+	{
+		return TryAddBounded(Candidate.SpiritShards, Delta.SpiritShards)
+			&& TryAddBounded(Candidate.SpiritHerb, Delta.SpiritHerb)
+			&& TryAddBounded(Candidate.VeinCrystal, Delta.VeinCrystal);
+	};
+	if (!AddGrant(Grant) || (bFirstClear && !AddGrant(FirstClearBonus)))
+	{
+		return false;
+	}
+	Inventory = Candidate;
+	CommittedTransactionIds.Add(BankingId);
+	if (bFirstClear)
+	{
+		CommittedTransactionIds.Add(FirstClearId);
+	}
+	// Observers see both grants and both IDs, never a half-committed first clear.
+	OnInventoryChanged.Broadcast(Inventory);
+	OnProfileCommitted.Broadcast();
+	return true;
+}
+
 bool UQinglanProfileSubsystem::TrySpend(FName TransactionId, const FQinglanInventory& Cost)
 {
 	if (TransactionId == NAME_None)
@@ -315,7 +358,7 @@ bool UQinglanProfileSubsystem::TryBreakthrough(FName TransactionId)
 	if (!CheckBreakthroughGate(BlockingReason))
 	{
 		// Gates (docs/dev/implementation-blueprint.md section 1.5):
-		// Qi -> Foundation: Bamboo Guardian cleared + 3 Qi ranks.
+		// Qi -> Foundation: Bamboo Guardian cleared + 3 Qi ranks + trial passed.
 		// Foundation -> Golden Core: Ashen Guardian cleared + 3 Foundation ranks
 		// + Golden Core trial passed. Trial entry itself is free (docs/03 section 1).
 		return false;
@@ -763,6 +806,12 @@ bool UQinglanProfileSubsystem::CheckBreakthroughGate(FText& OutBlockingReason) c
 		if (!IsBambooCleared())
 		{
 			OutBlockingReason = ProfileTableText(TEXT("cultivation.blocked.boss_required"));
+			return false;
+		}
+		if (!HasCampaignFlag(FName(QinglanProgression::FoundationTrialPassedCampaignFlag))
+			&& !HasNarrativeFlag(FName(QinglanProgression::FoundationTrialPassedStoryFlag)))
+		{
+			OutBlockingReason = ProfileTableText(TEXT("cultivation.blocked.trial_required"));
 			return false;
 		}
 		return true;

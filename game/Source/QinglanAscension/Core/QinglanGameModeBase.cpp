@@ -19,6 +19,9 @@
 #include "Combat/QinglanCombatComponent.h"
 #include "Combat/QinglanStatusComponent.h"
 #include "Core/QinglanInteractable.h"
+#include "Core/QinglanRoomLayout.h"
+#include "Misc/PackageName.h"
+#include "TimerManager.h"
 #include "Misc/CommandLine.h" // FParse
 #include "UnrealClient.h" // FScreenshotRequest
 #include "EngineUtils.h"
@@ -30,6 +33,7 @@
 #include "Persistence/QinglanSaveGame.h"
 #include "Persistence/QinglanSaveSubsystem.h"
 #include "Progression/QinglanProfileSubsystem.h"
+#include "Progression/QinglanProgressionTables.h"
 #include "Progression/QinglanRunSubsystem.h"
 #include "QinglanAscension.h"
 
@@ -81,13 +85,27 @@ namespace
 			{
 				return Start;
 			}
-			if (!AnyEntrance && Start->PlayerStartTag.ToString().StartsWith(Prefix))
+			if (!AnyEntrance && Start->PlayerStartTag == FName(*Prefix))
 			{
 				AnyEntrance = Start;
 			}
 		}
-		return AnyEntrance;
+		return RoomIndex == 0 ? AnyEntrance : nullptr;
 	}
+	APlayerStart* EnsureRoomEntrance(UWorld* World, int32 RoomIndex)
+	{
+		if (!World || RoomIndex < 0 || RoomIndex >= QinglanRoomLayout::RoomCount) { return nullptr; }
+		if (APlayerStart* Existing = FindRoomEntranceStart(World, RoomIndex)) { return Existing; }
+		// Old committed maps predate the per-room tags. Recreate their known
+		// greybox entrance transform without requiring an asset regeneration.
+		FActorSpawnParameters Params;
+		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		APlayerStart* Start = World->SpawnActor<APlayerStart>(APlayerStart::StaticClass(),
+			QinglanRoomLayout::RoomEntrance(RoomIndex), FRotator::ZeroRotator, Params);
+		if (Start) { Start->PlayerStartTag = QinglanRoomLayout::EntranceTag(RoomIndex); }
+		return Start;
+	}
+
 }
 
 
@@ -168,31 +186,49 @@ void AQinglanHubGameMode::BeginPlay()
 	{
 		if (UQinglanSaveSubsystem* Save = Instance->GetSubsystem<UQinglanSaveSubsystem>())
 		{
-			bool bAnyProfile = false;
-			for (int32 Slot = 0; Slot < UQinglanSaveSubsystem::ProfileSlotCount; ++Slot)
+			// AUD-01: ordinary hub travel must retain the active in-memory profile.
+			// TODO(AUD-01/AUD-51): move cold-start slot selection to the profile
+			// frontend; this guard only prevents arrival from reloading slot 0.
+			if (!Save->IsProfileSessionActive())
 			{
-				bAnyProfile |= Save->HasProfile(Slot);
-			}
-			if (!bAnyProfile)
-			{
-				UE_LOG(LogQinglan, Log, TEXT("First launch: creating profile slot 0"));
-				Save->CreateNewProfile(0);
-			}
-			else if (Save->HasProfile(0))
-			{
-				// Boot default: continue from slot 0 (the profile-select menu is
-				// a UI feature; without a load the safe-boundary autosave would
-				// have no active slot on every non-first launch).
-				FText Notice;
-				if (Save->LoadProfile(0, Notice))
+				int32 FirstExistingSlot = INDEX_NONE;
+				for (int32 Slot = 0; Slot < UQinglanSaveSubsystem::ProfileSlotCount; ++Slot)
 				{
-					UE_LOG(LogQinglan, Log, TEXT("Continuing from profile slot 0"));
+					if (Save->HasProfile(Slot)) { FirstExistingSlot = Slot; break; }
+				}
+				if (FirstExistingSlot == INDEX_NONE)
+				{
+					Save->CreateNewProfile(0);
 				}
 				else
 				{
-					UE_LOG(LogQinglan, Warning, TEXT("Profile slot 0 failed to load: %s"), *Notice.ToString());
+					FText Notice;
+					if (!Save->LoadProfile(FirstExistingSlot, Notice))
+					{
+						UE_LOG(LogQinglan, Warning, TEXT("Initial profile load failed: %s"), *Notice.ToString());
+					}
 				}
 			}
+		}
+	}
+
+	// Resume loaded expeditions before hub refills/autosave can change their
+	// entrance state. Failed save-before-travel leaves the request pending;
+	// the player's interact key retries it after the disk issue is resolved.
+	if (UQinglanRunSubsystem* Run = Instance ? Instance->GetSubsystem<UQinglanRunSubsystem>() : nullptr)
+	{
+		if (Run->NeedsCheckpointResume())
+		{
+			const FName Map = Run->GetPendingCheckpointMap();
+			if (!Map.IsNone())
+			{
+				QinglanInteraction::TravelToMap(this, *Map.ToString());
+			}
+			else
+			{
+				UE_LOG(LogQinglan, Error, TEXT("Cannot resume unsupported checkpoint realm"));
+			}
+			return;
 		}
 	}
 
@@ -237,8 +273,15 @@ void AQinglanHubGameMode::BeginPlay()
 	// prerequisites, so earlier visits are a Verbose no-op.
 	if (UQinglanStorySubsystem* Story = Instance ? Instance->GetSubsystem<UQinglanStorySubsystem>() : nullptr)
 	{
-		const TArray<FName> EpilogueChapters = { FName(TEXT("CH07")) };
-		QinglanInteraction::BeginFirstSceneOfChapters(Story, EpilogueChapters);
+		if (Story->HasFlag(FName(QinglanProgression::FoundationTrialPassedStoryFlag))
+			&& !Story->IsSceneCompleted(FName(TEXT("CH03_S03"))))
+		{
+			Story->BeginScene(FName(TEXT("CH03_S03")));
+		}
+		else
+		{
+			QinglanInteraction::BeginFirstSceneOfChapters(Story, { FName(TEXT("CH07")) });
+		}
 	}
 }
 
@@ -308,11 +351,17 @@ void AQinglanRealmGameMode::BeginPlay()
 	UGameInstance* Instance = GetGameInstance();
 	UQinglanRunSubsystem* Run = Instance ? Instance->GetSubsystem<UQinglanRunSubsystem>() : nullptr;
 
-	// Arm the room pipeline: StartExpedition leaves the room index unset, and
+	// Arm the room pipeline: StartExpedition captures a pre-travel entrance, and
 	// the room-0 door can only advance from the current room (blueprint 1.4
 	// "doors and rewards stay driven by exactly one trigger"). Room 0 is the
 	// entrance (no wave), so this never starts a fight on arrival.
-	if (Run && Run->IsInExpedition() && Run->GetCurrentRoomIndex() == INDEX_NONE)
+	if (Run && Run->NeedsCheckpointResume())
+	{
+		RequestCheckpointResume();
+		// Defer chapter playback until the pawn and saved encounter are ready.
+		return;
+	}
+	if (Run && Run->IsInExpedition() && Run->GetCurrentRoomIndex() <= 0)
 	{
 		Run->EnterRoom(0);
 	}
@@ -342,7 +391,62 @@ void AQinglanRealmGameMode::BeginPlay()
 	}
 }
 
-void AQinglanRealmGameMode::RestartRoomFromSnapshot()
+AActor* AQinglanRealmGameMode::ChoosePlayerStart_Implementation(AController* Player)
+{
+	UQinglanRunSubsystem* Run = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQinglanRunSubsystem>() : nullptr;
+	if (Run && Run->IsInExpedition())
+	{
+		if (APlayerStart* Entrance = EnsureRoomEntrance(GetWorld(), FMath::Max(0, Run->GetCurrentRoomIndex())))
+		{
+			return Entrance;
+		}
+	}
+	return Super::ChoosePlayerStart_Implementation(Player);
+}
+
+void AQinglanRealmGameMode::RequestCheckpointResume()
+{
+	ResumeRetryCount = 0;
+	TryResumeCheckpoint();
+}
+
+void AQinglanRealmGameMode::TryResumeCheckpoint()
+{
+	UWorld* World = GetWorld();
+	UQinglanRunSubsystem* Run = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQinglanRunSubsystem>() : nullptr;
+	if (!World || !Run || !Run->NeedsCheckpointResume()) { return; }
+	const FName ExpectedMap = Run->GetPendingCheckpointMap();
+	if (ExpectedMap.IsNone() || UGameplayStatics::GetCurrentLevelName(this, true) != FPackageName::GetShortName(ExpectedMap.ToString()))
+	{
+		UE_LOG(LogQinglan, Error, TEXT("Checkpoint resume refused in the wrong realm map"));
+		return;
+	}
+	APlayerController* PC = World->GetFirstPlayerController();
+	AQinglanCharacter* Player = PC ? Cast<AQinglanCharacter>(PC->GetPawn()) : nullptr;
+	if (Player && Player->GetCombat() && RestartRoomFromSnapshot())
+	{
+		World->GetTimerManager().ClearTimer(ResumeRetryTimer);
+		Run->MarkCheckpointResumed();
+		TArray<FQinglanBlessing> Offers;
+		if (Run->GetBlessingOffer(Offers)) { Player->PresentBlessingOffer(Offers); }
+		else if (UQinglanStorySubsystem* Story = GetGameInstance()->GetSubsystem<UQinglanStorySubsystem>())
+		{
+			const UQinglanRealmDataAsset* Realm = Run->GetCurrentRealm();
+			if (Realm) { QinglanInteraction::BeginFirstSceneOfChapters(Story, QinglanInteraction::ChaptersForRealm(Realm->RealmId)); }
+		}
+		return;
+	}
+	if (++ResumeRetryCount < 100)
+	{
+		World->GetTimerManager().SetTimer(ResumeRetryTimer, this, &AQinglanRealmGameMode::TryResumeCheckpoint, 0.1f, false);
+	}
+	else
+	{
+		UE_LOG(LogQinglan, Error, TEXT("Checkpoint resume could not obtain its player/entrance; request remains pending"));
+	}
+}
+
+bool AQinglanRealmGameMode::RestartRoomFromSnapshot()
 {
 	// Crash-resume path (blueprint section 1.6): restore the player at the
 	// room entrance from the run subsystem checkpoint with pre-room
@@ -353,7 +457,7 @@ void AQinglanRealmGameMode::RestartRoomFromSnapshot()
 	if (!Run || !Run->IsInExpedition())
 	{
 		UE_LOG(LogQinglan, Warning, TEXT("RestartRoomFromSnapshot: no active expedition to resume"));
-		return;
+		return false;
 	}
 
 	FQinglanCheckpoint Checkpoint;
@@ -361,38 +465,31 @@ void AQinglanRealmGameMode::RestartRoomFromSnapshot()
 	if (Checkpoint.RealmId == NAME_None)
 	{
 		UE_LOG(LogQinglan, Warning, TEXT("RestartRoomFromSnapshot: checkpoint carries no realm"));
-		return;
+		return false;
 	}
 
 	UWorld* World = GetWorld();
 	APlayerController* PC = World ? World->GetFirstPlayerController() : nullptr;
 
 	// 1) Position: room entrance PlayerStart for the checkpointed room.
-	APlayerStart* Entrance = FindRoomEntranceStart(World, Checkpoint.RoomIndex);
+	APlayerStart* Entrance = EnsureRoomEntrance(World, Checkpoint.RoomIndex);
 	APawn* Pawn = PC ? PC->GetPawn() : nullptr;
-	if (Entrance && PC)
+	if (!PC || !Entrance) { return false; }
+	if (!Pawn)
 	{
-		if (Pawn)
-		{
-			Pawn->SetActorLocationAndRotation(Entrance->GetActorLocation(), Entrance->GetActorRotation(), false, nullptr, ETeleportType::TeleportPhysics);
-		}
-		else
-		{
-			// Pawn destroyed mid-room (death/crash edge): respawn in place.
-			RestartPlayerAtPlayerStart(PC, Entrance);
-			Pawn = PC->GetPawn();
-		}
-	}
-	else if (PC)
-	{
-		RestartPlayer(PC); // default start selection as a last resort
+		RestartPlayerAtPlayerStart(PC, Entrance);
 		Pawn = PC->GetPawn();
+	}
+	AQinglanCharacter* Player = Cast<AQinglanCharacter>(Pawn);
+	if (!Player || !Player->GetCombat()) { return false; }
+	if (!Pawn->SetActorLocationAndRotation(Entrance->GetActorLocation(), Entrance->GetActorRotation(), false, nullptr, ETeleportType::TeleportPhysics))
+	{
+		return false;
 	}
 
 	// 2) Vitals: pre-room attribute snapshot (health/energy/stamina as they
 	// were when the room was entered; FQinglanCheckpoint.PlayerAttributes).
-	AQinglanCharacter* Player = Cast<AQinglanCharacter>(Pawn);
-	if (UQinglanCombatComponent* Combat = Player ? Player->GetCombat() : nullptr)
+	if (UQinglanCombatComponent* Combat = Player->GetCombat())
 	{
 		Combat->SetDerivedAttributes(Checkpoint.PlayerAttributes);
 	}
@@ -414,11 +511,12 @@ void AQinglanRealmGameMode::RestartRoomFromSnapshot()
 	// active. CommittedRoomIds keeps already-awarded room rewards from paying
 	// twice (run subsystem idempotency), so this cannot "respawn" committed
 	// rewards.
-	if (Run->GetCurrentRoomIndex() != Checkpoint.RoomIndex)
-	{
-		Run->EnterRoom(Checkpoint.RoomIndex);
-	}
+	// Import already set CurrentRoomIndex: equality does not mean the new
+	// world's encounter was spawned. Re-enter after restoring the pawn;
+	// committed rooms skip spawning, unfinished rooms recreate their wave.
+	if (!Run->EnterRoom(Checkpoint.RoomIndex)) { return false; }
 
 	UE_LOG(LogQinglan, Log, TEXT("RestartRoomFromSnapshot: realm %s room %d restored"),
 		*Checkpoint.RealmId.ToString(), Checkpoint.RoomIndex);
+	return true;
 }

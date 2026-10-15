@@ -9,6 +9,7 @@
 // (rooms spaced 55 m along +X, corridors centered between rooms); the exit
 // room (6) has no door because the exit station banks and travels instead.
 #include "Core/QinglanInteractionSpawner.h"
+#include "Core/QinglanRoomLayout.h"
 
 #include "Core/QinglanInteractable.h"
 #include "Engine/TargetPoint.h"
@@ -20,7 +21,6 @@
 namespace
 {
 	/** Room layout contract (QinglanContentBootstrap.cpp BootstrapMaps). */
-	constexpr float QinglanSpawnerRoomSpacing = 5500.f;
 	constexpr int32 QinglanRealmRoomCount = 7;
 	constexpr float QinglanDoorForwardOffset = 500.f; // corridor mouth, just inside the current room
 	constexpr float QinglanDoorHeight = 150.f;
@@ -170,7 +170,7 @@ void UQinglanInteractionSpawner::SynthesizeRealmDoors(UWorld* World)
 		// Corridor center, nudged back into the current room so the door is
 		// reachable before the corridor geometry.
 		const FVector Location(
-			FromRoom * QinglanSpawnerRoomSpacing + QinglanSpawnerRoomSpacing * 0.5f - QinglanDoorForwardOffset,
+			FromRoom * QinglanRoomLayout::RoomSpacingCm + QinglanRoomLayout::RoomSpacingCm * 0.5f - QinglanDoorForwardOffset,
 			0.f, QinglanDoorHeight);
 		SpawnInteractableAt(World, DoorId, Location);
 	}

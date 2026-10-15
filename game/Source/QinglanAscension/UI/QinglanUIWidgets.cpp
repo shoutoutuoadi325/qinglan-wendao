@@ -4,18 +4,12 @@
 // tables; live refresh without restart), docs/dev/implementation-blueprint.md
 // section 1.1 (typed events only; no global untyped event bus).
 //
-// FIXME-CONTRACT: the frozen scaffold headers (UI/QinglanUIWidgets.h) declare
-// only NativeConstruct overrides, so every dynamic-delegate binding routes
-// through UQinglanUIEventRelay (new header in this folder, per the "new
-// headers in your folder" rule). The relay is outer-owned by its widget, dies
-// with it, and dynamic multicast bindings are weak, so a destructed widget can
-// never receive a stale broadcast. The dialogue AdvanceLine/SelectChoice
-// passthroughs live on UQinglanHUDStatics for the same reason.
+// Dialogue/HUD subsystem bindings use their outer-owned event relay. Choice
+// buttons emit requests to Character, which clears the old menu before selecting
+// so synchronous story events can safely present the next group.
 //
-// UQinglanJournalWidget and UQinglanEndingWidget are deliberately BP-only in
-// this scaffold: journal/ending data flows through UQinglanHUDStatics helpers
-// (GameText, FormatGameText*) plus UQinglanProfileSubsystem/UQinglanStorySubsystem
-// queries, so they add no C++ surface here.
+// The journal remains Blueprint-authored. Ending confirmation has a native
+// runtime tree so stale placeholder Blueprint assets cannot remove its controls.
 #include "UI/QinglanUIWidgets.h"
 
 #include "Abilities/QinglanTechniqueTypes.h"
@@ -25,11 +19,26 @@
 #include "Combat/QinglanCombatComponent.h"
 #include "Combat/QinglanTechniqueComponent.h"
 #include "Components/ProgressBar.h"
+#include "Components/Border.h"
+#include "Components/Button.h"
+#include "Components/ButtonSlot.h"
+#include "Components/CheckBox.h"
+#include "Components/CanvasPanel.h"
+#include "Components/CanvasPanelSlot.h"
+#include "Components/HorizontalBox.h"
+#include "Components/HorizontalBoxSlot.h"
+#include "Components/ScrollBox.h"
+#include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
+#include "Components/VerticalBoxSlot.h"
+#include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "Progression/QinglanRunSubsystem.h"
+#include "Narrative/QinglanEndingRules.h"
+#include "Narrative/QinglanStoryRuntime.h"
+#include "Narrative/QinglanStorySubsystem.h"
 #include "UI/QinglanHUDStatics.h"
 #include "UI/QinglanUIEventRelay.h"
 
@@ -118,6 +127,60 @@ namespace
 	}
 }
 
+TSharedRef<SWidget> UQinglanDialogueWidget::RebuildWidget()
+{
+	// A fresh tree avoids old authored widgets with identical names retaining
+	// fixed Canvas geometry. Keep presenter names for existing lookups and assets.
+	WidgetTree = NewObject<UWidgetTree>(this);
+	UCanvasPanel* Root = WidgetTree->ConstructWidget<UCanvasPanel>();
+	Root->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+	WidgetTree->RootWidget = Root;
+	DialoguePanel = WidgetTree->ConstructWidget<UBorder>();
+	DialoguePanel->SetBrushColor(FLinearColor(0.015f, 0.025f, 0.035f, 0.96f));
+	DialoguePanel->SetPadding(FMargin(20.f, 12.f));
+	UCanvasPanelSlot* PanelSlot = Root->AddChildToCanvas(DialoguePanel);
+	PanelSlot->SetAnchors(FAnchors(0.06f, 0.48f, 0.94f, 0.97f));
+	PanelSlot->SetOffsets(FMargin(0.f));
+	UVerticalBox* Content = WidgetTree->ConstructWidget<UVerticalBox>();
+	DialoguePanel->AddChild(Content);
+	SpeakerText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_Speaker"));
+	SpeakerText->SetAutoWrapText(true);
+	FSlateFontInfo SpeakerFont = SpeakerText->GetFont();
+	SpeakerFont.Size = 22;
+	SpeakerText->SetFont(SpeakerFont);
+	Content->AddChildToVerticalBox(SpeakerText)->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+	UTextBlock* SourceKind = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_SourceKind"));
+	SourceKind->SetAutoWrapText(true);
+	FSlateFontInfo SourceFont = SourceKind->GetFont();
+	SourceFont.Size = 14;
+	SourceKind->SetFont(SourceFont);
+	Content->AddChildToVerticalBox(SourceKind);
+	LineScroll = WidgetTree->ConstructWidget<UScrollBox>();
+	UVerticalBoxSlot* LineSlot = Content->AddChildToVerticalBox(LineScroll);
+	FSlateChildSize LineSize;
+	LineSize.SizeRule = ESlateSizeRule::Fill;
+	LineSize.Value = 0.4f;
+	LineSlot->SetSize(LineSize);
+	LineSlot->SetPadding(FMargin(0.f, 4.f));
+	LineText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_Line"));
+	LineText->SetAutoWrapText(true);
+	FSlateFontInfo LineFont = LineText->GetFont();
+	LineFont.Size = 18;
+	LineText->SetFont(LineFont);
+	LineScroll->AddChild(LineText);
+	ChoiceScroll = WidgetTree->ConstructWidget<UScrollBox>();
+	ChoiceScroll->SetScrollWhenFocusChanges(EScrollWhenFocusChanges::InstantScroll);
+	UVerticalBoxSlot* ChoiceSlot = Content->AddChildToVerticalBox(ChoiceScroll);
+	FSlateChildSize ChoiceSize;
+	ChoiceSize.SizeRule = ESlateSizeRule::Fill;
+	ChoiceSize.Value = 0.6f;
+	ChoiceSlot->SetSize(ChoiceSize);
+	ChoiceSlot->SetPadding(FMargin(0.f, 6.f, 0.f, 0.f));
+	ChoicesBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("Box_Choices"));
+	ChoiceScroll->AddChild(ChoicesBox);
+	return Super::RebuildWidget();
+}
+
 void UQinglanDialogueWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
@@ -127,6 +190,10 @@ void UQinglanDialogueWidget::NativeConstruct()
 	UQinglanUIEventRelay* Relay = AcquireRelay(this);
 	Relay->SetupDialogue(this);
 	BindNamedElements();
+	SetCurrentLine(CurrentSpeaker, CurrentLineText);
+	const int32 PreviousSelection = SelectedChoiceIndex;
+	SetChoiceEntries(CurrentChoices);
+	SetSelectedChoiceIndex(PreviousSelection);
 }
 
 void UQinglanDialogueWidget::BindNamedElements()
@@ -144,10 +211,26 @@ void UQinglanDialogueWidget::BindNamedElements()
 	ChoicesBox = Tree->FindWidget<UVerticalBox>(TEXT("Box_Choices"));
 	if (UTextBlock* SourceKindText = Tree->FindWidget<UTextBlock>(TEXT("Txt_SourceKind")))
 	{
-		// Nothing feeds the source-kind column yet (records/scenes carry no
-		// key to the widget); clear the authored placeholder so it cannot read
-		// as live data during play.
-		SourceKindText->SetText(FText::GetEmpty());
+		SourceKindText->SetText(CurrentSourceLabel);
+	}
+}
+
+void UQinglanDialogueWidget::SetSourceKind(EQinglanSourceKind SourceKind)
+{
+	const TCHAR* Token = TEXT("live");
+	switch (SourceKind)
+	{
+	case EQinglanSourceKind::Paper: Token = TEXT("paper"); break;
+	case EQinglanSourceKind::Letter: Token = TEXT("letter"); break;
+	case EQinglanSourceKind::System: Token = TEXT("system"); break;
+	case EQinglanSourceKind::Memory: Token = TEXT("memory"); break;
+	case EQinglanSourceKind::Recorded: Token = TEXT("recorded"); break;
+	default: break;
+	}
+	CurrentSourceLabel = UQinglanHUDStatics::GameText(FName(*FString::Printf(TEXT("story.speaker.source.%s"), Token)));
+	if (UTextBlock* Text = WidgetTree ? WidgetTree->FindWidget<UTextBlock>(TEXT("Txt_SourceKind")) : nullptr)
+	{
+		Text->SetText(CurrentSourceLabel);
 	}
 }
 
@@ -163,12 +246,32 @@ bool UQinglanDialogueWidget::SetCurrentLine(const FText& InSpeakerName, const FT
 	{
 		LineText->SetText(InLineText);
 	}
+	if (LineScroll) { LineScroll->ScrollToStart(); }
+	if (DialoguePanel)
+	{
+		DialoguePanel->SetVisibility(CurrentSpeaker.IsEmpty() && CurrentLineText.IsEmpty() && CurrentChoices.IsEmpty()
+			? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+	}
 	return SpeakerText || LineText;
 }
 
 bool UQinglanDialogueWidget::SetChoiceEntries(const TArray<FQinglanSceneChoice>& Choices)
 {
 	CurrentChoices = Choices;
+	ChoiceButtons.Reset();
+	ChoiceButtons.SetNum(Choices.Num());
+	ChoiceClickRelays.Reset();
+	SelectedChoiceIndex = INDEX_NONE;
+	if (ChoiceScroll)
+	{
+		ChoiceScroll->SetVisibility(Choices.IsEmpty() ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+		ChoiceScroll->ScrollToStart();
+	}
+	if (DialoguePanel)
+	{
+		DialoguePanel->SetVisibility(CurrentSpeaker.IsEmpty() && CurrentLineText.IsEmpty() && CurrentChoices.IsEmpty()
+			? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+	}
 	if (!ChoicesBox)
 	{
 		return false; // no authored choice box: caller keeps the fallback list
@@ -193,17 +296,303 @@ bool UQinglanDialogueWidget::SetChoiceEntries(const TArray<FQinglanSceneChoice>&
 		Args.Add(TEXT("index"), FText::AsNumber(Index + 1));
 		Args.Add(TEXT("label"), Choices[Index].Label);
 		EntryText->SetText(FText::Format(UQinglanHUDStatics::GameText(GChoiceEntryTextKey), Args));
-		ChoicesBox->AddChild(EntryText);
+		EntryText->SetAutoWrapText(true);
+		FSlateFontInfo ChoiceFont = EntryText->GetFont();
+		ChoiceFont.Size = 17;
+		EntryText->SetFont(ChoiceFont);
+		UButton* Button = Tree->ConstructWidget<UButton>();
+		Button->AddChild(EntryText);
+		if (UButtonSlot* ContentSlot = Cast<UButtonSlot>(EntryText->Slot))
+		{
+			ContentSlot->SetPadding(FMargin(12.f, 8.f));
+		}
+		Button->SetIsEnabled(Choices[Index].UnmetRequirements.IsEmpty());
+		Button->SetBackgroundColor(FLinearColor(0.07f, 0.12f, 0.16f));
+		ChoicesBox->AddChildToVerticalBox(Button)->SetPadding(FMargin(0.f, 4.f));
+		UQinglanDialogueChoiceClickRelay* ClickRelay = NewObject<UQinglanDialogueChoiceClickRelay>(this);
+		ClickRelay->Initialize(this, Choices[Index].ChoiceId);
+		Button->OnClicked.AddDynamic(ClickRelay, &UQinglanDialogueChoiceClickRelay::HandleClicked);
+		ChoiceButtons[Index] = Button;
+		ChoiceClickRelays.Add(ClickRelay);
 	}
 	return true;
+}
+
+void UQinglanDialogueChoiceClickRelay::Initialize(UQinglanDialogueWidget* InOwner, FName InChoiceId)
+{
+	OwnerWidget = InOwner;
+	ChoiceId = InChoiceId;
+}
+
+void UQinglanDialogueChoiceClickRelay::HandleClicked()
+{
+	if (UQinglanDialogueWidget* Owner = OwnerWidget.Get())
+	{
+		Owner->RequestChoiceSelection(ChoiceId);
+	}
+}
+
+void UQinglanDialogueWidget::RequestChoiceSelection(FName ChoiceId)
+{
+	for (const FQinglanSceneChoice& Choice : CurrentChoices)
+	{
+		if (Choice.ChoiceId == ChoiceId && Choice.UnmetRequirements.IsEmpty())
+		{
+			// Request only. SelectChoice can synchronously present the next menu;
+			// Character owns clear-before-select ordering for every input surface.
+			OnChoiceSelected.Broadcast(ChoiceId);
+			return;
+		}
+	}
+}
+
+void UQinglanDialogueWidget::SetSelectedChoiceIndex(int32 Index)
+{
+	SelectedChoiceIndex = CurrentChoices.IsValidIndex(Index) ? Index : INDEX_NONE;
+	for (int32 ButtonIndex = 0; ButtonIndex < ChoiceButtons.Num(); ++ButtonIndex)
+	{
+		if (UButton* Button = ChoiceButtons[ButtonIndex])
+		{
+			Button->SetBackgroundColor(ButtonIndex == SelectedChoiceIndex
+				? FLinearColor(0.18f, 0.45f, 0.48f) : FLinearColor(0.07f, 0.12f, 0.16f));
+		}
+	}
+	if (ChoiceButtons.IsValidIndex(SelectedChoiceIndex) && ChoiceButtons[SelectedChoiceIndex]
+		&& ChoiceButtons[SelectedChoiceIndex]->GetIsEnabled() && GetOwningPlayer())
+	{
+		ChoiceButtons[SelectedChoiceIndex]->SetUserFocus(GetOwningPlayer());
+	}
+	if (ChoiceScroll && ChoiceButtons.IsValidIndex(SelectedChoiceIndex) && ChoiceButtons[SelectedChoiceIndex])
+	{
+		ChoiceScroll->ScrollWidgetIntoView(ChoiceButtons[SelectedChoiceIndex], true, EDescendantScrollDestination::IntoView);
+	}
 }
 
 bool UQinglanDialogueWidget::ShowRecordEntry(const FText& Title, const FText& Body)
 {
 	LastRecordTitle = Title;
 	LastRecordBody = Body;
+	// The current record registry has no source-kind field; do not carry a
+	// previous live dialogue's label onto an unclassified collected record.
+	CurrentSourceLabel = FText::GetEmpty();
+	if (UTextBlock* Text = WidgetTree ? WidgetTree->FindWidget<UTextBlock>(TEXT("Txt_SourceKind")) : nullptr)
+	{
+		Text->SetText(CurrentSourceLabel);
+	}
 	// Records reuse the line presenter: the title reads as the speaker slot.
 	return SetCurrentLine(Title, Body);
+}
+
+TSharedRef<SWidget> UQinglanEndingWidget::RebuildWidget()
+{
+	BuildEndingTree();
+	return Super::RebuildWidget();
+}
+
+void UQinglanEndingWidget::BuildEndingTree()
+{
+	if (!WidgetTree)
+	{
+		WidgetTree = NewObject<UWidgetTree>(this, TEXT("EndingRuntimeTree"));
+	}
+	UBorder* Backdrop = WidgetTree->ConstructWidget<UBorder>();
+	Backdrop->SetBrushColor(FLinearColor(0.015f, 0.025f, 0.035f, 0.96f));
+	Backdrop->SetPadding(FMargin(32.f));
+	Backdrop->SetHorizontalAlignment(HAlign_Center);
+	Backdrop->SetVerticalAlignment(VAlign_Center);
+	WidgetTree->RootWidget = Backdrop;
+	USizeBox* PanelSize = WidgetTree->ConstructWidget<USizeBox>();
+	PanelSize->SetWidthOverride(800.f);
+	PanelSize->SetMaxDesiredHeight(660.f);
+	Backdrop->AddChild(PanelSize);
+	UScrollBox* Scroll = WidgetTree->ConstructWidget<UScrollBox>();
+	PanelSize->AddChild(Scroll);
+	UVerticalBox* Content = WidgetTree->ConstructWidget<UVerticalBox>();
+	Scroll->AddChild(Content);
+	const auto AddText = [this, Content](int32 FontSize, FLinearColor Color)
+	{
+		UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>();
+		Text->SetAutoWrapText(true);
+		FSlateFontInfo Font = Text->GetFont();
+		Font.Size = FontSize;
+		Text->SetFont(Font);
+		Text->SetColorAndOpacity(FSlateColor(Color));
+		Content->AddChildToVerticalBox(Text)->SetPadding(FMargin(0.f, 8.f));
+		return Text;
+	};
+	EndingTitle = AddText(26, FLinearColor::White);
+	EndingPreview = AddText(17, FLinearColor::White);
+	EndingRequirements = AddText(16, FLinearColor(1.f, 0.8f, 0.35f));
+	EndingWarning = AddText(16, FLinearColor(1.f, 0.8f, 0.35f));
+	WarningAcknowledgment = WidgetTree->ConstructWidget<UCheckBox>();
+	AcknowledgmentLabel = WidgetTree->ConstructWidget<UTextBlock>();
+	AcknowledgmentLabel->SetAutoWrapText(true);
+	WarningAcknowledgment->AddChild(AcknowledgmentLabel);
+	Content->AddChildToVerticalBox(WarningAcknowledgment)->SetPadding(FMargin(0.f, 12.f));
+	EndingError = AddText(16, FLinearColor(1.f, 0.45f, 0.4f));
+	UHorizontalBox* Actions = WidgetTree->ConstructWidget<UHorizontalBox>();
+	Content->AddChildToVerticalBox(Actions)->SetPadding(FMargin(0.f, 12.f));
+	ConfirmButton = WidgetTree->ConstructWidget<UButton>();
+	ConfirmLabel = WidgetTree->ConstructWidget<UTextBlock>();
+	ConfirmButton->AddChild(ConfirmLabel);
+	Actions->AddChildToHorizontalBox(ConfirmButton)->SetPadding(FMargin(0.f, 0.f, 20.f, 0.f));
+	CancelButton = WidgetTree->ConstructWidget<UButton>();
+	CancelLabel = WidgetTree->ConstructWidget<UTextBlock>();
+	CancelButton->AddChild(CancelLabel);
+	Actions->AddChild(CancelButton);
+	ConfirmButton->OnClicked.AddDynamic(this, &UQinglanEndingWidget::HandleConfirmPressed);
+	CancelButton->OnClicked.AddDynamic(this, &UQinglanEndingWidget::CancelPreview);
+	WarningAcknowledgment->OnCheckStateChanged.AddDynamic(this, &UQinglanEndingWidget::HandleAcknowledgmentChanged);
+}
+
+void UQinglanEndingWidget::NativeConstruct()
+{
+	Super::NativeConstruct();
+	RefreshPresentation();
+	if (ConfirmButton && GetOwningPlayer())
+	{
+		if (bConfirmRequested) { WarningAcknowledgment->SetUserFocus(GetOwningPlayer()); }
+		else { ConfirmButton->SetUserFocus(GetOwningPlayer()); }
+	}
+}
+
+void UQinglanEndingWidget::ShowEnding(FName EndingId, bool bConfirmationRequested)
+{
+	CurrentEndingId = QinglanEnding::EndingEnumToId(QinglanEnding::EndingIdToEnum(EndingId));
+	bConfirmRequested = bConfirmationRequested;
+	bWarningAcknowledged = false; // every request requires its own deliberate acknowledgment
+	bClosing = false;
+	LastError = FText::GetEmpty();
+	if (WarningAcknowledgment)
+	{
+		WarningAcknowledgment->SetIsChecked(false);
+	}
+	RefreshPresentation();
+	if (ConfirmButton && GetOwningPlayer())
+	{
+		if (bConfirmRequested) { WarningAcknowledgment->SetUserFocus(GetOwningPlayer()); }
+		else { ConfirmButton->SetUserFocus(GetOwningPlayer()); }
+	}
+}
+
+void UQinglanEndingWidget::FocusDefaultControl()
+{
+	if (!GetOwningPlayer()) { return; }
+	if (bConfirmRequested && WarningAcknowledgment) { WarningAcknowledgment->SetUserFocus(GetOwningPlayer()); }
+	else if (ConfirmButton) { ConfirmButton->SetUserFocus(GetOwningPlayer()); }
+}
+
+void UQinglanEndingWidget::RefreshPresentation()
+{
+	if (!EndingTitle)
+	{
+		return; // ShowEnding may run before AddToViewport/RebuildWidget.
+	}
+	const EQinglanEnding Ending = QinglanEnding::EndingIdToEnum(CurrentEndingId);
+	const TCHAR* Token = Ending == EQinglanEnding::Open ? TEXT("open")
+		: Ending == EQinglanEnding::Seal ? TEXT("seal") : TEXT("shared");
+	EndingTitle->SetText(Ending == EQinglanEnding::None
+		? UQinglanHUDStatics::GameText(FName(TEXT("ending.unavailable")))
+		: UQinglanHUDStatics::GameText(FName(*FString::Printf(TEXT("story.ch06.s04.%s_title"), Token))));
+	EndingPreview->SetText(Ending == EQinglanEnding::None ? FText::GetEmpty()
+		: UQinglanHUDStatics::GameText(FName(*FString::Printf(TEXT("story.ch06.s04.%s_preview"), Token))));
+	EndingWarning->SetText(UQinglanHUDStatics::GameText(FName(TEXT("story.ch06.s04.confirm_warning"))));
+	AcknowledgmentLabel->SetText(UQinglanHUDStatics::GameText(FName(TEXT("ending.warning_acknowledgment"))));
+	ConfirmLabel->SetText(UQinglanHUDStatics::GameText(FName(bConfirmRequested ? TEXT("action.confirm") : TEXT("action.continue"))));
+	CancelLabel->SetText(UQinglanHUDStatics::GameText(FName(TEXT("action.cancel"))));
+	UQinglanStorySubsystem* Story = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQinglanStorySubsystem>() : nullptr;
+	FText Requirements;
+	const bool bAvailable = Story && Story->IsEndingAvailable(CurrentEndingId, Requirements) && !Story->IsEndingConfirmed();
+	const bool bPreviewed = Story && QinglanStoryRuntime::WasEndingPreviewed(Story, CurrentEndingId);
+	EndingRequirements->SetText(bAvailable ? FText::GetEmpty() : Requirements);
+	EndingRequirements->SetVisibility(bAvailable ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+	if (!Story || Ending == EQinglanEnding::None)
+	{
+		LastError = UQinglanHUDStatics::GameText(FName(TEXT("ending.unavailable")));
+	}
+	else if (bConfirmRequested && !bPreviewed && LastError.IsEmpty())
+	{
+		LastError = UQinglanHUDStatics::GameText(FName(TEXT("ending.preview_required")));
+	}
+	EndingError->SetText(LastError);
+	EndingError->SetVisibility(LastError.IsEmpty() ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+	WarningAcknowledgment->SetVisibility(bConfirmRequested ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	ConfirmButton->SetIsEnabled(!bClosing && (!bConfirmRequested || (bWarningAcknowledged && bAvailable && bPreviewed)));
+}
+
+void UQinglanEndingWidget::HandleAcknowledgmentChanged(bool bChecked)
+{
+	bWarningAcknowledged = bConfirmRequested && bChecked;
+	LastError = FText::GetEmpty();
+	RefreshPresentation();
+}
+
+void UQinglanEndingWidget::ToggleWarningAcknowledgment()
+{
+	if (bConfirmRequested && !bClosing && WarningAcknowledgment)
+	{
+		const bool bChecked = !bWarningAcknowledged;
+		WarningAcknowledgment->SetIsChecked(bChecked);
+		// SetIsChecked does not guarantee a user-style check-state event on every UMG version.
+		HandleAcknowledgmentChanged(bChecked);
+	}
+}
+
+void UQinglanEndingWidget::HandleConfirmPressed()
+{
+	ConfirmCurrentEnding();
+}
+
+bool UQinglanEndingWidget::ConfirmCurrentEnding()
+{
+	if (bClosing)
+	{
+		return false;
+	}
+	if (!bConfirmRequested)
+	{
+		// Continue returns to ending choices while preserving the inspected preview.
+		// Cancel has a separate button/path that discards pending confirmation state.
+		bClosing = true;
+		RemoveFromParent();
+		OnEndingClosed.Broadcast();
+		return false;
+	}
+	if (!bWarningAcknowledged)
+	{
+		LastError = UQinglanHUDStatics::GameText(FName(TEXT("story.ch06.s04.confirm_warning")));
+		RefreshPresentation();
+		return false;
+	}
+	UQinglanStorySubsystem* Story = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQinglanStorySubsystem>() : nullptr;
+	FText Error;
+	if (!Story || !Story->ConfirmEnding(CurrentEndingId, bWarningAcknowledged, Error))
+	{
+		LastError = Error.IsEmpty() ? UQinglanHUDStatics::GameText(FName(TEXT("ending.unavailable"))) : Error;
+		RefreshPresentation();
+		return false;
+	}
+	bClosing = true;
+	OnEndingCommitted.Broadcast(CurrentEndingId);
+	RemoveFromParent();
+	OnEndingClosed.Broadcast();
+	return true;
+}
+
+void UQinglanEndingWidget::CancelPreview()
+{
+	if (bClosing)
+	{
+		return;
+	}
+	bClosing = true;
+	if (UQinglanStorySubsystem* Story = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQinglanStorySubsystem>() : nullptr)
+	{
+		Story->CancelEndingPreview(); // transient confirmation state only; no campaign flags
+	}
+	bWarningAcknowledged = false;
+	RemoveFromParent();
+	OnEndingClosed.Broadcast();
 }
 
 void UQinglanHUDWidget::NativeConstruct()

@@ -37,6 +37,9 @@
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
 #include "InputAction.h"
+#include "InputCoreTypes.h"
+#include "Components/InputComponent.h"
+#include "Framework/Commands/InputChord.h"
 #include "InputTriggers.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/LocalPlayer.h"
@@ -45,6 +48,10 @@
 #include "UObject/ConstructorHelpers.h"
 #include "Blueprint/UserWidget.h"
 #include "Core/QinglanInteractable.h"
+#include "Core/QinglanGameModeBase.h"
+#include "Core/QinglanTrialAdmission.h"
+#include "Core/QinglanTrialDirector.h"
+#include "Persistence/QinglanSaveSubsystem.h"
 #include "Narrative/QinglanStoryDataTypes.h"
 #include "Narrative/QinglanStoryRuntime.h"
 #include "Progression/QinglanProfileSubsystem.h"
@@ -603,10 +610,41 @@ void AQinglanCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCo
 			EnhancedInput->BindActionValueLambda(Action, ETriggerEvent::Started, [this, Slot](const FInputActionValue&) { InputTalismanSlot(Slot); });
 		}
 	}
+	// Native menu bindings work with current cooked input assets. The first
+	// four number keys retain technique bindings; keys 5..8 are menu-only.
+	const TArray<FKey> ExtraNumbers = { EKeys::Five, EKeys::Six, EKeys::Seven, EKeys::Eight };
+	for (int32 Index = 0; Index < ExtraNumbers.Num(); ++Index)
+	{
+		FInputKeyBinding Binding(FInputChord(ExtraNumbers[Index]), IE_Pressed);
+		Binding.KeyDelegate.GetDelegateForManualSet().BindLambda([this, Index]() { ConsumeMenuSelection(Index + 4); });
+		PlayerInputComponent->KeyBindings.Add(MoveTemp(Binding));
+	}
+	const auto BindMenuKey = [this, PlayerInputComponent](FKey Key, TFunction<void()> Handler)
+	{
+		FInputKeyBinding Binding(FInputChord(Key), IE_Pressed);
+		Binding.KeyDelegate.GetDelegateForManualSet().BindLambda([Handler = MoveTemp(Handler)]() { Handler(); });
+		PlayerInputComponent->KeyBindings.Add(MoveTemp(Binding));
+	};
+	BindMenuKey(EKeys::Up, [this]() { MoveMenuSelection(-1); });
+	BindMenuKey(EKeys::Down, [this]() { MoveMenuSelection(1); });
+	BindMenuKey(EKeys::Gamepad_DPad_Up, [this]() { MoveMenuSelection(-1); });
+	BindMenuKey(EKeys::Gamepad_DPad_Down, [this]() { MoveMenuSelection(1); });
+	BindMenuKey(EKeys::Enter, [this]() { ConfirmMenuSelection(); });
+	BindMenuKey(EKeys::BackSpace, [this]() { CancelMenu(); });
+	BindMenuKey(EKeys::Gamepad_Special_Left, [this]() { CancelMenu(); });
+	BindMenuKey(EKeys::SpaceBar, [this]()
+	{
+		if (UQinglanEndingWidget* Widget = EndingWidget.Get(); Widget && Widget->IsInViewport())
+		{
+			Widget->ToggleWarningAcknowledgment();
+		}
+	});
+
 }
 
 void AQinglanCharacter::InputMove(const FInputActionValue& Value)
 {
+	if (EndingWidget.IsValid() && EndingWidget->IsInViewport()) { return; }
 	if (!Controller || bDefeatHandled)
 	{
 		return;
@@ -624,6 +662,7 @@ void AQinglanCharacter::InputMove(const FInputActionValue& Value)
 
 void AQinglanCharacter::InputLook(const FInputActionValue& Value)
 {
+	if (EndingWidget.IsValid() && EndingWidget->IsInViewport()) { return; }
 	if (!Controller)
 	{
 		return;
@@ -642,6 +681,7 @@ void AQinglanCharacter::InputLook(const FInputActionValue& Value)
 
 void AQinglanCharacter::InputSwordAttack(const FInputActionValue& /*Value*/)
 {
+	if (EndingWidget.IsValid() && EndingWidget->IsInViewport()) { return; }
 	if (bDefeatHandled)
 	{
 		return;
@@ -654,6 +694,7 @@ void AQinglanCharacter::InputSwordAttack(const FInputActionValue& /*Value*/)
 
 void AQinglanCharacter::InputDodge(const FInputActionValue& /*Value*/)
 {
+	if (EndingWidget.IsValid() && EndingWidget->IsInViewport()) { return; }
 	TryDodge();
 }
 
@@ -687,6 +728,7 @@ void AQinglanCharacter::InputTechniqueSlot(int32 Slot)
 
 void AQinglanCharacter::InputTalismanSlot(int32 Slot)
 {
+	if (EndingWidget.IsValid() && EndingWidget->IsInViewport()) { return; }
 	// docs/02 §1 slots Q/R; charge accounting and effect execution live in the
 	// talisman component (docs/03 §5).
 	if (bDefeatHandled)
@@ -709,8 +751,27 @@ void AQinglanCharacter::InputInteract(const FInputActionValue& /*Value*/)
 	{
 		return;
 	}
+	if (EndingWidget.IsValid() && EndingWidget->IsInViewport())
+	{
+		ConfirmMenuSelection();
+		return;
+	}
 	UGameInstance* const Instance = GetGameInstance();
 	UQinglanStorySubsystem* const Story = Instance ? Instance->GetSubsystem<UQinglanStorySubsystem>() : nullptr;
+	if (UQinglanRunSubsystem* Run = Instance ? Instance->GetSubsystem<UQinglanRunSubsystem>() : nullptr;
+		Run && Run->NeedsCheckpointResume())
+	{
+		if (AQinglanRealmGameMode* Mode = GetWorld() ? Cast<AQinglanRealmGameMode>(GetWorld()->GetAuthGameMode()) : nullptr)
+		{
+			Mode->RequestCheckpointResume();
+		}
+		else
+		{
+			const FName Map = Run->GetPendingCheckpointMap();
+			if (!Map.IsNone()) { QinglanInteraction::TravelToMap(this, *Map.ToString()); }
+		}
+		return;
+	}
 	if (Story && Story->IsScenePlaying())
 	{
 		UQinglanHUDStatics::AdvanceDialogueLine(this);
@@ -733,7 +794,7 @@ void AQinglanCharacter::InputInteract(const FInputActionValue& /*Value*/)
 		const TArray<FName> EpilogueChapters = { FName(TEXT("CH07")) };
 		if (QinglanInteraction::FindObjectiveProofInChapters(Story, EpilogueChapters, ProofScene, ProofObjective))
 		{
-			Story->NotifyObjectiveCompleted(ProofObjective);
+			Story->NotifySceneObjectiveCompleted(ProofScene, ProofObjective);
 			return;
 		}
 	}
@@ -752,6 +813,11 @@ void AQinglanCharacter::InputInteract(const FInputActionValue& /*Value*/)
 
 void AQinglanCharacter::InputPause(const FInputActionValue& /*Value*/)
 {
+	if (EndingWidget.IsValid() && EndingWidget->IsInViewport())
+	{
+		CancelMenu();
+		return;
+	}
 	UWorld* const World = GetWorld();
 	if (!World)
 	{
@@ -1105,8 +1171,137 @@ UUserWidget* AQinglanCharacter::EnsureDialogueWidget()
 	if (Widget)
 	{
 		DialogueWidget = Widget;
+		if (UQinglanDialogueWidget* Dialogue = Cast<UQinglanDialogueWidget>(Widget))
+		{
+			Dialogue->OnChoiceSelected.AddDynamic(this, &AQinglanCharacter::HandleDialogueChoiceSelected);
+		}
 	}
 	return Widget;
+}
+
+UQinglanEndingWidget* AQinglanCharacter::EnsureEndingWidget()
+{
+	if (UQinglanEndingWidget* Widget = EndingWidget.Get()) { return Widget; }
+	APlayerController* PC = Cast<APlayerController>(Controller);
+	UQinglanEndingWidget* Widget = PC ? CreateWidget<UQinglanEndingWidget>(PC, UQinglanEndingWidget::StaticClass()) : nullptr;
+	if (Widget)
+	{
+		EndingWidget = Widget;
+		Widget->OnEndingClosed.AddDynamic(this, &AQinglanCharacter::HandleEndingClosed);
+		Widget->OnEndingCommitted.AddDynamic(this, &AQinglanCharacter::HandleEndingCommitted);
+	}
+	return Widget;
+}
+
+void AQinglanCharacter::UpdateMenuInputMode()
+{
+	APlayerController* PC = Cast<APlayerController>(Controller);
+	if (!PC) { return; }
+	UUserWidget* Focus = nullptr;
+	if (UQinglanEndingWidget* Ending = EndingWidget.Get(); Ending && Ending->IsInViewport()) { Focus = Ending; }
+	else if (!PendingSceneChoices.IsEmpty()) { Focus = DialogueWidget.Get(); }
+	PC->bShowMouseCursor = Focus != nullptr;
+	if (Focus)
+	{
+		FInputModeGameAndUI Mode;
+		Mode.SetWidgetToFocus(Focus->TakeWidget());
+		Mode.SetHideCursorDuringCapture(false);
+		PC->SetInputMode(Mode);
+		if (UQinglanEndingWidget* Ending = EndingWidget.Get(); Ending && Ending->IsInViewport())
+		{
+			Ending->FocusDefaultControl();
+		}
+		else if (UQinglanDialogueWidget* Dialogue = Cast<UQinglanDialogueWidget>(Focus))
+		{
+			Dialogue->SetSelectedChoiceIndex(MenuSelectionIndex);
+		}
+	}
+	else { PC->SetInputMode(FInputModeGameOnly()); }
+}
+
+void AQinglanCharacter::HandleDialogueChoiceSelected(FName ChoiceId)
+{
+	const int32 Index = PendingSceneChoices.IndexOfByPredicate([ChoiceId](const FQinglanSceneChoice& Choice) { return Choice.ChoiceId == ChoiceId; });
+	if (Index != INDEX_NONE) { ConsumeMenuSelection(Index); }
+}
+
+void AQinglanCharacter::MoveMenuSelection(int32 Direction)
+{
+	if (PendingSceneChoices.IsEmpty()) { return; }
+	MenuSelectionIndex = (MenuSelectionIndex + Direction + PendingSceneChoices.Num()) % PendingSceneChoices.Num();
+	if (UQinglanDialogueWidget* Dialogue = Cast<UQinglanDialogueWidget>(DialogueWidget.Get()))
+	{
+		Dialogue->SetSelectedChoiceIndex(MenuSelectionIndex);
+	}
+}
+
+void AQinglanCharacter::ConfirmMenuSelection()
+{
+	if (UQinglanEndingWidget* Ending = EndingWidget.Get(); Ending && Ending->IsInViewport())
+	{
+		Ending->ConfirmCurrentEnding();
+		return;
+	}
+	if (!PendingSceneChoices.IsEmpty()) { ConsumeMenuSelection(MenuSelectionIndex); }
+}
+
+void AQinglanCharacter::CancelMenu()
+{
+	if (UQinglanEndingWidget* Ending = EndingWidget.Get(); Ending && Ending->IsInViewport())
+	{
+		Ending->CancelPreview();
+		return;
+	}
+	if (UGameplayStatics::GetCurrentLevelName(this, true).Contains(TEXT("TribulationArena")))
+	{
+		HandleStayAtHub(NAME_None, NAME_None);
+		return;
+	}
+	PendingShopChoices.Reset();
+	// A mandatory blessing/scene choice stays pending; dismissal cannot erase it.
+	if (PendingSceneChoices.IsEmpty() && PendingBlessingChoices.IsEmpty())
+	{
+		if (UUserWidget* Dialogue = DialogueWidget.Get()) { Dialogue->RemoveFromParent(); }
+	}
+	UpdateMenuInputMode();
+}
+
+void AQinglanCharacter::HandleEndingPreviewed(FName EndingId, FName SceneId)
+{
+	if (UQinglanEndingWidget* Ending = EnsureEndingWidget())
+	{
+		if (!Ending->IsInViewport()) { Ending->AddToViewport(100); }
+		UpdateMenuInputMode();
+		Ending->ShowEnding(EndingId, false);
+	}
+}
+
+void AQinglanCharacter::HandleConfirmEndingRequested(FName EndingId, FName SceneId)
+{
+	if (UQinglanEndingWidget* Ending = EnsureEndingWidget())
+	{
+		if (!Ending->IsInViewport()) { Ending->AddToViewport(100); }
+		UpdateMenuInputMode();
+		Ending->ShowEnding(EndingId, true);
+	}
+}
+
+void AQinglanCharacter::HandleCancelConfirmation(FName SceneId)
+{
+	if (UQinglanEndingWidget* Ending = EndingWidget.Get()) { Ending->RemoveFromParent(); }
+	UpdateMenuInputMode();
+}
+
+void AQinglanCharacter::HandleEndingClosed()
+{
+	UpdateMenuInputMode();
+}
+
+void AQinglanCharacter::HandleEndingCommitted(FName EndingId)
+{
+	PendingSceneChoices.Reset();
+	UpdateMenuInputMode();
+	QinglanInteraction::TravelToMap(this, QinglanInteraction::HubMapPath);
 }
 
 void AQinglanCharacter::HandleSceneLine(const FQinglanScriptLine& Line)
@@ -1123,6 +1318,7 @@ void AQinglanCharacter::HandleSceneLine(const FQinglanScriptLine& Line)
 		}
 		if (UQinglanDialogueWidget* Dialogue = Cast<UQinglanDialogueWidget>(Widget))
 		{
+			Dialogue->SetSourceKind(Line.SourceKind);
 			if (Dialogue->SetCurrentLine(Line.SpeakerName, Line.Text))
 			{
 				return; // rendered into Txt_Speaker/Txt_Line
@@ -1137,6 +1333,9 @@ void AQinglanCharacter::HandleSceneLine(const FQinglanScriptLine& Line)
 void AQinglanCharacter::HandleChoicesPresented(const TArray<FQinglanSceneChoice>& Choices)
 {
 	PendingSceneChoices = Choices;
+	MenuSelectionIndex = 0;
+	if (UUserWidget* Widget = EnsureDialogueWidget(); Widget && !Widget->IsInViewport()) { Widget->AddToViewport(); }
+	UpdateMenuInputMode();
 	// Widget path first (stored entries + Box_Choices rebuild); the keyed
 	// on-screen list is the unauthored-frontend fallback only.
 	if (UUserWidget* Widget = DialogueWidget.Get())
@@ -1144,6 +1343,8 @@ void AQinglanCharacter::HandleChoicesPresented(const TArray<FQinglanSceneChoice>
 		if (UQinglanDialogueWidget* Dialogue = Cast<UQinglanDialogueWidget>(Widget);
 			Dialogue && Widget->IsInViewport() && Dialogue->SetChoiceEntries(Choices))
 		{
+			Dialogue->SetSelectedChoiceIndex(MenuSelectionIndex);
+			UpdateMenuInputMode(); // Keep an ending modal above re-presented choices.
 			return;
 		}
 	}
@@ -1170,6 +1371,18 @@ void AQinglanCharacter::HandleSceneCompleted(FName SceneId)
 		{
 			Dialogue->SetChoiceEntries(TArray<FQinglanSceneChoice>());
 		}
+	}
+	UpdateMenuInputMode();
+	if (SceneId.ToString().StartsWith(TEXT("CH07")) && GetWorld()
+		&& Cast<AQinglanHubGameMode>(GetWorld()->GetAuthGameMode()))
+	{
+		GetWorld()->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this]()
+		{
+			if (UQinglanStorySubsystem* Story = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQinglanStorySubsystem>() : nullptr)
+			{
+				QinglanInteraction::BeginFirstSceneOfChapters(Story, { FName(TEXT("CH07")) });
+			}
+		}));
 	}
 	UE_LOG(LogQinglanCombat, Verbose, TEXT("Scene %s completed; dialogue presenter closed"), *SceneId.ToString());
 }
@@ -1216,12 +1429,15 @@ void AQinglanCharacter::HandleRoomCompleted(int32 RoomIndex, int64 ShardsAwarded
 	{
 		return;
 	}
-	const TArray<FName> Chapters = QinglanInteraction::ChaptersForRealm(Realm->RealmId);
-	FName ProofScene = NAME_None;
-	FName ProofObjective = NAME_None;
-	if (QinglanInteraction::FindObjectiveProofInChapters(Story, Chapters, ProofScene, ProofObjective))
+	// Dispatch the exact defeated encounter; never scan for the first eligible
+	// chapter scene (late chapters deliberately reuse local objective IDs).
+	if (Realm->RealmId == FName(UQinglanEconomyLibrary::BambooRealmIdText))
 	{
-		Story->NotifyObjectiveCompleted(ProofObjective);
+		Story->NotifySceneObjectiveCompleted(FName(TEXT("CH02_S02")), FName(TEXT("CH02_S02_OBJECTIVE")));
+	}
+	else if (Realm->RealmId == FName(UQinglanEconomyLibrary::AshenRealmIdText))
+	{
+		Story->NotifySceneObjectiveCompleted(FName(TEXT("CH05_S01")), FName(TEXT("s01.objective")));
 	}
 }
 
@@ -1246,29 +1462,57 @@ void AQinglanCharacter::HandleRecordOpened(FName RecordId, const FText& Title, c
 
 void AQinglanCharacter::HandleEnterTrialRequested(FName IdempotencyKey, FName SceneId)
 {
-	// CH06_S01 payload gates on foundation_rank_3_and_ashen_first_clear; the
-	// imported choice carries only the action name, so the proof check lives
-	// here with the same flags the Golden Core breakthrough gate reads.
-	UGameInstance* const Instance = GetGameInstance();
-	UQinglanProfileSubsystem* const Profile = Instance ? Instance->GetSubsystem<UQinglanProfileSubsystem>() : nullptr;
-	UQinglanStorySubsystem* const Story = Instance ? Instance->GetSubsystem<UQinglanStorySubsystem>() : nullptr;
-	const bool bAshenCleared = (Profile && Profile->HasCampaignFlag(FName(QinglanProgression::AshenClearedCampaignFlag)))
-		|| (Story && Story->HasFlag(FName(QinglanProgression::AshenClearedStoryFlag)));
-	if (!bAshenCleared)
+	// Choice actions dispatch before their scene transaction finishes. Defer
+	// entry until that transaction has committed its preparation/story flags.
+	if (UWorld* World = GetWorld())
 	{
-		UE_LOG(LogQinglanCombat, Log, TEXT("Enter trial declined: ashen guardian proof missing"));
-		ShowGameMessage(UQinglanHUDStatics::GameText(FName(TEXT("cultivation.blocked.boss_required"))));
-		return;
+		World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this, SceneId]()
+		{
+			UGameInstance* Instance = GetGameInstance();
+			UQinglanProfileSubsystem* Profile = Instance ? Instance->GetSubsystem<UQinglanProfileSubsystem>() : nullptr;
+			UQinglanStorySubsystem* Story = Instance ? Instance->GetSubsystem<UQinglanStorySubsystem>() : nullptr;
+			const QinglanTrialAdmission::ETrial Trial = SceneId.ToString().StartsWith(TEXT("CH03"))
+				? QinglanTrialAdmission::ETrial::Foundation : QinglanTrialAdmission::ETrial::GoldenCore;
+			const QinglanTrialAdmission::FResult Admission = QinglanTrialAdmission::EvaluateForTrial(Trial, Profile, Story);
+			if (!Admission.IsAllowed())
+			{
+				ShowGameMessage(UQinglanHUDStatics::GameText(Admission.ReasonKey));
+				return;
+			}
+			const FString Map = UGameplayStatics::GetCurrentLevelName(this, true);
+			if (!Map.Contains(TEXT("TribulationArena")))
+			{
+				QinglanInteraction::TravelToMap(this, QinglanInteraction::ArenaMapPath);
+			}
+		}));
 	}
-	// The choice fires from the arena's own preparation scene; only travel
-	// when the player still stands elsewhere (a reload would restart the map).
-	const FString MapName = GetWorld() ? GetWorld()->GetMapName() : FString();
-	if (MapName.Contains(TEXT("Tribulation")) || MapName.Contains(TEXT("Arena")))
+}
+
+void AQinglanCharacter::HandleStayAtHub(FName IdempotencyKey, FName SceneId)
+{
+	// Canceling preparation never completes a trial or grants a breakthrough.
+	if (UWorld* World = GetWorld())
 	{
-		UE_LOG(LogQinglanCombat, Verbose, TEXT("Enter trial: already at the arena; no travel"));
-		return;
+		for (TActorIterator<AQinglanTrialDirector> It(World); It; ++It)
+		{
+			It->CancelTrialAndReturnToHub();
+			return;
+		}
+		if (UGameplayStatics::GetCurrentLevelName(this, true).Contains(TEXT("TribulationArena")))
+		{
+			QinglanInteraction::TravelToMap(this, QinglanInteraction::HubMapPath);
+		}
 	}
-	QinglanInteraction::TravelToMap(this, QinglanInteraction::ArenaMapPath);
+}
+
+void AQinglanCharacter::HandleSaveFailed(FName ProfileId, FText Reason)
+{
+	ShowGameMessage(Reason);
+}
+
+void AQinglanCharacter::HandleBankingFailed()
+{
+	ShowGameMessage(UQinglanHUDStatics::GameText(FName(TEXT("run.banking_failed"))));
 }
 
 void AQinglanCharacter::HandleReturnToHub(FName IdempotencyKey, FName SceneId)
@@ -1322,6 +1566,19 @@ void AQinglanCharacter::HandleHealthChanged(float Current, float Maximum)
 void AQinglanCharacter::HandleDefeatTravel()
 {
 	// Timer callback: OpenLevel runs off the input/damage call stack.
+	if (UQinglanRunSubsystem* Run = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQinglanRunSubsystem>() : nullptr)
+	{
+		if (Run->IsInExpedition())
+		{
+			Run->EndExpedition(/*bVictory=*/false, /*bVoluntaryRetreat=*/false);
+			if (Run->IsInExpedition())
+			{
+				// TODO(AUD-07/51): expose retry/recovery from the defeat screen.
+				// Never travel with a failed settlement's loot still unbanked.
+				return;
+			}
+		}
+	}
 	QinglanInteraction::TravelToMap(this, QinglanInteraction::HubMapPath);
 }
 
@@ -1346,12 +1603,21 @@ void AQinglanCharacter::BindStoryDelegates()
 	FQinglanStoryDelegates& Delegates = QinglanStoryRuntime::Delegates(Story);
 	Delegates.OnRecordOpened.AddDynamic(this, &AQinglanCharacter::HandleRecordOpened);
 	Delegates.OnEnterTrial.AddDynamic(this, &AQinglanCharacter::HandleEnterTrialRequested);
+	Delegates.OnStayAtHub.AddDynamic(this, &AQinglanCharacter::HandleStayAtHub);
+	Delegates.OnEndingPreviewed.AddDynamic(this, &AQinglanCharacter::HandleEndingPreviewed);
+	Delegates.OnConfirmEndingRequested.AddDynamic(this, &AQinglanCharacter::HandleConfirmEndingRequested);
+	Delegates.OnCancelConfirmation.AddDynamic(this, &AQinglanCharacter::HandleCancelConfirmation);
 	Delegates.OnReturnToHub.AddDynamic(this, &AQinglanCharacter::HandleReturnToHub);
 	Delegates.OnCompleteCampaign.AddDynamic(this, &AQinglanCharacter::HandleCampaignComplete);
 	// Boss-room clears prove the realm's choice-free chapter scenes.
 	if (UQinglanRunSubsystem* const Run = Instance->GetSubsystem<UQinglanRunSubsystem>())
 	{
 		Run->OnRoomCompleted.AddDynamic(this, &AQinglanCharacter::HandleRoomCompleted);
+		Run->OnBankingFailed.AddDynamic(this, &AQinglanCharacter::HandleBankingFailed);
+	}
+	if (UQinglanSaveSubsystem* Save = Instance->GetSubsystem<UQinglanSaveSubsystem>())
+	{
+		Save->OnSaveFailed.AddDynamic(this, &AQinglanCharacter::HandleSaveFailed);
 	}
 	bStoryDelegatesBound = true;
 }
@@ -1373,12 +1639,21 @@ void AQinglanCharacter::UnbindStoryDelegates()
 			FQinglanStoryDelegates& Delegates = QinglanStoryRuntime::Delegates(Story);
 			Delegates.OnRecordOpened.RemoveDynamic(this, &AQinglanCharacter::HandleRecordOpened);
 			Delegates.OnEnterTrial.RemoveDynamic(this, &AQinglanCharacter::HandleEnterTrialRequested);
+			Delegates.OnStayAtHub.RemoveDynamic(this, &AQinglanCharacter::HandleStayAtHub);
+			Delegates.OnEndingPreviewed.RemoveDynamic(this, &AQinglanCharacter::HandleEndingPreviewed);
+			Delegates.OnConfirmEndingRequested.RemoveDynamic(this, &AQinglanCharacter::HandleConfirmEndingRequested);
+			Delegates.OnCancelConfirmation.RemoveDynamic(this, &AQinglanCharacter::HandleCancelConfirmation);
 			Delegates.OnReturnToHub.RemoveDynamic(this, &AQinglanCharacter::HandleReturnToHub);
 			Delegates.OnCompleteCampaign.RemoveDynamic(this, &AQinglanCharacter::HandleCampaignComplete);
+		}
+		if (UQinglanSaveSubsystem* Save = Instance->GetSubsystem<UQinglanSaveSubsystem>())
+		{
+			Save->OnSaveFailed.RemoveDynamic(this, &AQinglanCharacter::HandleSaveFailed);
 		}
 		if (UQinglanRunSubsystem* const Run = Instance->GetSubsystem<UQinglanRunSubsystem>())
 		{
 			Run->OnRoomCompleted.RemoveDynamic(this, &AQinglanCharacter::HandleRoomCompleted);
+			Run->OnBankingFailed.RemoveDynamic(this, &AQinglanCharacter::HandleBankingFailed);
 		}
 	}
 	bStoryDelegatesBound = false;
@@ -1434,6 +1709,7 @@ void AQinglanCharacter::ShowGameMessage(const FText& Message)
 
 bool AQinglanCharacter::ConsumeMenuSelection(int32 Slot)
 {
+	if (EndingWidget.IsValid() && EndingWidget->IsInViewport()) { return true; }
 	if (Slot < 0)
 	{
 		return false;
@@ -1445,15 +1721,20 @@ bool AQinglanCharacter::ConsumeMenuSelection(int32 Slot)
 		{
 			return true; // swallow invalid keys while choices freeze the scene
 		}
+		const TArray<FQinglanSceneChoice> PreviousChoices = PendingSceneChoices;
 		const FName ChoiceId = PendingSceneChoices[Slot].ChoiceId;
-		if (UQinglanHUDStatics::SelectDialogueChoice(this, ChoiceId))
+		PendingSceneChoices.Reset();
+		if (UQinglanDialogueWidget* Dialogue = Cast<UQinglanDialogueWidget>(DialogueWidget.Get()))
 		{
-			PendingSceneChoices.Reset();
-			if (UQinglanDialogueWidget* Dialogue = Cast<UQinglanDialogueWidget>(DialogueWidget.Get()))
-			{
-				Dialogue->SetChoiceEntries(TArray<FQinglanSceneChoice>());
-			}
+			Dialogue->SetChoiceEntries({});
 		}
+		UpdateMenuInputMode();
+		if (!UQinglanHUDStatics::SelectDialogueChoice(this, ChoiceId))
+		{
+			HandleChoicesPresented(PreviousChoices);
+		}
+		// Successful selection may synchronously present another group/menu.
+		// Do not clear that new list after returning from the story subsystem.
 		return true;
 	}
 	if (PendingBlessingChoices.Num() > 0)

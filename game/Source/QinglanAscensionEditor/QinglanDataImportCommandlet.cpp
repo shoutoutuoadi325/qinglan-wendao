@@ -36,6 +36,7 @@
 #include "Abilities/QinglanTechniqueTypes.h"
 #include "Core/QinglanCoreTypes.h"
 #include "Narrative/QinglanStoryDataTypes.h"
+#include "Narrative/QinglanStoryIdentity.h"
 #include "Progression/QinglanProgressionTables.h"
 
 namespace
@@ -770,6 +771,36 @@ namespace
 		}
 	}
 
+	/** AUD-09: identities are unique within an explicit scene/stage owner.
+	 * Cross-scene reuse of a local ID is valid; runtime callers must supply ownership.
+	 */
+	void ValidateSceneMemberIds(const TSharedRef<FJsonObject>& Scene, const FString& Context, TArray<FString>& Errors)
+	{
+		if (!QinglanStoryIdentity::IsValidComponent(JName(Scene, TEXT("id"))))
+		{
+			AddError(Errors, Context, TEXT("scene/stage id is empty or contains reserved separator '::'"));
+		}
+		for (const TCHAR* Field : { TEXT("objectives"), TEXT("choices") })
+		{
+			TSet<FName> Seen;
+			for (const TSharedPtr<FJsonValue>& Value : JArr(Scene, Field))
+			{
+				const TSharedPtr<FJsonObject> Member = Value.IsValid() ? Value->AsObject() : nullptr;
+				if (!Member.IsValid())
+				{
+					AddError(Errors, Context, FString::Printf(TEXT("%s member must be an object"), Field));
+					continue;
+				}
+				const FName Id = JName(Member.ToSharedRef(), TEXT("id"));
+				if (!QinglanStoryIdentity::IsValidComponent(Id) || Seen.Contains(Id))
+				{
+					AddError(Errors, Context, FString::Printf(TEXT("invalid or duplicate %s id '%s' within owner"), Field, *Id.ToString()));
+				}
+				Seen.Add(Id);
+			}
+		}
+	}
+
 	void ValidateStoryFiles(const TMap<FString, TSharedRef<FJsonObject>>& StoryFiles, const FQinglanLocaleData& Locales,
 		TArray<FString>& Errors, int32& OutMainSceneCount, int32& OutSideStageCount, int32& OutRecordCount, int32& OutBarkCount)
 	{
@@ -837,6 +868,7 @@ namespace
 				if (!Scene.IsValid()) { continue; }
 				const TSharedRef<FJsonObject> SceneRef = Scene.ToSharedRef();
 				const FName SceneId = JName(SceneRef, TEXT("id"));
+				ValidateSceneMemberIds(SceneRef, FPaths::GetCleanFilename(FilePair.Key) + TEXT("/scene ") + SceneId.ToString(), Errors);
 				if (SceneId.IsNone()) { continue; }
 				if (SceneIds.Contains(SceneId)) // UE 5.8: TSet::Add returns FSetElementId, not bool
 				{
@@ -875,6 +907,7 @@ namespace
 					const TSharedPtr<FJsonObject> Stage = StageValue->AsObject();
 					if (!Stage.IsValid()) { continue; }
 					const FName StageId = JName(Stage.ToSharedRef(), TEXT("id"));
+					ValidateSceneMemberIds(Stage.ToSharedRef(), FPaths::GetCleanFilename(FilePair.Key) + TEXT("/stage ") + StageId.ToString(), Errors);
 					if (StageId.IsNone()) { continue; }
 					if (StageIds.Contains(StageId)) // UE 5.8: TSet::Add returns FSetElementId, not bool
 					{
@@ -889,6 +922,13 @@ namespace
 			}
 			OutRecordCount += JArr(Root, TEXT("records")).Num();
 			OutBarkCount += JArr(Root, TEXT("barks")).Num();
+		}
+		for (const FName StageId : StageIds)
+		{
+			if (SceneIds.Contains(StageId))
+			{
+				AddError(Errors, TEXT("story identities"), FString::Printf(TEXT("main scene and side stage share owner id '%s'"), *StageId.ToString()));
+			}
 		}
 
 		// --- Chapters reference existing scenes and agree with scene.chapter ----

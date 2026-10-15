@@ -3,6 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/GameModeBase.h"
+#include "TimerManager.h"
 #include "QinglanGameModeBase.generated.h"
 
 /**
@@ -26,5 +27,13 @@ public:
 	AQinglanRealmGameMode();
 	virtual void BeginPlay() override;
 	/** Respawns at room entrance with pre-room snapshot on crash-resume. */
-	void RestartRoomFromSnapshot();
+	bool RestartRoomFromSnapshot();
+	/** Retries a loaded checkpoint after possession and room authoring are ready. */
+	void RequestCheckpointResume();
+	virtual AActor* ChoosePlayerStart_Implementation(AController* Player) override;
+
+private:
+	void TryResumeCheckpoint();
+	FTimerHandle ResumeRetryTimer;
+	int32 ResumeRetryCount = 0;
 };

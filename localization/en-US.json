@@ -99,5 +99,19 @@
   "relic.mountain_token.desc": "+20 max health while carried; the stone's weight slows your blade by 8% sword damage.",
   "relic.verdant_seed.name": "Verdant Seed",
   "relic.verdant_seed.desc": "Healing you receive is 15% stronger; the seedling draws on your qi — techniques cost 5% more energy.",
-  "preset.ultra": "Ultra"
+  "preset.ultra": "Ultra",
+  "trial.blocked.profile_unavailable": "Load a profile before entering a trial.",
+  "trial.blocked.wrong_stage": "This trial is unavailable at your current cultivation stage.",
+  "trial.blocked.story_required": "Complete the required story preparation first.",
+  "trial.blocked.completed": "This trial has already been completed.",
+  "trial.unavailable": "The trial could not start. Your progress is unchanged; try again.",
+  "trial.in_progress": "A trial is already in progress.",
+  "trial.return_hub": "Return to the sanctuary.",
+  "save.resume_pending": "Your expedition checkpoint is ready. Interact to retry resuming.",
+  "save.resume_failed": "The checkpoint could not resume. Interact to retry.",
+  "run.banking_failed": "Rewards could not be banked. Your expedition loot is retained; retry at the exit.",
+  "ending.warning_acknowledgment": "I have read the warning and understand this ending is permanent for this profile.",
+  "ending.unavailable": "This ending is not available. Complete its requirements first.",
+  "ending.preview_required": "Preview this ending before confirming it.",
+  "action.continue": "Continue"
 }

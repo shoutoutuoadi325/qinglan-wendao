@@ -22,11 +22,17 @@
 #include "Combat/QinglanCombatComponent.h"
 #include "Components/SceneComponent.h"
 #include "Core/QinglanAudioSubsystem.h"
+#include "Core/QinglanInteractable.h"
+#include "Core/QinglanTrialAdmission.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
 #include "Narrative/QinglanStorySubsystem.h"
+#include "Progression/QinglanProfileSubsystem.h"
+#include "Progression/QinglanProgressionTables.h"
+#include "Progression/QinglanRunSubsystem.h"
+#include "UI/QinglanHUDStatics.h"
 #include "QinglanAscension.h"
 
 namespace
@@ -87,6 +93,30 @@ bool AQinglanTrialDirector::BeginTrial(FName SceneId, FName ObjectiveId, float D
 		UE_LOG(LogQinglan, Warning, TEXT("BeginTrial refused: trial %s still runs"), *TrialSceneId.ToString());
 		return false;
 	}
+	UGameInstance* Instance = GetGameInstance();
+	UQinglanProfileSubsystem* Profile = Instance ? Instance->GetSubsystem<UQinglanProfileSubsystem>() : nullptr;
+	UQinglanStorySubsystem* Story = Instance ? Instance->GetSubsystem<UQinglanStorySubsystem>() : nullptr;
+	const QinglanTrialAdmission::FResult Admission = QinglanTrialAdmission::EvaluateScene(SceneId, ObjectiveId, Profile, Story);
+	if (!Admission.IsAllowed())
+	{
+		if (AQinglanCharacter* Player = GetTrialPlayer(this))
+		{
+			Player->ShowGameMessage(UQinglanHUDStatics::GameText(Admission.ReasonKey));
+		}
+		return false;
+	}
+	QinglanTrialAdmission::ETrial Trial;
+	QinglanTrialAdmission::ResolveScene(SceneId, Trial); // EvaluateScene validated the scene.
+	const float RequiredDuration = Trial == QinglanTrialAdmission::ETrial::Foundation ? 90.f : 150.f;
+	const int32 RequiredTier = Trial == QinglanTrialAdmission::ETrial::Foundation ? 1 : 2;
+	const UQinglanRunSubsystem* Run = Instance ? Instance->GetSubsystem<UQinglanRunSubsystem>() : nullptr;
+	AQinglanCharacter* Player = GetTrialPlayer(this);
+	if (!FMath::IsNearlyEqual(DurationSeconds, RequiredDuration) || Tier != RequiredTier
+		|| (Run && Run->IsInExpedition()) || !Player || !Player->GetCombat() || !Player->GetCombat()->IsAlive())
+	{
+		UE_LOG(LogQinglan, Warning, TEXT("Trial refused: invalid clock/tier, expedition active, or player unavailable"));
+		return false;
+	}
 	if (DurationSeconds <= 0.f || !GetWorld() || !EnsureWaveEngine())
 	{
 		return false;
@@ -113,11 +143,27 @@ bool AQinglanTrialDirector::BeginTrial(FName SceneId, FName ObjectiveId, float D
 	return true;
 }
 
+bool AQinglanTrialDirector::CancelTrialAndReturnToHub()
+{
+	EndTrial(/*bSuccess=*/false);
+	return QinglanInteraction::TravelToMap(this, QinglanInteraction::HubMapPath);
+}
+
 void AQinglanTrialDirector::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 	if (!bActive)
 	{
+		return;
+	}
+	if (!IsValid(WaveEngine.Get()) || CatalogAssets.IsEmpty())
+	{
+		// A lost combat driver cannot leave an unattended clock that awards proof.
+		EndTrial(/*bSuccess=*/false);
+		if (AQinglanCharacter* Player = GetTrialPlayer(this))
+		{
+			Player->ShowGameMessage(UQinglanHUDStatics::GameText(FName(TEXT("trial.unavailable"))));
+		}
 		return;
 	}
 
@@ -259,6 +305,7 @@ void AQinglanTrialDirector::EndTrial(bool bSuccess)
 	}
 	bActive = false;
 	bWaveOutstanding = false;
+	RemainingSeconds = 0.f;
 
 	// Sweep every engine-owned enemy (living, portal-pending, pooled alike)
 	// and reset the engine with an empty wave: its restart path releases the
@@ -281,17 +328,45 @@ void AQinglanTrialDirector::EndTrial(bool bSuccess)
 		return;
 	}
 
-	UE_LOG(LogQinglan, Log, TEXT("Trial %s survived; committing objective %s"),
+	UE_LOG(LogQinglan, Log, TEXT("Trial %s survived; committing scoped objective %s"),
 		*TrialSceneId.ToString(), *TrialObjectiveId.ToString());
 	if (UGameInstance* Instance = GetGameInstance())
 	{
-		if (UQinglanStorySubsystem* Story = Instance->GetSubsystem<UQinglanStorySubsystem>())
+		UQinglanStorySubsystem* Story = Instance->GetSubsystem<UQinglanStorySubsystem>();
+		UQinglanProfileSubsystem* Profile = Instance->GetSubsystem<UQinglanProfileSubsystem>();
+		// Recheck after combat. A lost registry or changed prerequisite cannot
+		// turn a stale attempt into a reward for a different story objective.
+		const QinglanTrialAdmission::FResult Admission = QinglanTrialAdmission::EvaluateScene(
+			TrialSceneId, TrialObjectiveId, Profile, Story);
+		if (!Admission.IsAllowed() || !Story->NotifySceneObjectiveCompleted(TrialSceneId, TrialObjectiveId)
+			|| !Story->IsSceneCompleted(TrialSceneId))
 		{
-			Story->NotifyObjectiveCompleted(TrialObjectiveId);
+			UE_LOG(LogQinglan, Warning, TEXT("Trial completion rejected; proof remains pending"));
+			if (AQinglanCharacter* Player = GetTrialPlayer(this))
+			{
+				Player->ShowGameMessage(UQinglanHUDStatics::GameText(FName(TEXT("trial.unavailable"))));
+			}
+			return;
+		}
+		const bool bFoundation = TrialSceneId == FName(TEXT("CH03_S02"));
+		Profile->SetCampaignFlag(FName(bFoundation ? QinglanProgression::FoundationTrialPassedCampaignFlag
+			: QinglanProgression::GoldenCoreTrialWonCampaignFlag));
+		// The profile owns permanent attribute/unlock changes and transaction idempotency.
+		if (!Profile->TryBreakthrough(FName(bFoundation ? TEXT("tx.trial.foundation.breakthrough")
+			: TEXT("tx.trial.golden_core.breakthrough"))))
+		{
+			// Proof is retained for the cultivation station to retry; never erase a won trial.
+			UE_LOG(LogQinglan, Warning, TEXT("Trial proof committed but breakthrough rejected; cultivation retry required"));
 		}
 		if (UQinglanAudioSubsystem* Audio = Instance->GetSubsystem<UQinglanAudioSubsystem>())
 		{
 			Audio->SetMusicState(EQinglanMusicState::Explore); // completion beat
+		}
+		if (bFoundation)
+		{
+			// TravelToMap saves first. A failed save keeps the player in the cleared
+			// arena, where the ordinary retreat action can retry the same return.
+			QinglanInteraction::TravelToMap(this, QinglanInteraction::HubMapPath);
 		}
 	}
 }

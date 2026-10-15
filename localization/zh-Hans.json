@@ -99,5 +99,19 @@
   "relic.mountain_token.desc": "携带时生命上限+20；令牌沉重，剑伤降低8%。",
   "relic.verdant_seed.name": "青木籽",
   "relic.verdant_seed.desc": "受到的治疗效果提高15%；幼苗汲取真元——术法能耗增加5%。",
-  "preset.ultra": "极致"
+  "preset.ultra": "极致",
+  "trial.blocked.profile_unavailable": "请先加载存档，再进入试炼。",
+  "trial.blocked.wrong_stage": "当前修为阶段无法参加此项试炼。",
+  "trial.blocked.story_required": "请先完成试炼所需的剧情准备。",
+  "trial.blocked.completed": "此项试炼已经完成。",
+  "trial.unavailable": "试炼未能启动，进度未发生变化。请重试。",
+  "trial.in_progress": "试炼正在进行中。",
+  "trial.return_hub": "返回清岚别院。",
+  "save.resume_pending": "远征检查点已就绪。按交互键重试恢复。",
+  "save.resume_failed": "检查点未能恢复。请按交互键重试。",
+  "run.banking_failed": "奖励未能结算，远征战利品已保留。请在出口重试。",
+  "ending.warning_acknowledgment": "我已阅读警告，并理解此结局在本存档中不可更改。",
+  "ending.unavailable": "尚不能选择此结局，请先满足其条件。",
+  "ending.preview_required": "请先预览此结局，再进行确认。",
+  "action.continue": "继续"
 }

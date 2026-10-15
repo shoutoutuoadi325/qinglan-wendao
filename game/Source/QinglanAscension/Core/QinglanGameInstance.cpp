@@ -157,6 +157,15 @@ namespace
 			UE_LOG(LogQinglan, Warning, TEXT("StartFirstMap: no world to travel from yet"));
 			return;
 		}
+		if (UQinglanSaveSubsystem* Save = Instance->GetSubsystem<UQinglanSaveSubsystem>())
+		{
+			FText Error;
+			if (!Save->SaveActiveSession(Error))
+			{
+				UE_LOG(LogQinglan, Warning, TEXT("First-map travel blocked by save failure: %s"), *Error.ToString());
+				return;
+			}
+		}
 		UGameplayStatics::OpenLevel(World, FName(MapPath), true, Options);
 	}
 }

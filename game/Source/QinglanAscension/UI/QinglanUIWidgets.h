@@ -4,11 +4,34 @@
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
 #include "Core/QinglanCoreTypes.h"
+#include "Narrative/QinglanStorySubsystem.h"
 #include "QinglanUIWidgets.generated.h"
 
 class UProgressBar;
 class UTextBlock;
 class UVerticalBox;
+class UButton;
+class UCheckBox;
+class UBorder;
+class UScrollBox;
+class UQinglanDialogueWidget;
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FQinglanEndingClosed);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FQinglanEndingCommitted, FName, EndingId);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FQinglanDialogueChoiceSelected, FName, ChoiceId);
+
+/** Dynamic UButton delegates have no payload; this per-button owner supplies its stable choice id. */
+UCLASS()
+class UQinglanDialogueChoiceClickRelay : public UObject
+{
+	GENERATED_BODY()
+public:
+	void Initialize(UQinglanDialogueWidget* InOwner, FName InChoiceId);
+	UFUNCTION() void HandleClicked();
+private:
+	UPROPERTY(Transient) TWeakObjectPtr<UQinglanDialogueWidget> OwnerWidget;
+	FName ChoiceId = NAME_None;
+};
 
 /** Dialogue subtitle + choices presenter; drives via StorySubsystem events. */
 UCLASS(Abstract)
@@ -37,13 +60,20 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Qinglan|Dialogue")
 	bool SetCurrentLine(const FText& SpeakerName, const FText& LineText);
+	/** Present the authored live/letter/paper/system/memory/recorded classification. */
+	void SetSourceKind(EQinglanSourceKind SourceKind);
 	/**
-	 * Stores the presented choice list and rebuilds Box_Choices (one index-
-	 * prefixed TextBlock per entry); an empty array clears the list.
+	 * Stores the presented choice list and rebuilds Box_Choices with clickable,
+	 * index-prefixed buttons; an empty array clears the list.
 	 * Returns false when Box_Choices does not exist (fallback presenter).
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Qinglan|Dialogue")
 	bool SetChoiceEntries(const TArray<FQinglanSceneChoice>& Choices);
+	/** Controller/keyboard selection uses the same visible button highlight and focus. */
+	UFUNCTION(BlueprintCallable, Category = "Qinglan|Dialogue") void SetSelectedChoiceIndex(int32 Index);
+	/** Emits a selection request; Character clears the old menu before invoking the story authority. */
+	UFUNCTION(BlueprintCallable, Category = "Qinglan|Dialogue") void RequestChoiceSelection(FName ChoiceId);
+	UPROPERTY(BlueprintAssignable) FQinglanDialogueChoiceSelected OnChoiceSelected;
 	/**
 	 * Stores one opened lore record (title + body) as the shown line.
 	 * Returns the SetCurrentLine presentation result.
@@ -57,6 +87,10 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Qinglan|Dialogue") FText LastRecordTitle;
 	UPROPERTY(BlueprintReadOnly, Category = "Qinglan|Dialogue") FText LastRecordBody;
 
+protected:
+	/** Responsive native layout also repairs stale Blueprint trees with fixed choice rectangles. */
+	virtual TSharedRef<SWidget> RebuildWidget() override;
+
 private:
 	/**
 	 * Resolves the named elements the bootstrap tree provides. Idempotent:
@@ -67,8 +101,15 @@ private:
 
 	/** Named presenter blocks (null when the authored tree lacks them). */
 	UPROPERTY(Transient) TObjectPtr<UTextBlock> SpeakerText;
+	FText CurrentSourceLabel;
 	UPROPERTY(Transient) TObjectPtr<UTextBlock> LineText;
 	UPROPERTY(Transient) TObjectPtr<UVerticalBox> ChoicesBox;
+	UPROPERTY(Transient) TObjectPtr<UBorder> DialoguePanel;
+	UPROPERTY(Transient) TObjectPtr<UScrollBox> LineScroll;
+	UPROPERTY(Transient) TObjectPtr<UScrollBox> ChoiceScroll;
+	UPROPERTY(Transient) TArray<TObjectPtr<UButton>> ChoiceButtons;
+	UPROPERTY(Transient) TArray<TObjectPtr<UQinglanDialogueChoiceClickRelay>> ChoiceClickRelays;
+	int32 SelectedChoiceIndex = INDEX_NONE;
 };
 
 /** Combat HUD: vitals, techniques+cooldowns, talisman charges, objectives. */
@@ -110,8 +151,51 @@ class UQinglanJournalWidget : public UUserWidget
 };
 
 /** Ending preview + explicit confirmation dialog. */
-UCLASS(Abstract)
-class UQinglanEndingWidget : public UUserWidget
+UCLASS()
+class QINGLANASCENSION_API UQinglanEndingWidget : public UUserWidget
 {
 	GENERATED_BODY()
+public:
+	virtual void NativeConstruct() override;
+	/** Presentation only: the story action owns preview authorization and its events. */
+	UFUNCTION(BlueprintCallable, Category = "Qinglan|Ending")
+	void ShowEnding(FName EndingId, bool bConfirmationRequested);
+	/** Shared input path. Preview mode closes back to review (false = no commit);
+	 * confirmation mode calls the story authority only after explicit acknowledgment. */
+	UFUNCTION(BlueprintCallable, Category = "Qinglan|Ending") bool ConfirmCurrentEnding();
+	UFUNCTION(BlueprintCallable, Category = "Qinglan|Ending") void CancelPreview();
+	UFUNCTION(BlueprintCallable, Category = "Qinglan|Ending") void ToggleWarningAcknowledgment();
+	void FocusDefaultControl();
+	UFUNCTION(BlueprintPure, Category = "Qinglan|Ending") bool IsWarningAcknowledged() const { return bWarningAcknowledged; }
+	UFUNCTION(BlueprintPure, Category = "Qinglan|Ending") bool IsConfirmationRequested() const { return bConfirmRequested; }
+
+	UPROPERTY(BlueprintAssignable) FQinglanEndingClosed OnEndingClosed;
+	UPROPERTY(BlueprintAssignable) FQinglanEndingCommitted OnEndingCommitted;
+
+protected:
+	/** Always builds working controls, even when an older WBP_Ending has only placeholder text. */
+	virtual TSharedRef<SWidget> RebuildWidget() override;
+
+private:
+	void BuildEndingTree();
+	void RefreshPresentation();
+	UFUNCTION() void HandleConfirmPressed();
+	UFUNCTION() void HandleAcknowledgmentChanged(bool bChecked);
+
+	UPROPERTY(Transient) TObjectPtr<UTextBlock> EndingTitle;
+	UPROPERTY(Transient) TObjectPtr<UTextBlock> EndingPreview;
+	UPROPERTY(Transient) TObjectPtr<UTextBlock> EndingRequirements;
+	UPROPERTY(Transient) TObjectPtr<UTextBlock> EndingWarning;
+	UPROPERTY(Transient) TObjectPtr<UTextBlock> EndingError;
+	UPROPERTY(Transient) TObjectPtr<UTextBlock> AcknowledgmentLabel;
+	UPROPERTY(Transient) TObjectPtr<UTextBlock> ConfirmLabel;
+	UPROPERTY(Transient) TObjectPtr<UTextBlock> CancelLabel;
+	UPROPERTY(Transient) TObjectPtr<UCheckBox> WarningAcknowledgment;
+	UPROPERTY(Transient) TObjectPtr<UButton> ConfirmButton;
+	UPROPERTY(Transient) TObjectPtr<UButton> CancelButton;
+	FName CurrentEndingId = NAME_None;
+	FText LastError;
+	bool bConfirmRequested = false;
+	bool bWarningAcknowledged = false;
+	bool bClosing = false;
 };

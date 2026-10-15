@@ -72,6 +72,117 @@ Reviewed revision: `e94be12ee39826a6fba73f57534b06bbf0c73db8`, matching
   untracked `packaging/Linux/` output stays out of Git on purpose; only
   manifests/checksums belong in the repository (AUD-57/59 evidence).
 
+## Current handoff: runtime integration pass (2026-10-15)
+
+The owner expanded the initial framework-only budget. This latest pass connects
+those frameworks to production callers, adds native usable controls and real
+runtime regression source, and supersedes the earlier framework-only handoff.
+**All 60 acceptance checkboxes remain open:** no Unreal build or playthrough has
+run on these changes. Source implementation and accepted gameplay are separate.
+
+- Branch: `fix/audit-repairs`; baseline source revision:
+  `12fa3bacb7d4e7884787f9534cc838fd66e7921e`.
+- The owner requested committing and pushing these three local passes on
+  2026-10-15. This handoff is included with the source/test changes in
+  `fix: integrate audit repairs and runtime regression coverage`; obtain the
+  repair commit hash from Git history. Six new runtime/helper/test files are
+  included. Unreal compilation and runtime verification remain pending.
+- Authored data changed: CH05_S04 now contains its existing localized
+  `story.ch05.s04.conditions` line, matching the acknowledgment choice pin.
+  English/Chinese UI JSON grew from 101 to 115 keys. CH05's bilingual reading
+  edition was regenerated. No cooked assets or map binaries were regenerated.
+- New runtime files: `Core/QinglanTrialAdmission.h/.cpp`,
+  `Core/QinglanRoomLayout.h`, `Narrative/QinglanStoryIdentity.h`.
+- New tests: `QinglanAuditFrameworkTests.cpp` (10) and
+  `QinglanRunIntegrationTests.cpp` (5), in the editor module. These are authored
+  test cases, **not 15 passing test results**.
+
+### Local source/content evidence
+
+- Source snapshot: `d2f4ce0146a1677da9201ea2f8554735586a74bcfb7f125c7e60051e1b7f6f2c` (SHA-256, 35 modified/new
+  files under `game/Source`).
+- Authored content snapshot: `566240af1d74363a9c126dca4b03f70e8a6d3864c79e40c8f5b37eeded69d3df` (SHA-256,
+  4 modified files under `data/` and `localization/`). This is source
+  data and generated reading text, not cooked `.uasset`/`.umap` evidence.
+- Reproduce each digest by taking the sorted union of tracked changed paths
+  (`git diff --name-only`) and untracked paths (`git ls-files --others
+  --exclude-standard`), selecting the prefixes above, and hashing each UTF-8
+  repository-relative path, NUL, raw bytes, NUL, in that order. No build hash
+  exists for these local changes yet. After committing, obtain the file list
+  with `git diff-tree --no-commit-id --name-only -r <repair-commit>` and read
+  each file at that revision before applying the same prefix filters/hash.
+
+### Per-item dispositions for the local passes
+
+| AUD | Disposition | Current implementation and remaining acceptance |
+| --- | --- | --- |
+| AUD-01 | **Still open; source path connected** | Hub arrival retains active profiles. A cold boot loads the first existing slot only once (slot selection frontend remains missing). Both OpenLevel wrappers save before travel; a failed new hub departure resets its empty run so the gate can retry. Verify hub return/restart, all selected slots and save failures in-engine. |
+| AUD-02 | **Still open; checkpoint resume connected** | Loaded runs route from hub to their realm before hub refill/autosave. Realm mode waits for possession, restores room entrance/vitals/status, re-arms only unfinished encounters and presents pending blessings. Interact retries a pending resume; loading is consumed only after restoration. Story scene/choice/proposal/ending/agreement boundaries now request saves. Save callbacks cannot recursively write/switch profile; Character displays save failure notices. Need real process-kill/failure tests and frontend recovery UX. |
+| AUD-04 | **Still open; subsystem isolation connected** | `ResetRun` discards every run-owned field; empty checkpoint import clears the previous run. Failed loads do not publish a target slot before checking the profile subsystem. Load/create reject save/import reentrancy. Verify profile switches with world/pawn teardown when the missing profile UI is implemented. |
+| AUD-05 | **Still open; signed stream callers repaired** | Removed stale two-argument RestoreStream calls left by Wave 1. Unfinished room checkpoints save the pre-wave encounter seed; rebuilding a room reproduces its wave rather than drawing the next one. New expeditions reset prior room RNG snapshots. Direct signed/zero-state and actual EnterRoom/reload comparisons are authored; run them with Unreal and check actual encounters. |
+| AUD-06 | **Still open; pending offer connected** | Pending offer/owner round-trip without reroll, restore to player presentation, and save on selection. Room transitions reject leaving an unresolved draft; completed-room events fire after offer creation/save. Direct round-trip, one-time selection and replay cases are authored. Legacy saves whose offer was already lost still need a documented compatibility/recovery policy. |
+| AUD-07 | **Still open; atomic settlement connected** | Base/optional first-clear delta and journal IDs commit together; allocation/profile/overflow/capacity failure retains run loot and emits a visible notice. Journal-sized ID search removes 999 cap. Exit/defeat/recall callers respect failed settlements. Reentrant EndExpedition is blocked. Test actual 999-run histories, disk failures and long-lived journal policy before acceptance. |
+| AUD-08 | **Still open; payout integration connected** | Victory uses overflow-checked repeat-material top-up plus first-minus-repeat bonus only. Expected Bamboo first/repeat: 3/2 herbs + 1 crystal; Ashen: 3/2 crystals. Retreat/death use exact integer ratios floored per stack, avoiding float underpayment and int64 overflow. Boss campaign proof comes only from the actual boss-kind room. Still verify full production payout/proof paths on first/repeat/retreat/death runs. |
+| AUD-09 | **Still open; runtime scoped identity implemented** | All Story objective/choice indexing uses owner-scoped keys. Production Character/Interactable/TrialDirector proof calls name exact scenes. Legacy bare APIs reject ambiguity; choice import/export migrates unique entries and logs/drops unknown, malformed or ambiguous entries. Import validation checks owner/member collisions. Lost overwritten legacy history cannot be reconstructed. Run direct scoped/runtime save tests plus the real CH04..07 journey. |
+| AUD-10 | **Still open; epilogue continuation only** | CH07 completion queues the next eligible epilogue scene in the same hub visit. Foundation debrief CH03_S03 starts on hub return. Full main/side scene-to-anchor authoring remains incomplete; do not infer all mandatory scene routing was fixed. |
+| AUD-12 | **Still open; runtime fix implemented** | Successful selection clears skip halt; actual SkipChoiceResume test checks no silent selection and reachable response/completion. Engine execution pending. |
+| AUD-13 | **Still open; groups and controls implemented** | Only active authored group/pin options are presented/selectable; every required group must resolve. CH05 conditions pin now has a script line. Ending controls re-open their family until atomic confirmation. Native dialogue renders clickable disabled-aware buttons, scrolling/focus, and number keys 5..8; arrows/DPad/Enter and native controller button focus are wired. Clear-before-select ordering preserves synchronously presented next groups. Verify mouse/keyboard/controller and long bilingual content in-engine. |
+| AUD-14 | **Still open; ending frontend connected** | Character binds preview/confirm/cancel events to a native scrollable ending widget added to viewport. Preview Continue preserves preview authorization; Cancel discards transient state. Confirmation requires explicit warning checkbox and calls actual ConfirmEnding; success requests hub travel into CH07. Modal input blocks gameplay/underlying choice shortcuts. Actual backend transaction test covers no-preview/no-ack/cancel/single commit. Verify rendered controls, every ending and failure/restart paths. Guardian release presentation/earned conditions remain AUD-11 work. |
+| AUD-18 | **Still open; admission authority connected** | Hub entry checks preparation prerequisites; direct anchors/Director enforce exact trial scene/objective and combat prerequisites. Foundation: Qi rank 3 + Bamboo; Golden Core: Foundation rank 3 + Ashen. Character entry defers one tick for its scene transaction. Ashen entry also requires Foundation and CH03 debrief. Profile breakthrough now requires actual Foundation trial proof, preventing shrine bypass. First-campaign policy is implemented; replay policy and full campaign acceptance remain open. |
+| AUD-19 | **Still open; return paths connected** | Foundation success commits scoped story proof, trial campaign flag and deterministic breakthrough, then saves/travels hub. Character stay action and Backspace/controller View cancellation use CancelTrialAndReturnToHub, including missing-director arena fallback. Failed save leaves the return retryable. Verify success/failure/cancel/retry interactively; no full pause/outcome frontend exists. |
+| AUD-20 | **Still open; free-win fallback removed only** | Failed initialization/lost wave engine grants no proof; Director validates canonical duration/tier, living player and absence of expedition. Required elite/boss/hazard phases are still unimplemented: the existing survival timer remains the success condition. This is not an implemented authored trial. |
+| AUD-21 | **Still open; room origins connected** | Shared RoomLayout constants now drive map authoring, door positioning/teleport, resume and encounter origin. Director has a root and uses current-room origin; portal positions stay on the room floor. Generator authors seven tagged PlayerStarts per realm; runtime fallback creates equivalent starts for old maps. Default spawn explicitly chooses the current room. Regenerate and verify saved maps, collision/nav and actual enemy locations. |
+| AUD-51 | **Still open; narrow frontend additions** | Save/bank error notices and ending/choice controls now exist. Profiles/settings/equipment/journal/shop/outcome screens remain incomplete. Do not call native ending/dialogue work a complete menu system. |
+| AUD-52 | **Still open; dialogue layout/dismiss partial** | Native responsive lower-screen dialogue has separate scrollable line/choice regions, real font sizes and wrapping. Focus scrolls options into view. Script source-kind labels now display; Backspace dismisses records when no mandatory choice is pending. Record registry lacks source classification; journal reopen and text-scale/720p/Retina/CJK visual acceptance still require work. |
+| AUD-58 | **Still open; 15 regressions authored** | Tests directly execute scoped Story behavior/migration, skip/groups, ending transaction, physical/authored trial admission, atomic settlement, exact bank flooring, Run checkpoint/reset/draft/reward replay and unfinished-room RNG reconstruction. Existing rank-gate fixture now asserts Foundation trial proof. Full SaveSubsystem disk failure injection, registered profile-to-run integration, functional maps and engine execution remain missing. |
+
+All other AUD IDs retain their prior status. Remaining save limitations include
+partial objective persistence, courier clock/delivery persistence (AUD-16), legacy
+schema-v1 field compatibility and true disk fault injection. A bank committed in
+memory but failing to save retains current memory plus the last valid disk
+snapshot as restart fallback; it is not durable until a later successful save.
+Scoped choice migration cannot restore decisions already overwritten by older
+bare-ID saves. Normal-choice/generic anchor proof still does not implement all
+authored gameplay conditions (AUD-11).
+
+### Verification and next-agent sequence
+
+Results on 2026-10-15 for the local changes above; all lightweight commands
+exited 0. This section records their evidence:
+
+- `python3 tools/validate_repository.py`: passed; 122 text files, **115 UI keys**
+  per locale and consistent planning/data/link/packaging contracts.
+- `python3 tools/validate_story.py`: passed; 30 main scenes, 24 side stages,
+  24 records, 40 barks and 768 story keys per locale.
+- `python3 tools/export_story_reading.py --check`: 18 bilingual editions current.
+- `git diff --check`: passed. New source files were also checked for trailing
+  whitespace; referenced helper types, exports, input APIs and locale keys were
+  reviewed against current source.
+- Independent static review found and corrected: missing ending viewport
+  insertion, stale per-room RNG snapshots across expeditions, blocked-departure
+  retry, pre-commit material overflow, and post-wave seed reuse on resume.
+
+**No Unreal build, automation execution, asset regeneration, cook, package or
+interactive rendering ran.** The test code is unbuilt. Native UI bypasses old
+placeholder widget layouts, but new UI keys still need string-table regeneration;
+the CH05 script/pins need regenerated story registry content. Tagged PlayerStarts
+also need regenerated maps for source-controlled assets (runtime fallback exists).
+The Chinese runtime localization pipeline remains AUD-48, not fixed by JSON parity.
+
+1. Build this entire branch with the selected engine, including editor tests and
+   UHT, before extending source. Preserve source and logs for any compiler repair.
+2. Run the existing `Qinglan` suite plus all 15 tests in the two new test files.
+   Attach automation output, actual source/build/content hashes and date. Do not
+   treat these document validators as proof of C++ or gameplay correctness.
+3. Regenerate registry/string-table/maps from current data, reload in a fresh
+   engine process, and test checkpoint travel/room/vitals/wave/offer restoration;
+   hub preservation; Foundation admission/success/debrief/Ashen gate; grouped
+   CH05 decisions; CH06 preview/ack/confirm/cancel and same-visit CH07 continuation.
+4. Continue P0 routing and earned-objective work (AUD-10/11), courier state and
+   time flow (AUD-15/16/17), then real trial mechanics (AUD-20), remaining input/
+   loadout/frontends/localization and asset/release acceptance. Existing acceptance
+   criteria below remain authoritative; tick only with actual evidence.
+
 ## Decision
 
 **Development is not complete.** The repository has substantial gameplay code
@@ -88,8 +199,8 @@ The current implementation does not meet the version 1.0 acceptance contract in
 | P2 — narrower correctness/completion issues | 20 |
 | Total | 60 |
 
-This document is a repair backlog for the development agent. It changes no game
-code. Every finding below needs a recorded disposition and its acceptance checks;
+This document is a repair backlog for the development agent. The original audit
+changed no game code; subsequent source work is recorded in the handoff above. Every finding below needs a recorded disposition and its acceptance checks;
 compiling modules or passing the existing 12 tests does not close these items.
 
 ## Review scope and evidence limits

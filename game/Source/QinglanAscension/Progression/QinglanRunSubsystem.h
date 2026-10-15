@@ -31,7 +31,7 @@ struct FQinglanBlessing
  * victory 100%, voluntary retreat 70% floored per stack, defeat 50%.
  */
 UCLASS()
-class UQinglanRunSubsystem : public UGameInstanceSubsystem
+class QINGLANASCENSION_API UQinglanRunSubsystem : public UGameInstanceSubsystem
 {
 	GENERATED_BODY()
 
@@ -58,6 +58,11 @@ public:
 	UFUNCTION(BlueprintCallable) void ResetRun();
 	/** Realm of the open checkpoint resume target; NAME_None when at the sanctuary (AUD-02). */
 	UFUNCTION(BlueprintPure) FName GetPendingCheckpointRealm() const;
+	/** Loaded checkpoints are restored once after the matching realm world/pawn exists. */
+	UFUNCTION(BlueprintPure) bool NeedsCheckpointResume() const;
+	/** Cooked map for the loaded realm; NAME_None when absent or unsupported. */
+	UFUNCTION(BlueprintPure) FName GetPendingCheckpointMap() const;
+	void MarkCheckpointResumed();
 
 	/** Checkpoint capture for the save subsystem (pre-room snapshot). */
 	void ExportCheckpoint(struct FQinglanCheckpoint& Out) const;

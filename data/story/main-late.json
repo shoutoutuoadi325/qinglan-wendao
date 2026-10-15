@@ -860,6 +860,13 @@
           "source_kind": "live",
           "source_kind_key": "story.speaker.source.live",
           "text_key": "story.ch05.s04.network_mechanism"
+        },
+        {
+          "speaker": "Keeper Lan",
+          "speaker_key": "story.speaker.lan",
+          "source_kind": "live",
+          "source_kind_key": "story.speaker.source.live",
+          "text_key": "story.ch05.s04.conditions"
         }
       ],
       "choices": [

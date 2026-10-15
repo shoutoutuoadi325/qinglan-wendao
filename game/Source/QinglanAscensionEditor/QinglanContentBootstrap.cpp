@@ -1,5 +1,6 @@
 // Content bootstrap implementation. See header for intent.
 #include "QinglanContentBootstrap.h"
+#include "Core/QinglanRoomLayout.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Components/ExponentialHeightFogComponent.h"
@@ -815,12 +816,12 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaps()
 		UMaterialInterface* Dirt = Mat(TEXT("M_DirtFloor"));
 
 		// Rooms 0..6 spaced 55 m apart along +X; each 45 m across (docs/01 rooms).
-		for (int32 i = 0; i < 7; ++i)
+		for (int32 i = 0; i < QinglanRoomLayout::RoomCount; ++i)
 		{
-			const float X = i * 5500.f;
+			const float X = QinglanRoomLayout::RoomCenter(i).X;
 			SpawnShape(Bamboo, EngineCube(), FVector(X, 0, -50), FVector(4500, 4500, 100), i % 2 ? Grass : Dirt, *FString::Printf(TEXT("Bamboo_Room%d_Floor"), i));
 			// Corridor to next room.
-			if (i < 6)
+			if (i + 1 < QinglanRoomLayout::RoomCount)
 			{
 				SpawnShape(Bamboo, EngineCube(), FVector(X + 2750.f, 0, -50), FVector(1000, 800, 100), Grass, *FString::Printf(TEXT("Bamboo_Corr%d"), i));
 			}
@@ -856,8 +857,16 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaps()
 		{
 			SpawnAnchor(Bamboo, A.Value, A.Key);
 		}
-		APlayerStart* PS = Bamboo->SpawnActor<APlayerStart>(APlayerStart::StaticClass(), FVector(0, 0, 100), FRotator::ZeroRotator, FActorSpawnParameters());
-		if (PS) { PS->SetActorLabel(TEXT("PlayerStart")); }
+		for (int32 Room = 0; Room < QinglanRoomLayout::RoomCount; ++Room)
+		{
+			APlayerStart* PS = Bamboo->SpawnActor<APlayerStart>(APlayerStart::StaticClass(), QinglanRoomLayout::RoomEntrance(Room), FRotator::ZeroRotator, FActorSpawnParameters());
+			if (PS)
+			{
+				PS->SetActorLabel(FString::Printf(TEXT("PlayerStart_Room%d"), Room));
+				PS->PlayerStartTag = QinglanRoomLayout::EntranceTag(Room);
+				PS->Tags.AddUnique(PS->PlayerStartTag);
+			}
+		}
 		bOk &= SaveWorldMap(Bamboo);
 		UE_LOG(LogTemp, Log, TEXT("L_BambooHollow created"));
 	}
@@ -869,11 +878,11 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaps()
 		UMaterialInterface* Volcanic = Mat(TEXT("M_VolcanicRock"));
 		UMaterialInterface* Dirt = Mat(TEXT("M_DirtFloor"));
 
-		for (int32 i = 0; i < 7; ++i)
+		for (int32 i = 0; i < QinglanRoomLayout::RoomCount; ++i)
 		{
-			const float X = i * 5500.f;
+			const float X = QinglanRoomLayout::RoomCenter(i).X;
 			SpawnShape(Ashen, EngineCube(), FVector(X, 0, -50), FVector(4500, 4500, 100), Volcanic, *FString::Printf(TEXT("Ashen_Room%d_Floor"), i));
-			if (i < 6)
+			if (i + 1 < QinglanRoomLayout::RoomCount)
 			{
 				SpawnShape(Ashen, EngineCube(), FVector(X + 2750.f, 0, -50), FVector(1000, 800, 100), Volcanic, *FString::Printf(TEXT("Ashen_Corr%d"), i));
 			}
@@ -904,8 +913,16 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaps()
 		{
 			SpawnAnchor(Ashen, A.Value, A.Key);
 		}
-		APlayerStart* PS2 = Ashen->SpawnActor<APlayerStart>(APlayerStart::StaticClass(), FVector(0, 0, 100), FRotator::ZeroRotator, FActorSpawnParameters());
-		if (PS2) { PS2->SetActorLabel(TEXT("PlayerStart")); }
+		for (int32 Room = 0; Room < QinglanRoomLayout::RoomCount; ++Room)
+		{
+			APlayerStart* PS = Ashen->SpawnActor<APlayerStart>(APlayerStart::StaticClass(), QinglanRoomLayout::RoomEntrance(Room), FRotator::ZeroRotator, FActorSpawnParameters());
+			if (PS)
+			{
+				PS->SetActorLabel(FString::Printf(TEXT("PlayerStart_Room%d"), Room));
+				PS->PlayerStartTag = QinglanRoomLayout::EntranceTag(Room);
+				PS->Tags.AddUnique(PS->PlayerStartTag);
+			}
+		}
 		bOk &= SaveWorldMap(Ashen);
 		UE_LOG(LogTemp, Log, TEXT("L_AshenVerge created"));
 	}

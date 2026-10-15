@@ -57,8 +57,10 @@ namespace QinglanInteraction
 	inline constexpr const TCHAR* AshenMapPath = TEXT("/Game/Qinglan/Maps/L_AshenVerge");
 	inline constexpr const TCHAR* ArenaMapPath = TEXT("/Game/Qinglan/Maps/L_TribulationArena");
 
-	/** Opens a map via the same UGameplayStatics::OpenLevel path the game instance uses (Core/QinglanGameInstance.cpp). */
-	void TravelToMap(UObject* WorldContext, const TCHAR* MapPath);
+	/** Saves then requests OpenLevel; false means no travel was requested.
+	 * True does not confirm asynchronous map loading succeeded.
+	 */
+	bool TravelToMap(UObject* WorldContext, const TCHAR* MapPath);
 
 	/**
 	 * Deterministic expedition seed from the realm id and the fiction clock

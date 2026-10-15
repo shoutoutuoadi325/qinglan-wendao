@@ -48,6 +48,12 @@ public:
 	// --- Authoritative mutations (atomic, idempotent via transaction IDs) ---
 	/** Grants currency/materials. Returns false if it would overflow bounded ints. */
 	UFUNCTION(BlueprintCallable) bool TryGrant(FName TransactionId, const FQinglanInventory& Grant);
+	/** AUD-07/08: commit run payout and optional first-clear delta together.
+	 * Replayed banking IDs are no-ops; overflow/journal-capacity failure changes
+	 * neither inventory nor transaction history. The run owner saves afterward.
+	 */
+	bool TryBankExpedition(FName BankingId, const FQinglanInventory& Grant,
+		FName FirstClearId, const FQinglanInventory& FirstClearBonus);
 	/** Spends currency; on insufficient resources returns false and changes nothing. */
 	UFUNCTION(BlueprintCallable) bool TrySpend(FName TransactionId, const FQinglanInventory& Cost);
 	/** Attempts the next cultivation rank up; validates boss gates and materials. */

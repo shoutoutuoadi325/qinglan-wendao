@@ -19,8 +19,8 @@ class UQinglanEnemyDataAsset;
  * open one. The director itself owns only the clock, the wave schedule, and
  * the outcome contract:
  * - Success: the player is still alive when the clock runs out ->
- *   UQinglanStorySubsystem::NotifyObjectiveCompleted(ObjectiveId), remaining
- *   enemies swept, music back to Explore.
+ *   scoped scene objective proof + permanent breakthrough, enemies swept,
+ *   music back to Explore; Foundation returns to the hub.
  * - Failure: the player dies first -> the trial ends silently (the character's
  *   defeat flow already returns to the hub; the anchor re-press restarts).
  *
@@ -42,10 +42,12 @@ public:
 
 	/**
 	 * Begins one timed trial. Returns false when a trial already runs, the
-	 * world has no wave engine, or the catalog yielded no archetypes; the
-	 * caller then keeps its direct-complete fallback.
+	 * admission/story prerequisites fail, the world has no wave engine, or the
+	 * catalog yielded no archetypes. Rejection never grants objective proof.
 	 */
 	bool BeginTrial(FName SceneId, FName ObjectiveId, float DurationSeconds, int32 Tier);
+	/** Ordinary retreat action: discard this attempt, keep permanent progression, save and return. */
+	UFUNCTION(BlueprintCallable) bool CancelTrialAndReturnToHub();
 
 	UFUNCTION(BlueprintPure) bool IsTrialActive() const { return bActive; }
 	/** Seconds left in the running trial (0 when none); the HUD polls this. */

@@ -46,6 +46,8 @@ public:
 	UFUNCTION(BlueprintCallable) void CreateNewProfile(int32 Slot);
 	/** Removes checkpoint state (used on expedition end / return to hub). */
 	UFUNCTION(BlueprintCallable) void ClearCheckpoint();
+	/** Run lifecycle hook: re-enable checkpoint writes after a new expedition starts successfully. */
+	void BeginExpeditionCheckpoint();
 	/** For UI: open the platform save folder through supported desktop APIs. */
 	UFUNCTION(BlueprintCallable) bool ShowSaveFolder();
 

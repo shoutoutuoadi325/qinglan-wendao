@@ -138,7 +138,7 @@ struct FQinglanRegistryBark
  * the data/story JSON files and validated against both locales. Immutable at runtime.
  */
 UCLASS()
-class UQinglanStoryRegistry : public UDataAsset
+class QINGLANASCENSION_API UQinglanStoryRegistry : public UDataAsset
 {
 	GENERATED_BODY()
 

@@ -17,6 +17,7 @@ class UQinglanStatusComponent;
 class USpringArmComponent;
 class UCameraComponent;
 class UUserWidget;
+class UQinglanEndingWidget;
 
 /** One purchasable sanctuary-shop entry (relic or passive manual). */
 struct FQinglanShopOfferEntry
@@ -138,6 +139,17 @@ protected:
 	void EnsureHudCreated();
 	/** Creates (once) and returns the dialogue presenter; null until first shown. */
 	UUserWidget* EnsureDialogueWidget();
+	UQinglanEndingWidget* EnsureEndingWidget();
+	void UpdateMenuInputMode();
+	void MoveMenuSelection(int32 Direction);
+	void ConfirmMenuSelection();
+	void CancelMenu();
+	UFUNCTION() void HandleDialogueChoiceSelected(FName ChoiceId);
+	UFUNCTION() void HandleEndingPreviewed(FName EndingId, FName SceneId);
+	UFUNCTION() void HandleConfirmEndingRequested(FName EndingId, FName SceneId);
+	UFUNCTION() void HandleCancelConfirmation(FName SceneId);
+	UFUNCTION() void HandleEndingClosed();
+	UFUNCTION() void HandleEndingCommitted(FName EndingId);
 	/** Story playback display: line, choices, records (widget or on-screen fallback). */
 	UFUNCTION() void HandleSceneLine(const FQinglanScriptLine& Line);
 	UFUNCTION() void HandleChoicesPresented(const TArray<FQinglanSceneChoice>& Choices);
@@ -148,6 +160,9 @@ protected:
 	UFUNCTION() void HandleRoomCompleted(int32 RoomIndex, int64 ShardsAwarded);
 	/** Story choice-action delegates (Narrative/QinglanStoryRuntime.h). */
 	UFUNCTION() void HandleEnterTrialRequested(FName IdempotencyKey, FName SceneId);
+	UFUNCTION() void HandleStayAtHub(FName IdempotencyKey, FName SceneId);
+	UFUNCTION() void HandleSaveFailed(FName ProfileId, FText Reason);
+	UFUNCTION() void HandleBankingFailed();
 	UFUNCTION() void HandleReturnToHub(FName IdempotencyKey, FName SceneId);
 	UFUNCTION() void HandleCampaignComplete(FName IdempotencyKey, FName SceneId);
 	/** Defeat: banks at 50% and returns to the hub after a short beat (docs/03 section 6). */
@@ -161,6 +176,8 @@ protected:
 
 	TWeakObjectPtr<UUserWidget> HudWidget;
 	TWeakObjectPtr<UUserWidget> DialogueWidget;
+	TWeakObjectPtr<UQinglanEndingWidget> EndingWidget;
+	int32 MenuSelectionIndex = 0;
 	bool bHudCreated = false;
 	bool bStoryDelegatesBound = false;
 	bool bDefeatHandled = false;

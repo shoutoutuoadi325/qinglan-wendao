@@ -480,7 +480,10 @@ bool FAutomationTestQinglanRankCosts::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Breakthrough blocked without boss proof"), Profile->TryBreakthrough(FName(TEXT("bt_foundation"))));
 	TestFalse(TEXT("CanAttemptBreakthrough false"), Profile->CanAttemptBreakthrough(Reason));
 	Profile->SetCampaignFlag(FName(QinglanProgression::BambooClearedCampaignFlag));
-	TestTrue(TEXT("Gate open with boss proof"), Profile->CanAttemptBreakthrough(Reason));
+	TestFalse(TEXT("Foundation still requires its actual trial"), Profile->CanAttemptBreakthrough(Reason));
+	TestFalse(TEXT("Boss proof cannot bypass Foundation trial"), Profile->TryBreakthrough(FName(TEXT("bt_foundation"))));
+	Profile->SetCampaignFlag(FName(QinglanProgression::FoundationTrialPassedCampaignFlag));
+	TestTrue(TEXT("Gate open with boss and trial proof"), Profile->CanAttemptBreakthrough(Reason));
 	TestTrue(TEXT("Foundation breakthrough committed"), Profile->TryBreakthrough(FName(TEXT("bt_foundation"))));
 	TestEqual(TEXT("Stage advanced to Foundation"), Profile->GetCultivationStage(), EQinglanStage::FoundationEstablishment);
 	TestEqual(TEXT("Rank reset on breakthrough"), Profile->GetCultivationRank(), 0);

@@ -272,8 +272,8 @@ bool UQinglanTalismanComponent::ExecuteEffect(const FQinglanTalismanCatalogEntry
 			UE_LOG(LogQinglanCombat, Warning, TEXT("Recall rejected: retreat banking failed; expedition kept open"));
 			return false;
 		}
-		QinglanInteraction::TravelToMap(this, QinglanInteraction::HubMapPath);
-		return true;
+		// Do not consume the charge when save-before-travel rejected departure.
+		return QinglanInteraction::TravelToMap(this, QinglanInteraction::HubMapPath);
 	}
 
 	UE_LOG(LogQinglanCombat, Warning, TEXT("UseSlot: talisman '%s' carries unknown effect kind '%s'"),

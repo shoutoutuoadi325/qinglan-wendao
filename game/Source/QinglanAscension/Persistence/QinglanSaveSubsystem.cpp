@@ -15,6 +15,7 @@
 #include "HAL/PlatformFileManager.h"
 #include "HAL/PlatformProcess.h"
 #include "Misc/FileHelper.h"
+#include "Misc/GuardValue.h"
 #include "Misc/Paths.h"
 #include "Serialization/MemoryReader.h"
 #include "Serialization/MemoryWriter.h"
@@ -60,6 +61,8 @@ namespace
 		bool bProfileActiveThisSession = false;
 		/** Reentrancy guard: profile/story/run state is being swapped by LoadProfile/CreateNewProfile; commit-boundary autosaves stay off. */
 		bool bApplyingProfileState = false;
+		/** Includes completion/failure delegates: callbacks must not recursively write or replace the active profile. */
+		bool bSaving = false;
 		/**
 		 * Story-owned narrative fields (revision, scenes, flags, decisions,
 		 * agreements, ending) carried from the last load/save. SaveNow prefers
@@ -566,6 +569,18 @@ bool UQinglanSaveSubsystem::DeserializeVerified(const TArray<uint8>& Bytes, UQin
 bool UQinglanSaveSubsystem::LoadProfile(int32 Slot, FText& OutNotice)
 {
 	OutNotice = FText::GetEmpty();
+	if (!IsInGameThread())
+	{
+		OutNotice = QinglanSave::Loc(TEXT("error.save_failed"));
+		return false;
+	}
+	FQinglanSaveBookkeeping& Bookkeeping = Book(this);
+	if (Bookkeeping.bSaving || Bookkeeping.bApplyingProfileState)
+	{
+		OutNotice = QinglanSave::Loc(TEXT("error.save_failed"));
+		UE_LOG(LogQinglanSave, Warning, TEXT("LoadProfile rejected during a save/profile replacement"));
+		return false;
+	}
 	if (!IsValidSlot(Slot))
 	{
 		UE_LOG(LogQinglanSave, Error, TEXT("LoadProfile: slot %d out of range"), Slot);
@@ -635,13 +650,6 @@ bool UQinglanSaveSubsystem::LoadProfile(int32 Slot, FText& OutNotice)
 		UE_LOG(LogQinglanSave, Warning, TEXT("LoadProfile: slot %d fell back to a valid backup"), Slot);
 	}
 
-	FQinglanSaveBookkeeping& Bookkeeping = Book(this);
-	Bookkeeping.ActiveSlot = Slot;
-	Bookkeeping.LastAcceptedSequence = ChosenSave->SaveSequence;
-	Bookkeeping.ProfileId = ChosenSave->ProfileId;
-	Bookkeeping.bCheckpointSuppressed = false;
-	Bookkeeping.CarriedNarrative = ChosenSave->Narrative;
-
 	UGameInstance* GameInstancePtr = GetGameInstance();
 	UQinglanProfileSubsystem* ProfileSubsystem = GameInstancePtr ? GameInstancePtr->GetSubsystem<UQinglanProfileSubsystem>() : nullptr;
 	if (ProfileSubsystem == nullptr)
@@ -652,6 +660,13 @@ bool UQinglanSaveSubsystem::LoadProfile(int32 Slot, FText& OutNotice)
 		OutNotice = QinglanSave::Loc(TEXT("error.save_failed"));
 		return false;
 	}
+	// Publish the selected slot only after the required state owner is available;
+	// a failed load must not redirect later saves away from the active profile.
+	Bookkeeping.ActiveSlot = Slot;
+	Bookkeeping.LastAcceptedSequence = ChosenSave->SaveSequence;
+	Bookkeeping.ProfileId = ChosenSave->ProfileId;
+	Bookkeeping.bCheckpointSuppressed = false;
+	Bookkeeping.CarriedNarrative = ChosenSave->Narrative;
 	// AUD-04: a profile switch replaces ALL session state atomically. The
 	// applying guard keeps the commit-boundary autosave off while the
 	// subsystems are mid-swap; OnProfileChanged fires once everything landed.
@@ -700,6 +715,15 @@ bool UQinglanSaveSubsystem::SaveNow(FText& OutError)
 		return false;
 	}
 	FQinglanSaveBookkeeping& Bookkeeping = Book(this);
+	if (Bookkeeping.bSaving || Bookkeeping.bApplyingProfileState)
+	{
+		// Do not broadcast here: an OnSaveFailed handler retrying synchronously
+		// would otherwise recurse without ever reaching the writer.
+		OutError = QinglanSave::Loc(TEXT("error.save_failed"));
+		UE_LOG(LogQinglanSave, Warning, TEXT("SaveNow rejected during a save/profile replacement"));
+		return false;
+	}
+	TGuardValue<bool> SavingGuard(Bookkeeping.bSaving, true);
 	if (!IsValidSlot(Bookkeeping.ActiveSlot))
 	{
 		OutError = QinglanSave::Loc(TEXT("save.no_profile_loaded"));
@@ -952,6 +976,17 @@ bool UQinglanSaveSubsystem::HasProfile(int32 Slot) const
 
 void UQinglanSaveSubsystem::CreateNewProfile(int32 Slot)
 {
+	if (!IsInGameThread())
+	{
+		UE_LOG(LogQinglanSave, Error, TEXT("CreateNewProfile called off the game thread"));
+		return;
+	}
+	FQinglanSaveBookkeeping& Bookkeeping = Book(this);
+	if (Bookkeeping.bSaving || Bookkeeping.bApplyingProfileState)
+	{
+		UE_LOG(LogQinglanSave, Warning, TEXT("CreateNewProfile rejected during a save/profile replacement"));
+		return;
+	}
 	if (!IsValidSlot(Slot))
 	{
 		UE_LOG(LogQinglanSave, Error, TEXT("CreateNewProfile: slot %d out of range"), Slot);
@@ -965,7 +1000,6 @@ void UQinglanSaveSubsystem::CreateNewProfile(int32 Slot)
 		return;
 	}
 
-	FQinglanSaveBookkeeping& Bookkeeping = Book(this);
 	Bookkeeping.ActiveSlot = Slot;
 	Bookkeeping.LastAcceptedSequence = 0;
 	Bookkeeping.ProfileId = MakeProfileIdForSlot(Slot);
@@ -1020,8 +1054,17 @@ void UQinglanSaveSubsystem::ClearCheckpoint()
 {
 	// Suppresses the checkpoint section of subsequent writes (expedition end /
 	// return to hub). The next SaveNow persists checkpoint == null; committed
-	// rewards stay journaled through CommittedTransactionIds.
+	// rewards stay journaled through CommittedTransactionIds. Suppression stays
+	// on through retries and is released only when a new expedition starts.
 	Book(this).bCheckpointSuppressed = true;
+}
+
+void UQinglanSaveSubsystem::BeginExpeditionCheckpoint()
+{
+	// AUD-02: ClearCheckpoint belongs to the previous expedition. Without this
+	// lifecycle reset, every later expedition in the same profile session would
+	// save successfully but silently omit its checkpoint.
+	Book(this).bCheckpointSuppressed = false;
 }
 
 bool UQinglanSaveSubsystem::ShowSaveFolder()

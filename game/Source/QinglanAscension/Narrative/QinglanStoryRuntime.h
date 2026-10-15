@@ -84,7 +84,7 @@ struct FQinglanStorySession
 	TSet<FName> CompletedMainScenes;
 	TSet<FName> CompletedSideStages;
 	TSet<FName> Flags;
-	/** ChoiceId -> chosen option Id (self-recorded authored option ids). */
+	/** Scene-scoped choice key -> authored option ID. */
 	TMap<FName, FName> ChoiceDecisions;
 	/** QuestId -> pending version (selected draft, not yet effective). */
 	TMap<FName, FName> PendingAgreements;
@@ -99,6 +99,11 @@ struct FQinglanStorySession
 	bool bRevisitBranch = false;
 	bool bChoicesPresented = false;
 	bool bChoicesResolved = true;
+	/** Playback-local decision families; authored unnamed choices form one family. */
+	TSet<FName> ResolvedChoiceGroups;
+	TSet<FName> PresentedChoiceIds;
+	FName ActiveChoiceGroup = NAME_None;
+	FName ActiveChoicePin = NAME_None;
 	bool bAdvanceHalted = false;
 	int32 NextScriptLine = 0;
 	TArray<FName> PendingResponseKeys;
@@ -123,6 +128,8 @@ struct FQinglanStorySession
 
 	// --- Objectives / journal ---
 	TSet<FName> CompletedObjectives;
+	/** Prevent save delegates from recursively autosaving the same transaction. */
+	bool bSavingStoryBoundary = false;
 
 	// --- Ambient (barks) / dispatcher events ---
 	FName CurrentLocation = NAME_None;
@@ -211,11 +218,18 @@ namespace QinglanStoryRuntime
 	double GetStoryClockSeconds(const UQinglanStorySubsystem* Story);
 
 	// --- Save bridge (see QinglanStorySubsystem.cpp FIXME-CONTRACT) ---
-	void ExportNarrativeState(const UQinglanStorySubsystem* Story, FQinglanNarrativeState& Out);
-	void ImportNarrativeState(UQinglanStorySubsystem* Story, const FQinglanNarrativeState& In);
+	QINGLANASCENSION_API void ExportNarrativeState(const UQinglanStorySubsystem* Story, FQinglanNarrativeState& Out);
+	QINGLANASCENSION_API void ImportNarrativeState(UQinglanStorySubsystem* Story, const FQinglanNarrativeState& In);
+	/** Persist the current narrative transaction through the active profile save path. */
+	QINGLANASCENSION_API bool SaveStoryBoundary(UQinglanStorySubsystem* Story);
+#if WITH_DEV_AUTOMATION_TESTS
+	/** Transient registry injection; tests must clear this with nullptr before returning. */
+	QINGLANASCENSION_API void SetRegistryForTesting(UQinglanStoryRegistry* Registry);
+#endif
 
 	// --- State queries for UI / automation specs ---
-	bool IsObjectiveCompleted(const UQinglanStorySubsystem* Story, FName ObjectiveId);
+	QINGLANASCENSION_API bool IsObjectiveCompleted(const UQinglanStorySubsystem* Story, FName ObjectiveId);
+	QINGLANASCENSION_API bool IsSceneObjectiveCompleted(const UQinglanStorySubsystem* Story, FName SceneId, FName ObjectiveId);
 	FName GetPendingAgreement(const UQinglanStorySubsystem* Story, FName QuestId);
 	bool WasEndingPreviewed(const UQinglanStorySubsystem* Story, FName EndingId);
 } // namespace QinglanStoryRuntime

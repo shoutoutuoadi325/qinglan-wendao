@@ -1,0 +1,35 @@
+Linux Shipping package evidence (rebuilt 2026-10-19 after audit repairs)
+Project commit: f438ee1 + packaging config fix (this commit)
+Engine: 5.8.3 (tools/build/versions.lock)
+
+1cd877c0e31057201d7d1a494064a2c6a60b068e20f033f03db06546806b0d96  packaging/Linux/QinglanAscension/Binaries/Linux/QinglanAscension-Linux-Shipping
+f72b0289ea052acdf82c2def86d9f25bb1bf19f2766118dce126fcb7968bfca3  packaging/Linux/QinglanAscension/Content/Paks/QinglanAscension-Linux.pak
+072363fdbb2a5b49d9b24a3f44d954099150a4907e48b867535d947ad3830c8a  packaging/Linux/QinglanAscension/Content/Paks/QinglanAscension-Linux.ucas
+e8bd23e18670506aa18964bfe825d92d94ffd7e4663bcb6f04bf5d2978304bd1  packaging/Linux/QinglanAscension/Content/Paks/QinglanAscension-Linux.utoc
+
+Cooked inventory verification (IoStore .utoc contains):
+  L_Hub                    1
+  L_BambooHollow           1
+  L_AshenVerge             1
+  L_TribulationArena       1
+  DT_Localization          1
+  ST_Game                  1
+  DA_StoryRegistry         1
+  WBP_HUD                  1
+  WBP_Dialogue             1
+  WBP_Journal              1
+  WBP_Ending               1
+  AM_Human_SwordCut_1      1
+  AM_Knight_Attack         1
+  SK_Knight                6
+  SK_Slime                 4
+  SW_                      6
+  M_Cobblestone            2
+  M_QinglanSurface         1
+  IMC_Default              1
+
+Staged file counts:
+     4 packaging/Linux/Manifest_DebugFiles_Linux.txt
+    10 packaging/Linux/Manifest_NonUFSFiles_Linux.txt
+  3178 packaging/Linux/Manifest_UFSFiles_Linux.txt
+  3192 total

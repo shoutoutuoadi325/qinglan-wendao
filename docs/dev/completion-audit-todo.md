@@ -1338,7 +1338,10 @@ build (`tools/build/versions.lock`), headless `-nullrhi`. Evidence logs are in
 `ed02e88` (courier/trials/routing data, 35 tests), `16b1a7b` (proof guard
 runtime, combat/AI/VFX, bilingual runtime, content, 44 tests), `f481f03`
 (exit authority, focus, loadout, action gates, animation/VFX, 49 tests).
-Auxiliary: `ac56e83` (AUD-56 ledger), `368445d` (packaging evidence).
+Auxiliary: `ac56e83` (AUD-56 ledger), `368445d` (packaging evidence). Later
+waves: `f438ee1` (player menus/journal, textured surfaces, scene dressing,
+53 tests). Packaging evidence: `docs/dev/evidence/package-linux-2026-10-19.log`
+and `packaging/evidence/linux-shipping-2026-10-19.txt`.
 
 | AUD | Disposition | Implementation and coverage | Remaining acceptance |
 | --- | --- | --- | --- |
@@ -1392,15 +1395,16 @@ Auxiliary: `ac56e83` (AUD-56 ledger), `368445d` (packaging evidence).
 | AUD-48 | Fixed | Generated `DT_Localization` (890 bilingual rows), registered runtime text source for every `FText::FromStringTable` consumer, HUD prefers the service. Test: `BilingualKeyParityAndResolve`. | Offline Shipping locale switch and CJK glyph QA. |
 | AUD-49 | Fixed | First-launch state captured before profile creation; explicit culture preference persisted outside the profile. Test: `FirstLaunchOrdering`. | New-profile QA on a Chinese OS. |
 | AUD-50 | Fixed | `ST_Game` regenerated and asserted at import time (890 keys written; failure if the table truncates). | Fresh-process asset load QA. |
-| AUD-51 | Partially fixed | Native dialogue, ending, choice, save/bank notices implemented; other screens still incomplete. | Profile/settings/equipment/journal/shop/outcome screens. |
-| AUD-52 | Partially fixed | Responsive native dialogue with separate scroll/choice regions, real font sizes, source labels, Backspace dismissal. | Journal reopen, text-scale/720p/Retina/CJK visual QA. |
-| AUD-53 | Partially fixed | `DirectoriesToAlwaysCook`/localization cook configuration added. | Clean cook inventory + offline launch with the new content. |
+| AUD-51 | Fixed (source+tests) | Native pause, profile-slot, settings/accessibility, equipment/talisman, journal, shop/offer, and outcome screens with keyboard/controller/mouse navigation; HUD shows objective, talisman charges, trial time, barks. Tests: `JournalOpenCloseReopen`, `MenuStateMachine`, `OfferPersistence`. | Rendered layout/input QA; outcome summary is limited to returned loot until Run exposes a settlement summary. |
+| AUD-52 | Fixed (source+tests) | Responsive native dialogue/record widgets with real font-size settings (not render scale), wrapping, scrolling, source-kind labels, record close/reopen. Test: `JournalOpenCloseReopen`. | Text-scale/720p/Retina/CJK visual QA remains a rendered acceptance step. |
+| AUD-53 | Fixed (Linux) | Packaging settings corrected to the config=Game section: all runtime-string content directories and all four maps cook. Package inventory verified in the IoStore table of contents (maps, DT_Localization, ST_Game, registry, widgets, montages, character/monster meshes, audio, materials); `package-game.sh` rc=0 and mandatory-output checks fixed. Evidence: `packaging/evidence/linux-shipping-2026-10-19.txt`. | Offline launch on a display machine; Windows/macOS cook inventory. |
 | AUD-54 | Fixed (source) | Correct dynamic-resolution CVar/user setting; GI/reflection/Nanite policy applied per preset; capability reasons. | Measured rendering on supported backends. |
-| AUD-55 | Open | Content remains blockout; no authored texture sets or Niagara systems are committed. | Full art pass and rendered walkthrough. |
+| AUD-55 | Partially fixed | 81 Poly Haven Texture2D assets imported with correct sRGB/compression; textured + solid MICs per surface set; master material with tiling/samplers; hub/trial surfaces textured; deterministic collision-free Quaternius nature dressing on all four maps. Test: `TextureSetContract`. | Hero Niagara effects, hand-composed art, and rendered/performance evidence remain open. |
 | AUD-56 | Partially fixed | Ledger populated with 42 records (Quaternius CC0 verified, PolyHaven CC0, caching notes). | Eight audio sources are unknown; release blocker. |
 | AUD-57 | Fixed | Portable build/regenerate scripts, engine revision lock, nonzero on missing inputs, mandatory-output validation, regeneration rc_all=0. | Second-machine reproduction. |
-| AUD-58 | Partially fixed | 49 automation cases cover the repaired persistence/narrative/trial/combat/localization paths. | Fault injection, functional maps, complete keyboard/controller playthrough. |
-| AUD-59 | Blocked | Linux Shipping package manifests and artifact hashes recorded (`packaging/evidence/`). | Windows DX12 and Apple Silicon Metal builds/devices are unavailable in this environment; owner action required. |
+| AUD-58 | Partially fixed | 53 automation cases cover the repaired persistence/narrative/trial/combat/localization/UI/content paths. | Fault injection, functional maps, complete keyboard/controller playthrough. |
+| AUD-59 | Blocked | Linux Shipping package rebuilt after the repairs (rc=0) with a verified
+IoStore inventory and artifact hashes (`packaging/evidence/linux-shipping-2026-10-19.txt`). | Windows DX12 and Apple Silicon Metal builds/devices are unavailable in this environment; owner action required. |
 | AUD-60 | Fixed | README/CONTRIBUTING/test-report/build guide rewritten around recorded evidence with historical results labeled. | — |
 
 ### Remaining acceptance gates (not satisfied by this repair work)

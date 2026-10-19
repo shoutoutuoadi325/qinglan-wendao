@@ -43,8 +43,13 @@ run_as_build_user bash -c "cd '$QINGLAN_ENGINE_ROOT' && '$RUNUAT' BuildCookRun -
 rc=$?
 
 if [ "$rc" -eq 0 ]; then
-  CLIENT_BIN="$QINGLAN_ARCHIVE_DIR/QinglanAscension/Binaries/$QINGLAN_PLATFORM/QinglanAscension"
-  [ -f "$CLIENT_BIN" ] || fail "packaging reported success but the client binary is missing: $CLIENT_BIN"
+  # UAT names the staged executable <Target>-<Platform>-<Config> (e.g.
+  # QinglanAscension-Linux-Shipping); accept any binary in that directory and
+  # ignore the debug/symbol sidecars.
+  CLIENT_BIN=$(find "$QINGLAN_ARCHIVE_DIR/QinglanAscension/Binaries/$QINGLAN_PLATFORM" \
+    -maxdepth 1 -type f -name 'QinglanAscension*' ! -name '*.debug' ! -name '*.sym' \
+    2>/dev/null | head -1)
+  [ -n "$CLIENT_BIN" ] || fail "packaging reported success but no client binary was staged under $QINGLAN_ARCHIVE_DIR/QinglanAscension/Binaries/$QINGLAN_PLATFORM"
   find "$QINGLAN_ARCHIVE_DIR/QinglanAscension" -name '*.pak' -print -quit 2>/dev/null | grep -q . \
     || fail "packaging reported success but no pak staged under $QINGLAN_ARCHIVE_DIR/QinglanAscension"
 fi

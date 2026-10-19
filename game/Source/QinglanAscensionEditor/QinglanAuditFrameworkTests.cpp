@@ -1012,6 +1012,23 @@ namespace
 			return Save != nullptr && Profile != nullptr;
 		}
 
+		/**
+		 * Simulated process exit: deinitialize the subsystem collection and drop
+		 * every reference. The per-instance runtime bookkeeping is keyed by the
+		 * subsystem object, so a subsequent fixture shares only the on-disk save
+		 * directory, never in-memory run/profile state.
+		 */
+		void Shutdown()
+		{
+			if (Instance != nullptr)
+			{
+				Instance->Shutdown();
+			}
+			Instance = nullptr;
+			Save = nullptr;
+			Profile = nullptr;
+		}
+
 		UGameInstance* Instance = nullptr;
 		UQinglanSaveSubsystem* Save = nullptr;
 		UQinglanProfileSubsystem* Profile = nullptr;
@@ -1241,6 +1258,128 @@ bool FQinglanAuditSaveTruncatedTempRejected::RunTest(const FString& Parameters)
 	{
 		TestEqual(TEXT("Successful retry advances the sequence"), Committed->SaveSequence, 3);
 		TestEqual(TEXT("Successful retry preserves the inventory"), Committed->Inventory.SpiritShards, static_cast<int64>(42));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditProcessRestartResume,
+	"Qinglan.Persistence.ProcessRestartResume", AuditFrameworkTestFlags)
+
+bool FQinglanAuditProcessRestartResume::RunTest(const FString& Parameters)
+{
+	// The scope intentionally keeps one test-owned directory across both
+	// instances; it owns the static override and restores/clears it on exit.
+	// Runtime bookkeeping is keyed by subsystem object, so replacing the game
+	// instance models a process restart without in-memory state leaking.
+	const FScopedQinglanSaveDirectory Scope;
+	const FName RealmId(UQinglanEconomyLibrary::BambooRealmIdText);
+
+	FQinglanCheckpoint Expected;
+	{
+		// ---- Instance A: earn a checkpoint through production boundaries. ----
+		FQinglanSaveDiskFixture A;
+		if (!TestTrue(TEXT("Instance A initializes"), A.Initialize()))
+		{
+			return false;
+		}
+		A.Save->CreateNewProfile(SaveDiskTestSlot);
+		UQinglanRunSubsystem* RunA = A.Instance->GetSubsystem<UQinglanRunSubsystem>();
+		if (!TestNotNull(TEXT("Instance A run subsystem"), RunA))
+		{
+			return false;
+		}
+		TestTrue(TEXT("Bamboo expedition starts"), RunA->StartExpedition(RealmId, 424242));
+		TestTrue(TEXT("Room 2 entered"), RunA->EnterRoom(2));
+		// Completing the room awards unbanked loot and commits the room boundary.
+		RunA->CompleteCurrentRoom(FName(TEXT("tx.restart.room2")));
+		TestTrue(TEXT("Room 2 checkpoint committed"), RunA->GetCurrentRoomIndex() == 2 &&
+			RunA->IsInExpedition());
+		TestTrue(TEXT("Room 2 reward is unbanked"), RunA->GetUnbankedLoot().SpiritShards > 0);
+
+		// Save-before-travel production boundary; both this and the room commit
+		// persist the run's pre-room checkpoint.
+		FText SaveError;
+		TestTrue(TEXT("SaveActiveSession commits"), A.Save->SaveActiveSession(SaveError));
+		RunA->ExportCheckpoint(Expected);
+		TestEqual(TEXT("Expected checkpoint realm"), Expected.RealmId, RealmId);
+		TestEqual(TEXT("Expected checkpoint room"), Expected.RoomIndex, 2);
+		TestTrue(TEXT("Expected checkpoint committed room 2"), Expected.CommittedRoomIds.Contains(2));
+
+		// The checkpoint reached disk before the instance goes away.
+		UQinglanSaveGame* Persisted = Scope.LoadValid(A.Save, Scope.Path(SaveDiskTestSlot, 0));
+		if (TestNotNull(TEXT("Persisted primary is valid"), Persisted))
+		{
+			TestTrue(TEXT("Persisted primary carries a checkpoint"), Persisted->bHasCheckpoint);
+			TestEqual(TEXT("Persisted realm"), Persisted->Checkpoint.RealmId, Expected.RealmId);
+			TestEqual(TEXT("Persisted room"), Persisted->Checkpoint.RoomIndex, Expected.RoomIndex);
+			TestEqual(TEXT("Persisted loot"), Persisted->Checkpoint.Loot.SpiritShards,
+				Expected.Loot.SpiritShards);
+		}
+
+		A.Shutdown(); // simulated process exit; the override directory stays
+	}
+
+	{
+		// ---- Instance B: fresh GameInstance + Init against the same files. ----
+		FQinglanSaveDiskFixture B;
+		if (!TestTrue(TEXT("Instance B initializes"), B.Initialize()))
+		{
+			return false;
+		}
+		UQinglanRunSubsystem* RunB = B.Instance->GetSubsystem<UQinglanRunSubsystem>();
+		if (!TestNotNull(TEXT("Instance B run subsystem"), RunB))
+		{
+			return false;
+		}
+		// Isolation proof: the new game instance carries no in-memory run state;
+		// only the shared test directory connects it to instance A.
+		TestFalse(TEXT("Instance B starts without A's run state"), RunB->IsInExpedition());
+
+		FText Notice;
+		TestTrue(TEXT("LoadProfile succeeds after restart"), B.Save->LoadProfile(SaveDiskTestSlot, Notice));
+		TestTrue(TEXT("Expedition survives the restart"), RunB->IsInExpedition());
+		TestTrue(TEXT("A checkpoint resume is pending"), RunB->NeedsCheckpointResume());
+		TestFalse(TEXT("Resume maps to a cooked realm"), RunB->GetPendingCheckpointMap().IsNone());
+		TestEqual(TEXT("Resumed realm"), RunB->GetPendingCheckpointRealm(), RealmId);
+		TestEqual(TEXT("Resumed room"), RunB->GetCurrentRoomIndex(), 2);
+
+		FQinglanCheckpoint Restored;
+		RunB->ExportCheckpoint(Restored);
+		TestEqual(TEXT("Realm seed"), Restored.RealmSeed, Expected.RealmSeed);
+		TestEqual(TEXT("Encounter stream"), Restored.EncounterStreamState, Expected.EncounterStreamState);
+		TestEqual(TEXT("Loot stream"), Restored.LootStreamState, Expected.LootStreamState);
+		TestEqual(TEXT("Blessing stream"), Restored.BlessingStreamState, Expected.BlessingStreamState);
+		TestTrue(TEXT("Acquired blessings"), Restored.AcquiredBlessings == Expected.AcquiredBlessings);
+		TestTrue(TEXT("Pending blessing offer"),
+			Restored.PendingBlessingOffer == Expected.PendingBlessingOffer);
+		TestEqual(TEXT("Pending blessing room"), Restored.PendingBlessingRoom,
+			Expected.PendingBlessingRoom);
+		// Headless instances have no pawn, so the snapshot is the authored
+		// default attribute block; every field must still survive the round trip.
+		TestEqual(TEXT("Health"), Restored.PlayerAttributes.Health, Expected.PlayerAttributes.Health);
+		TestEqual(TEXT("Max health"), Restored.PlayerAttributes.MaxHealth,
+			Expected.PlayerAttributes.MaxHealth);
+		TestEqual(TEXT("Spiritual energy"), Restored.PlayerAttributes.SpiritualEnergy,
+			Expected.PlayerAttributes.SpiritualEnergy);
+		TestEqual(TEXT("Max spiritual energy"), Restored.PlayerAttributes.MaxSpiritualEnergy,
+			Expected.PlayerAttributes.MaxSpiritualEnergy);
+		TestEqual(TEXT("Stamina"), Restored.PlayerAttributes.Stamina, Expected.PlayerAttributes.Stamina);
+		TestEqual(TEXT("Max stamina"), Restored.PlayerAttributes.MaxStamina,
+			Expected.PlayerAttributes.MaxStamina);
+		TestEqual(TEXT("Technique power"), Restored.PlayerAttributes.TechniquePower,
+			Expected.PlayerAttributes.TechniquePower);
+		TestEqual(TEXT("Defense"), Restored.PlayerAttributes.Defense, Expected.PlayerAttributes.Defense);
+		TestEqual(TEXT("Unbanked shards"), Restored.Loot.SpiritShards, Expected.Loot.SpiritShards);
+		TestEqual(TEXT("Unbanked herbs"), Restored.Loot.SpiritHerb, Expected.Loot.SpiritHerb);
+		TestEqual(TEXT("Unbanked crystals"), Restored.Loot.VeinCrystal, Expected.Loot.VeinCrystal);
+		TestTrue(TEXT("Committed rooms"), Restored.CommittedRoomIds == Expected.CommittedRoomIds);
+		TestEqual(TEXT("Run loot query matches"), RunB->GetUnbankedLoot().SpiritShards,
+			Expected.Loot.SpiritShards);
+
+		// The resume handoff completes without dropping the expedition.
+		RunB->MarkCheckpointResumed();
+		TestFalse(TEXT("Resume request is consumed"), RunB->NeedsCheckpointResume());
+		TestTrue(TEXT("Expedition remains active after resume"), RunB->IsInExpedition());
 	}
 	return true;
 }
@@ -2808,6 +2947,8 @@ namespace
 namespace CampaignAudit
 {
 	constexpr int32 ExpectedMainSceneCount = 30;
+	constexpr int32 ExpectedSideQuestCount = 8;
+	constexpr int32 ExpectedSideStageCount = 24;
 
 	/** Smallest world that supports the production trial/room/story paths. */
 	class FCampaignWorld
@@ -3230,9 +3371,16 @@ public:
 	}
 
 	bool DriveScene(FName SceneId, FString& OutReason);
+	/** S1/S2/S3 side-quest stage driver; QuestId disambiguates protocol stages. */
+	bool DriveSideQuestStage(FName QuestId, FName StageId, FString& OutReason);
 
 private:
 	bool DriveSceneInternal(FName SceneId, FString& OutReason);
+	bool DriveSideQuestStageInternal(FName QuestId, FName StageId, FString& OutReason);
+	/** Sends one authored guard's terms. Delivery terms advance the authored
+	 *  18/12 in-fiction hours once per quest, then verify the reply arrived. */
+	void SendGuardTerms(const FQinglanRegistryGuard& Guard, TSet<FName>& AdvancedDeliveries,
+		FString& OutReason);
 	bool DriveGeneric(const FQinglanRegistryScene& Scene, FString& OutReason);
 	bool DriveTrial(const FQinglanRegistryScene& Scene, FString& OutReason);
 	bool DriveBossRoom(const FQinglanRegistryScene& Scene, FString& OutReason);
@@ -4191,6 +4339,343 @@ bool FMainJourneyDriver::DriveEnding(const FQinglanRegistryScene& Scene, FString
 	}
 	return true;
 }
+
+// ---------------------------------------------------------------------------
+// Side-quest driver (SQ01..SQ08, S1/S2/S3).
+// ---------------------------------------------------------------------------
+
+bool FMainJourneyDriver::DriveSideQuestStage(FName QuestId, FName StageId, FString& OutReason)
+{
+	if (DriveSideQuestStageInternal(QuestId, StageId, OutReason))
+	{
+		return true;
+	}
+	if (Story != nullptr && Story->IsScenePlaying())
+	{
+		const FString Cause = OutReason;
+		AbortPlayback();
+		if (Story->IsScenePlaying())
+		{
+			OutReason = FString::Printf(
+				TEXT("%s [playback abort failed; a public story StopPlayback API is needed]"), *Cause);
+		}
+		else
+		{
+			OutReason = FString::Printf(
+				TEXT("%s [playback aborted via Export/ImportNarrativeState]"), *Cause);
+		}
+	}
+	return false;
+}
+
+void FMainJourneyDriver::SendGuardTerms(const FQinglanRegistryGuard& Guard,
+	TSet<FName>& AdvancedDeliveries, FString& OutReason)
+{
+	OutReason.Reset();
+	for (const FQinglanRegistryGuardTerm& Term : Guard.AllOf)
+	{
+		if (Term.Kind == FName(TEXT("event")))
+		{
+			QinglanStoryRuntime::NotifyGameplayEvent(Story, Term.Event, TArray<FName>());
+		}
+		else if (Term.Kind == FName(TEXT("event_count")))
+		{
+			const int32 Required = FMath::Max(1, Term.Count);
+			for (int32 Count = 0; Count < Required; ++Count)
+			{
+				QinglanStoryRuntime::NotifyGameplayEvent(Story, Term.Event, TArray<FName>());
+			}
+		}
+		else if (Term.Kind == FName(TEXT("ordered")))
+		{
+			for (const FName Step : Term.OrderedSteps)
+			{
+				QinglanStoryRuntime::NotifyGameplayEvent(Story, Step, TArray<FName>());
+			}
+		}
+		else if (Term.Kind == FName(TEXT("time_advance")))
+		{
+			QinglanStoryRuntime::AdvanceHubTime(Story, Term.GameHours);
+		}
+		else if (Term.Kind == FName(TEXT("delivery")))
+		{
+			const FName DeliveryQuest = Term.Quest;
+			if (DeliveryQuest == NAME_None)
+			{
+				OutReason = TEXT("delivery guard term has no quest");
+				return;
+			}
+			if (!AdvancedDeliveries.Contains(DeliveryQuest))
+			{
+				const double Hours = QinglanStoryRuntime::DeliveryGameHoursForQuest(DeliveryQuest);
+				QinglanStoryRuntime::AdvanceHubTime(Story, Hours);
+				AdvancedDeliveries.Add(DeliveryQuest);
+			}
+			const QinglanStoryRuntime::FQinglanDeliveryStatus Pending =
+				QinglanStoryRuntime::QueryPendingDeliveries(Story);
+			if (Pending.Quests.Contains(DeliveryQuest))
+			{
+				OutReason = FString::Printf(
+					TEXT("courier reply for %s did not arrive after the authored fictional hours"),
+					*DeliveryQuest.ToString());
+				return;
+			}
+		}
+		else if (Term.Kind == FName(TEXT("flag")))
+		{
+			// Side-quest flag terms are previous-stage completion prerequisites.
+			// Verify them first so the test cannot write another stage's
+			// completion flag as a shortcut; the dispatcher call is then a
+			// no-op state confirmation on the production flag path.
+			if (!Story->HasFlag(Term.Flag))
+			{
+				OutReason = FString::Printf(
+					TEXT("guard flag %s is not set; the prerequisite stage did not commit"),
+					*Term.Flag.ToString());
+				return;
+			}
+			QinglanStoryRuntime::NotifyGameplayEvent(Story, NAME_None, TArray<FName>{ Term.Flag });
+		}
+	}
+}
+
+bool FMainJourneyDriver::DriveSideQuestStageInternal(FName QuestId, FName StageId, FString& OutReason)
+{
+	if (Registry == nullptr || Story == nullptr)
+	{
+		OutReason = TEXT("story registry/subsystem is unavailable");
+		return false;
+	}
+	const FQinglanRegistrySideQuest* Quest = Registry->FindQuest(QuestId);
+	if (Quest == nullptr)
+	{
+		OutReason = FString::Printf(TEXT("side quest %s is absent from the registry"),
+			*QuestId.ToString());
+		return false;
+	}
+	const FQinglanRegistryScene* Stage = nullptr;
+	int32 StageIndex = INDEX_NONE;
+	for (int32 Index = 0; Index < Quest->Stages.Num(); ++Index)
+	{
+		if (Quest->Stages[Index].SceneId == StageId)
+		{
+			Stage = &Quest->Stages[Index];
+			StageIndex = Index;
+			break;
+		}
+	}
+	if (Stage == nullptr)
+	{
+		OutReason = FString::Printf(TEXT("stage %s is not authored under quest %s"),
+			*StageId.ToString(), *QuestId.ToString());
+		return false;
+	}
+	if (Story->IsSceneCompleted(StageId))
+	{
+		OutReason = TEXT("stage was already completed before its authored entry");
+		return false;
+	}
+	const bool bConfirmationStage =
+		Stage->ScriptTrigger == FName(TEXT("confirmation_checks_ready"))
+		|| QinglanStoryRuntime::SceneHasCommitGuard(Story, StageId);
+	TSet<FName> AdvancedDeliveries;
+
+	if (bConfirmationStage)
+	{
+		// confirmation_checks_ready scenes cannot BeginScene until their
+		// structured commit guard passes. The guard terms are also the
+		// objective proof terms (plus the previous stage flag), so satisfy them
+		// first; choice stages do not auto-complete from the dispatch scan.
+		SendGuardTerms(Stage->ConfirmationGuardTerms, AdvancedDeliveries, OutReason);
+		if (!OutReason.IsEmpty())
+		{
+			return false;
+		}
+		CompleteSatisfiedObjectives(*Stage);
+		const QinglanStoryRuntime::FQinglanGuardReport CommitReport =
+			QinglanStoryRuntime::EvaluateSceneCommitGuard(Story, StageId);
+		if (CommitReport.Status != QinglanStoryRuntime::EQinglanGuardStatus::Satisfied)
+		{
+			OutReason = FString::Printf(
+				TEXT("S3 confirmation guard unmet (status=%d missing=%d) before BeginScene"),
+				static_cast<int32>(CommitReport.Status), CommitReport.Missing.Num());
+			return false;
+		}
+		if (!GuardedObjectivesSatisfied(*Stage, OutReason))
+		{
+			// Rare data shape: an objective term not mirrored by the commit guard.
+			for (const FQinglanRegistryObjective& Objective : Stage->Objectives)
+			{
+				SendGuardTerms(Objective.Guard, AdvancedDeliveries, OutReason);
+				if (!OutReason.IsEmpty())
+				{
+					return false;
+				}
+			}
+			CompleteSatisfiedObjectives(*Stage);
+			if (!GuardedObjectivesSatisfied(*Stage, OutReason))
+			{
+				return false;
+			}
+		}
+		if (Story->IsSceneCompleted(StageId))
+		{
+			// A confirmation stage must still present and commit its authored
+			// confirmation choice; guard dispatch alone must not complete it.
+			OutReason = TEXT("S3 committed from guard dispatch before its confirm choice");
+			return false;
+		}
+	}
+
+	if (!Story->BeginScene(StageId))
+	{
+		OutReason = FString::Printf(
+			TEXT("BeginScene rejected (playing=%d current=%s)"),
+			Story->IsScenePlaying() ? 1 : 0, *Story->GetCurrentSceneId().ToString());
+		return false;
+	}
+	if (!Story->IsScenePlaying() && !Story->IsSceneCompleted(StageId))
+	{
+		OutReason = TEXT("stage did not enter story playback");
+		return false;
+	}
+
+	if (Stage->Choices.Num() == 0)
+	{
+		// S1: play the transcript, then submit the gameplay proof.
+		for (int32 Line = 0; Line < Stage->Script.Num() + 8 && Story->IsScenePlaying(); ++Line)
+		{
+			Story->AdvanceLine();
+		}
+		SendGuardEvents(*Stage);
+		CompleteSatisfiedObjectives(*Stage);
+		if (!GuardedObjectivesSatisfied(*Stage, OutReason))
+		{
+			return false;
+		}
+		if (!Story->IsSceneCompleted(StageId))
+		{
+			OutReason = TEXT("choice-free side stage did not commit after its guard events");
+			return false;
+		}
+		return true;
+	}
+
+	if (!bConfirmationStage)
+	{
+		// S2: objective proof (if any) before the authored choice transaction.
+		SendGuardEvents(*Stage);
+		CompleteSatisfiedObjectives(*Stage);
+		if (!GuardedObjectivesSatisfied(*Stage, OutReason))
+		{
+			return false;
+		}
+	}
+	else if (!GuardedObjectivesSatisfied(*Stage, OutReason))
+	{
+		return false;
+	}
+
+	int32 Steps = 0;
+	int32 AdvancesSinceSelection = 0;
+	while (!Story->IsSceneCompleted(StageId) && Steps++ < 4096)
+	{
+		if (!Story->IsScenePlaying())
+		{
+			if (!Story->BeginScene(StageId))
+			{
+				OutReason = TEXT("playback stopped without committing and could not be re-entered");
+				return false;
+			}
+			if (!Story->IsScenePlaying())
+			{
+				OutReason = TEXT("re-entry did not resume side-stage playback");
+				return false;
+			}
+			AdvancesSinceSelection = 0;
+		}
+
+		bool bSelected = false;
+		SelectLegalChoice(*Stage, bSelected);
+		if (bSelected)
+		{
+			if (bConfirmationStage && (QuestId == FName(TEXT("SQ02")) || QuestId == FName(TEXT("SQ03")))
+				&& !Story->IsSceneCompleted(StageId)
+				&& Story->GetEffectiveAgreement(QuestId) == NAME_None)
+			{
+				OutReason = FString::Printf(
+					TEXT("accept_verified_proposal did not commit an effective agreement for %s"),
+					*QuestId.ToString());
+				return false;
+			}
+			AdvancesSinceSelection = 0;
+			continue;
+		}
+		Story->AdvanceLine();
+		++AdvancesSinceSelection;
+		if (AdvancesSinceSelection > Stage->Script.Num() + 64)
+		{
+			OutReason = FString::Printf(
+				TEXT("stalled after %d advances with no selectable side-stage choice (playing=%d)"),
+				AdvancesSinceSelection, Story->IsScenePlaying() ? 1 : 0);
+			return false;
+		}
+	}
+	if (!Story->IsSceneCompleted(StageId))
+	{
+		OutReason = TEXT("side-stage drive loop exhausted before commit");
+		return false;
+	}
+
+	// Protocol stages.
+	if (StageIndex == 1 && (QuestId == FName(TEXT("SQ02")) || QuestId == FName(TEXT("SQ03"))))
+	{
+		const FName Pending = QinglanStoryRuntime::GetPendingAgreement(Story, QuestId);
+		if (Pending == NAME_None)
+		{
+			OutReason = FString::Printf(
+				TEXT("select_proposal did not register a pending version for %s"), *QuestId.ToString());
+			return false;
+		}
+		if (!QinglanStoryRuntime::QueryPendingDeliveries(Story).Quests.Contains(QuestId))
+		{
+			OutReason = FString::Printf(
+				TEXT("courier dispatch is missing after %s S2"), *QuestId.ToString());
+			return false;
+		}
+	}
+	if (StageIndex == 2)
+	{
+		if (QuestId == FName(TEXT("SQ02")) || QuestId == FName(TEXT("SQ03")))
+		{
+			const FName Pending = QinglanStoryRuntime::GetPendingAgreement(Story, QuestId);
+			const FName Effective = Story->GetEffectiveAgreement(QuestId);
+			if (Effective == NAME_None || Effective != Pending)
+			{
+				OutReason = FString::Printf(
+					TEXT("verified agreement mismatch for %s (pending=%s effective=%s)"),
+					*QuestId.ToString(), *Pending.ToString(), *Effective.ToString());
+				return false;
+			}
+			if (QinglanStoryRuntime::QueryPendingDeliveries(Story).Quests.Contains(QuestId))
+			{
+				OutReason = FString::Printf(
+					TEXT("courier reply for %s is still pending at confirmation"), *QuestId.ToString());
+				return false;
+			}
+		}
+		for (const FName Flag : Quest->CompletionFlags)
+		{
+			if (!Story->HasFlag(Flag))
+			{
+				OutReason = FString::Printf(TEXT("quest %s completion flag %s is missing"),
+					*QuestId.ToString(), *Flag.ToString());
+				return false;
+			}
+		}
+	}
+	return true;
+}
 } // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditCampaignNewProfileMainJourney,
@@ -4372,5 +4857,185 @@ bool FQinglanAuditCampaignNewProfileMainJourney::RunTest(const FString& Paramete
 		Profile->HasCampaignFlag(FName(QinglanProgression::GoldenCoreReachedFlag)));
 
 	return BlockedScenes.Num() == 0;
+}
+
+// ===========================================================================
+// Side-quest functional campaign: SQ01..SQ08, S1 -> S2 -> S3 (24 stages).
+//
+// Starts from a new profile whose authored CH00-CH04 chapter flags are loaded
+// through the production narrative save bridge (the side quests are authored
+// to open after those chapters). No side stage is pre-completed. Every stage
+// then runs through BeginScene/AdvanceLine/SelectChoice, guard terms use
+// NotifyGameplayEvent, and SQ02/SQ03 use the production proposal ->
+// AdvanceHubTime(18/12 h) -> accept_verified_proposal protocol.
+// ===========================================================================
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditCampaignNewProfileSideQuestJourney,
+	"Qinglan.Campaign.NewProfileSideQuestJourney", AuditFrameworkTestFlags)
+
+bool FQinglanAuditCampaignNewProfileSideQuestJourney::RunTest(const FString& Parameters)
+{
+	using namespace CampaignAudit;
+	if (!FPlatformMisc::GetEnvironmentVariable(TEXT("QINGLAN_RUN_CAMPAIGN")).Equals(TEXT("1")))
+	{
+		AddInfo(TEXT("Skipped heavy side-quest campaign; set QINGLAN_RUN_CAMPAIGN=1 to run it."));
+		return true;
+	}
+	QinglanStoryRuntime::SetRegistryForTesting(nullptr);
+	FScopedQinglanSaveDirectory SaveDirectory;
+	FCampaignWorld Fix;
+	if (!TestTrue(TEXT("Headless side-quest world created"), Fix.IsValid()))
+	{
+		return false;
+	}
+
+	UQinglanSaveSubsystem* Save = Fix.Instance->GetSubsystem<UQinglanSaveSubsystem>();
+	UQinglanProfileSubsystem* Profile = Fix.Instance->GetSubsystem<UQinglanProfileSubsystem>();
+	UQinglanRunSubsystem* Run = Fix.Instance->GetSubsystem<UQinglanRunSubsystem>();
+	UQinglanStorySubsystem* Story = Fix.Instance->GetSubsystem<UQinglanStorySubsystem>();
+	if (!TestNotNull(TEXT("Save subsystem"), Save)
+		|| !TestNotNull(TEXT("Profile subsystem"), Profile)
+		|| !TestNotNull(TEXT("Run subsystem"), Run)
+		|| !TestNotNull(TEXT("Story subsystem"), Story))
+	{
+		return false;
+	}
+
+	Save->CreateNewProfile(SaveDiskTestSlot);
+	TestTrue(TEXT("CreateNewProfile activates a save session"), Save->IsProfileSessionActive());
+	TestTrue(TEXT("Side-quest pawn dispatched BeginPlay"),
+		Fix.Pawn != nullptr && Fix.Pawn->HasActorBegunPlay());
+	TestTrue(TEXT("Character Story/Save/Run production bindings are installed"),
+		Fix.AreProductionBindingsInstalled(Story, Run, Save));
+
+	const UQinglanStoryRegistry* Registry = Story->GetRegistry();
+	if (!TestNotNull(TEXT("Real story registry loads from /Game/Qinglan/Data/DA_StoryRegistry"), Registry))
+	{
+		return false;
+	}
+	TestEqual(TEXT("Registry carries eight side quests"), Registry->SideQuests.Num(), ExpectedSideQuestCount);
+
+	// Authored availability: SQ01/SQ05/SQ08 open after CH02, SQ04 after CH01,
+	// SQ02/SQ03/SQ06/SQ07 after CH04. Load that starting narrative state through
+	// the production save bridge. No side-stage completion flag is seeded.
+	FQinglanNarrativeState Seed;
+	Seed.Flags.Add(FName(TEXT("mq_ch00_complete")));
+	Seed.Flags.Add(FName(TEXT("mq_ch01_complete")));
+	Seed.Flags.Add(FName(TEXT("mq_ch02_complete")));
+	Seed.Flags.Add(FName(TEXT("mq_ch03_complete")));
+	Seed.Flags.Add(FName(TEXT("mq_ch04_complete")));
+	QinglanStoryRuntime::ImportNarrativeState(Story, Seed);
+	TestEqual(TEXT("All eight side quests are available after the seeded chapters"),
+		Story->GetAvailableSideQuests().Num(), ExpectedSideQuestCount);
+
+	TArray<TPair<FName, FName>> StageOrder;
+	for (const FQinglanRegistrySideQuest& Quest : Registry->SideQuests)
+	{
+		TestEqual(*FString::Printf(TEXT("%s authors three side stages"), *Quest.QuestId.ToString()),
+			Quest.Stages.Num(), 3);
+		for (const FQinglanRegistryScene& Stage : Quest.Stages)
+		{
+			StageOrder.Emplace(Quest.QuestId, Stage.SceneId);
+		}
+	}
+	TestEqual(TEXT("Registry carries the 24 authored side stages"),
+		StageOrder.Num(), ExpectedSideStageCount);
+
+	FMainJourneyDriver Driver(Fix, Story, Profile, Run, Registry);
+	TArray<FString> BlockedStages;
+	int32 PassedStages = 0;
+	for (const TPair<FName, FName>& Entry : StageOrder)
+	{
+		const FName QuestId = Entry.Key;
+		const FName StageId = Entry.Value;
+		const FQinglanRegistrySideQuest* Quest = Registry->FindQuest(QuestId);
+		const FQinglanRegistryScene* Stage = nullptr;
+		if (Quest != nullptr)
+		{
+			for (const FQinglanRegistryScene& Candidate : Quest->Stages)
+			{
+				if (Candidate.SceneId == StageId)
+				{
+					Stage = &Candidate;
+					break;
+				}
+			}
+		}
+		if (Stage == nullptr)
+		{
+			const FString Reason(TEXT("stage absent from its quest"));
+			BlockedStages.Add(FString::Printf(TEXT("%s/%s: %s"),
+				*QuestId.ToString(), *StageId.ToString(), *Reason));
+			TestTrue(*FString::Printf(TEXT("%s/%s enters its authored stage"),
+				*QuestId.ToString(), *StageId.ToString()), false);
+			continue;
+		}
+		TestFalse(*FString::Printf(TEXT("%s/%s is not pre-completed before entry"),
+			*QuestId.ToString(), *StageId.ToString()), Story->IsSceneCompleted(StageId));
+
+		FString Reason;
+		const bool bOk = Driver.DriveSideQuestStage(QuestId, StageId, Reason);
+		const bool bCompleted = Story->IsSceneCompleted(StageId);
+		if (bOk && bCompleted)
+		{
+			++PassedStages;
+			AddInfo(FString::Printf(TEXT("PASS %s/%s"),
+				*QuestId.ToString(), *StageId.ToString()));
+		}
+		else
+		{
+			if (Reason.IsEmpty())
+			{
+				Reason = TEXT("stage did not report completion");
+			}
+			BlockedStages.Add(FString::Printf(TEXT("%s/%s: %s"),
+				*QuestId.ToString(), *StageId.ToString(), *Reason));
+			AddError(FString::Printf(TEXT("BLOCKED %s/%s: %s"),
+				*QuestId.ToString(), *StageId.ToString(), *Reason));
+			TestTrue(*FString::Printf(TEXT("%s/%s completes through production paths"),
+				*QuestId.ToString(), *StageId.ToString()), false);
+			continue;
+		}
+
+		for (const FName Flag : Stage->SetsFlags)
+		{
+			TestTrue(*FString::Printf(TEXT("%s/%s commits authored flag %s"),
+				*QuestId.ToString(), *StageId.ToString(), *Flag.ToString()),
+				Story->HasFlag(Flag));
+		}
+	}
+
+	int32 CompletedStages = 0;
+	for (const FQinglanRegistrySideQuest& Quest : Registry->SideQuests)
+	{
+		for (const FQinglanRegistryScene& Stage : Quest.Stages)
+		{
+			if (Story->IsSceneCompleted(Stage.SceneId))
+			{
+				++CompletedStages;
+			}
+		}
+		for (const FName Flag : Quest.CompletionFlags)
+		{
+			TestTrue(*FString::Printf(TEXT("Quest %s completion flag %s is set"),
+				*Quest.QuestId.ToString(), *Flag.ToString()), Story->HasFlag(Flag));
+		}
+	}
+	TestEqual(TEXT("All 24 side stages complete"), CompletedStages, ExpectedSideStageCount);
+	TestEqual(TEXT("Driver pass count matches completed side stages"),
+		PassedStages, ExpectedSideStageCount);
+	TestEqual(TEXT("No side quests remain available"),
+		Story->GetAvailableSideQuests().Num(), 0);
+	// The authored quest rewards ride the production reward path.
+	TestTrue(TEXT("SQ04 unlocked mist_step"), Profile->IsTechniqueUnlocked(FName(TEXT("mist_step"))));
+	TestTrue(TEXT("SQ05 unlocked orbiting_blades"),
+		Profile->IsTechniqueUnlocked(FName(TEXT("orbiting_blades"))));
+
+	AddInfo(FString::Printf(TEXT("Side-quest manifest: %d/%d stages passed, %d blocked"),
+		PassedStages, ExpectedSideStageCount, BlockedStages.Num()));
+	for (const FString& Blocked : BlockedStages)
+	{
+		AddError(FString::Printf(TEXT("Side-quest manifest: %s"), *Blocked));
+	}
+	return BlockedStages.Num() == 0;
 }
 #endif // WITH_DEV_AUTOMATION_TESTS

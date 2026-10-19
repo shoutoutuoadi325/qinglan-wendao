@@ -656,10 +656,11 @@ void AQinglanCharacter::BeginPlay()
 	// Montage playback stays on DefaultSlot. If creating the instance fails
 	// (unregistered mesh or class failure), fall back to the single-node idle.
 	//
-	// Still missing from the art/content side: authored Human Walk/Run takes
-	// (the Human rig ships Idle/Jump/Action only), an AnimBP editor asset with
-	// a DefaultSlot node (slot montages need a graph to produce pose), and
-	// sword_base/sword_tip/cast_source socket validation.
+	// Walk/Run currently resolve to procedural placeholder sequences authored by
+	// QinglanAnimBootstrap (the Human rig ships Idle/Jump/Action only) and fall
+	// back to Idle until that commandlet runs. Still missing from the art side:
+	// an AnimBP editor asset with a DefaultSlot node (slot montages need a graph
+	// to produce pose) and sword_base/sword_tip/cast_source socket validation.
 	if (USkeletalMeshComponent* const MeshComp = GetMesh())
 	{
 		if (USkeletalMesh* const Mesh = Cast<USkeletalMesh>(

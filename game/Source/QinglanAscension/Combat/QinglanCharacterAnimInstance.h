@@ -10,8 +10,12 @@
 // slot); without that graph the slot montages have no pose output.
 //
 // Remaining asset work (AUD-44, tracked here because the code path is ready):
-//   - The Human rig ships Idle/Jump/ArmatureAction only. There is no
-//     SK_HumanHuman_Armature_Walk or _Run take, so Walk/Run fall back to Idle.
+//   - The Human rig ships Idle/Jump/ArmatureAction only. QinglanAnimBootstrap
+//     now generates "程序化占位行走/跑步" (procedural placeholder walk/run) at
+//     SK_HumanHuman_Armature_Walk / _Run using the UE 5.8 animation data model
+//     API (1.0 s / 0.6 s loops, local-X limb swing, 20-35 deg knee flexion).
+//     The axis/sign is not visually tuned; replace with authored takes when
+//     available. Until the commandlet runs, Walk/Run fall back to Idle.
 //     (The Knight rig has Walking/Run takes, but its skeleton is a different
 //     rig and cannot be played on the Human mesh.)
 //   - No AnimBP editor asset exists yet (slot graph, aim offsets, layered

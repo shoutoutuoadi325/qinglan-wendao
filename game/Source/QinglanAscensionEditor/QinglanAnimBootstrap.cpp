@@ -1,4 +1,6 @@
-// Animation bootstrap: builds combat montages from imported FBX takes.
+// Animation bootstrap: builds combat montages from imported FBX takes, and
+// procedurally authors the missing Human Walk/Run locomotion sequences
+// (AUD-44 placeholders) through the UE 5.8 animation data model API.
 // Discovers anim sequences under /Game/Qinglan/Characters, cuts combo montages
 // with notify windows, and pairs them to techniques/enemies by naming rules.
 //
@@ -15,10 +17,13 @@
 #include "UObject/Package.h"
 #include "UObject/SavePackage.h"
 
+#include "Animation/AnimData/IAnimationDataController.h"
+#include "Animation/AnimData/IAnimationDataModel.h"
 #include "Animation/AnimMontage.h"
 #include "Animation/AnimSequence.h"
 #include "Animation/Skeleton.h"
 #include "Abilities/QinglanTechniqueTypes.h"
+#include "Engine/SkeletalMesh.h"
 
 /**
  * AUD-45 path contract. Each montage is its own package and its top-level
@@ -156,6 +161,397 @@ namespace
 		}
 		return true;
 	}
+
+	// -----------------------------------------------------------------------
+	// AUD-44: procedural placeholder Walk/Run animation sequences.
+	//
+	// The Quaternius Human pack ships Idle/Jump/ArmatureAction but no locomotion
+	// takes. Until the art pass authors real Walk/Run clips, this generates two
+	// independent one-second / 0.6-second loop assets with hand-authored limb
+	// swing so UQinglanCharacterAnimInstance's convention paths resolve.
+	//
+	// These are placeholders: the rotation axis/sign below follows the AUD-44
+	// prescription (local X) but has not been visually tuned against the rig;
+	// the assets are separate names and can be replaced/removed freely.
+	// -----------------------------------------------------------------------
+	const TCHAR* const HumanCharacterDirectory = TEXT("/Game/Qinglan/Characters/Human");
+	const TCHAR* const HumanSkeletonObjectPath = TEXT("/Game/Qinglan/Characters/Human/SK_Human_Skeleton");
+	const TCHAR* const HumanMeshObjectPath = TEXT("/Game/Qinglan/Characters/Human/SK_Human");
+
+	USkeleton* LoadHumanSkeleton()
+	{
+		if (USkeleton* Skeleton = LoadObject<USkeleton>(nullptr, HumanSkeletonObjectPath))
+		{
+			return Skeleton;
+		}
+		if (USkeletalMesh* Mesh = LoadObject<USkeletalMesh>(nullptr, HumanMeshObjectPath))
+		{
+			return Mesh->GetSkeleton();
+		}
+		return nullptr;
+	}
+
+	struct FProceduralLimbBones
+	{
+		FName LeftThigh;
+		FName RightThigh;
+		FName LeftCalf;
+		FName RightCalf;
+		FName LeftUpperArm;
+		FName RightUpperArm;
+	};
+
+	/**
+	 * Case-insensitive role matching against the reference skeleton. The Human
+	 * rig uses Mixamo-style names (LeftUpLeg/LeftLeg/LeftArm), but the matcher
+	 * also accepts thigh/calf/leg/arm/upperarm spellings from other packs.
+	 * Missing roles fall back to the first reference bones with a warning.
+	 */
+	FProceduralLimbBones ResolveProceduralLimbBones(const FReferenceSkeleton& RefSkeleton)
+	{
+		FProceduralLimbBones Bones;
+		const int32 NumBones = RefSkeleton.GetRawBoneNum();
+
+		// "前若干骨骼" fallback pool: skip the root so a fallback never rotates
+		// the whole character around its origin.
+		TArray<FName> FallbackBones;
+		for (int32 BoneIndex = 1; BoneIndex < NumBones && FallbackBones.Num() < 8; ++BoneIndex)
+		{
+			FallbackBones.Add(RefSkeleton.GetBoneName(BoneIndex));
+		}
+		if (FallbackBones.Num() == 0 && NumBones > 0)
+		{
+			FallbackBones.Add(RefSkeleton.GetBoneName(0));
+		}
+
+		TSet<FName> Assigned;
+		auto Assign = [&Assigned](FName Candidate, FName& OutBone)
+		{
+			if (!Candidate.IsNone() && OutBone.IsNone() && !Assigned.Contains(Candidate))
+			{
+				OutBone = Candidate;
+				Assigned.Add(Candidate);
+			}
+		};
+
+		for (int32 BoneIndex = 0; BoneIndex < NumBones; ++BoneIndex)
+		{
+			const FName BoneName = RefSkeleton.GetBoneName(BoneIndex);
+			const FString Lower = BoneName.ToString().ToLower();
+
+			const bool bLeft = Lower.Contains(TEXT("left"))
+				|| Lower.StartsWith(TEXT("l_")) || Lower.EndsWith(TEXT("_l"))
+				|| Lower.EndsWith(TEXT(".l"));
+			const bool bRight = Lower.Contains(TEXT("right"))
+				|| Lower.StartsWith(TEXT("r_")) || Lower.EndsWith(TEXT("_r"))
+				|| Lower.EndsWith(TEXT(".r"));
+			if (!bLeft && !bRight)
+			{
+				continue;
+			}
+
+			const bool bThigh = Lower.Contains(TEXT("thigh"))
+				|| Lower.Contains(TEXT("upleg")) || Lower.Contains(TEXT("upperleg"));
+			const bool bCalf = !bThigh && (Lower.Contains(TEXT("calf")) || Lower.Contains(TEXT("leg")));
+			const bool bUpperArm = Lower.Contains(TEXT("upperarm")) || Lower.Contains(TEXT("upper_arm"))
+				|| (Lower.Contains(TEXT("arm"))
+					&& !Lower.Contains(TEXT("forearm"))
+					&& !Lower.Contains(TEXT("lowerarm"))
+					&& !Lower.Contains(TEXT("hand"))
+					&& !Lower.Contains(TEXT("shoulder"))
+					&& !Lower.Contains(TEXT("clavicle")));
+
+			if (bThigh)
+			{
+				Assign(BoneName, bLeft ? Bones.LeftThigh : Bones.RightThigh);
+			}
+			else if (bCalf)
+			{
+				Assign(BoneName, bLeft ? Bones.LeftCalf : Bones.RightCalf);
+			}
+			else if (bUpperArm)
+			{
+				Assign(BoneName, bLeft ? Bones.LeftUpperArm : Bones.RightUpperArm);
+			}
+		}
+
+		auto FillMissing = [&FallbackBones, &Assigned](FName& OutBone, const TCHAR* Role)
+		{
+			if (!OutBone.IsNone())
+			{
+				return;
+			}
+			for (const FName Candidate : FallbackBones)
+			{
+				if (!Assigned.Contains(Candidate))
+				{
+					OutBone = Candidate;
+					Assigned.Add(Candidate);
+					UE_LOG(LogTemp, Warning,
+						TEXT("AUD-44: no %s bone matched; using reference bone '%s'"),
+						Role, *Candidate.ToString());
+					return;
+				}
+			}
+			if (FallbackBones.Num() > 0)
+			{
+				OutBone = FallbackBones[0];
+				UE_LOG(LogTemp, Warning,
+					TEXT("AUD-44: no %s bone matched and fallback pool exhausted; reusing '%s'"),
+					Role, *OutBone.ToString());
+			}
+			else
+			{
+				UE_LOG(LogTemp, Warning, TEXT("AUD-44: no bones available for %s role"), Role);
+			}
+		};
+		FillMissing(Bones.LeftThigh, TEXT("left thigh"));
+		FillMissing(Bones.RightThigh, TEXT("right thigh"));
+		FillMissing(Bones.LeftCalf, TEXT("left calf"));
+		FillMissing(Bones.RightCalf, TEXT("right calf"));
+		FillMissing(Bones.LeftUpperArm, TEXT("left upper-arm"));
+		FillMissing(Bones.RightUpperArm, TEXT("right upper-arm"));
+
+		UE_LOG(LogTemp, Log,
+			TEXT("AUD-44 limb bones: LT=%s RT=%s LC=%s RC=%s LA=%s RA=%s"),
+			*Bones.LeftThigh.ToString(), *Bones.RightThigh.ToString(),
+			*Bones.LeftCalf.ToString(), *Bones.RightCalf.ToString(),
+			*Bones.LeftUpperArm.ToString(), *Bones.RightUpperArm.ToString());
+		return Bones;
+	}
+
+	/** One limb track: keyed local-X swing (thigh/arm) or 20-35 deg knee bend. */
+	bool AddProceduralSwingTrack(
+		IAnimationDataController& Controller,
+		const FReferenceSkeleton& RefSkeleton,
+		FName BoneName,
+		float SwingDegrees,
+		float PhaseOffsetRadians,
+		bool bKneeBend,
+		int32 NumFrames,
+		int32 NumKeys)
+	{
+		const int32 BoneIndex = RefSkeleton.FindBoneIndex(BoneName);
+		if (BoneIndex == INDEX_NONE)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("AUD-44: bone '%s' not found in reference skeleton; track skipped"),
+				*BoneName.ToString());
+			return false;
+		}
+
+		const FTransform& RefPose = RefSkeleton.GetRawRefBonePose()[BoneIndex];
+		TArray<FVector> PositionalKeys;
+		TArray<FQuat> RotationalKeys;
+		TArray<FVector> ScalingKeys;
+		PositionalKeys.Reserve(NumKeys);
+		RotationalKeys.Reserve(NumKeys);
+		ScalingKeys.Reserve(NumKeys);
+
+		constexpr float TwoPi = 2.f * UE_PI;
+		constexpr float KneeMinDegrees = 20.f;
+		constexpr float KneeMaxDegrees = 35.f;
+
+		for (int32 KeyIndex = 0; KeyIndex < NumKeys; ++KeyIndex)
+		{
+			// Key 0 and key NumFrames share the same phase for a seamless loop.
+			const float Alpha = static_cast<float>(KeyIndex) / static_cast<float>(FMath::Max(1, NumFrames));
+			const float Phase = Alpha * TwoPi + PhaseOffsetRadians;
+
+			float AngleDegrees = SwingDegrees * FMath::Sin(Phase);
+			if (bKneeBend)
+			{
+				// Positive-only knee flexion, phase-lagged by the caller.
+				const float BendAlpha = 0.5f + 0.5f * FMath::Sin(Phase); // 0..1
+				AngleDegrees = FMath::Lerp(KneeMinDegrees, KneeMaxDegrees, BendAlpha);
+			}
+
+			// Post-multiply applies the delta in the bone's local space.
+			const FQuat Swing(FVector::ForwardVector, FMath::DegreesToRadians(AngleDegrees));
+			PositionalKeys.Add(RefPose.GetLocation());
+			RotationalKeys.Add((RefPose.GetRotation() * Swing).GetNormalized());
+			ScalingKeys.Add(RefPose.GetScale3D());
+		}
+
+		if (!Controller.AddBoneCurve(BoneName, /*bShouldTransact=*/false))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("AUD-44: AddBoneCurve failed for '%s'"), *BoneName.ToString());
+			return false;
+		}
+		if (!Controller.SetBoneTrackKeys(BoneName, PositionalKeys, RotationalKeys, ScalingKeys, /*bShouldTransact=*/false))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("AUD-44: SetBoneTrackKeys failed for '%s'"), *BoneName.ToString());
+			return false;
+		}
+		return true;
+	}
+
+	/** Builds and saves one procedural locomotion sequence. */
+	UAnimSequence* GenerateProceduralLocomotionSequence(
+		USkeleton* Skeleton,
+		const FString& AssetName,
+		int32 NumFrames,
+		float ThighSwingDegrees,
+		float ArmSwingDegrees,
+		const TCHAR* Label)
+	{
+		if (!Skeleton || NumFrames <= 0)
+		{
+			UE_LOG(LogTemp, Error, TEXT("AUD-44: cannot generate %s (skeleton=%s frames=%d)"),
+				*AssetName, *GetNameSafe(Skeleton), NumFrames);
+			return nullptr;
+		}
+
+		const FString PackagePath = FString(HumanCharacterDirectory) / AssetName;
+		const FString ObjectPath = FString::Printf(TEXT("%s.%s"), *PackagePath, *AssetName);
+
+		// Placeholders are generated only when the convention path is empty: an
+		// authored replacement must survive later bootstrap runs.
+		if (FPackageName::DoesPackageExist(PackagePath))
+		{
+			if (UAnimSequence* Existing = LoadObject<UAnimSequence>(nullptr, *ObjectPath))
+			{
+				UE_LOG(LogTemp, Log,
+					TEXT("AUD-44: %s already exists; leaving it untouched"), *AssetName);
+				return Existing;
+			}
+			UE_LOG(LogTemp, Warning,
+				TEXT("AUD-44: %s exists on disk but failed to load; regenerating"), *AssetName);
+		}
+
+		UPackage* Package = CreatePackage(*PackagePath);
+		if (!Package)
+		{
+			UE_LOG(LogTemp, Error, TEXT("AUD-44: could not create package %s"), *PackagePath);
+			return nullptr;
+		}
+
+		UAnimSequence* Sequence = FindObject<UAnimSequence>(Package, *AssetName);
+		if (!Sequence)
+		{
+			Sequence = NewObject<UAnimSequence>(Package, *AssetName, RF_Public | RF_Standalone | RF_Transactional);
+		}
+		if (!Sequence)
+		{
+			UE_LOG(LogTemp, Error, TEXT("AUD-44: could not create UAnimSequence %s"), *PackagePath);
+			return nullptr;
+		}
+
+		Sequence->SetSkeleton(Skeleton);
+		const FReferenceSkeleton& RefSkeleton = Skeleton->GetReferenceSkeleton();
+		const FProceduralLimbBones Limbs = ResolveProceduralLimbBones(RefSkeleton);
+		const int32 NumKeys = NumFrames + 1; // frames 0..NumFrames, last == first
+		constexpr float TwoPi = 2.f * UE_PI;
+		const float CalfPhaseLag = -0.3f * TwoPi;
+
+		IAnimationDataController& Controller = Sequence->GetController();
+		Controller.OpenBracket(
+			FText::FromString(FString::Printf(TEXT("Generating procedural %s locomotion"), Label)),
+			/*bShouldTransact=*/false);
+		Controller.ResetModel(/*bShouldTransact=*/false);
+		Controller.SetFrameRate(FFrameRate(30, 1), /*bShouldTransact=*/false);
+		Controller.SetNumberOfFrames(FFrameNumber(NumFrames), /*bShouldTransact=*/false);
+
+		int32 TrackCount = 0;
+		TSet<FName> AddedTracks;
+		auto AddTrackOnce = [&](FName BoneName, float SwingDegrees, float PhaseOffset, bool bKneeBend)
+		{
+			// The fallback pool can (only when exhausted) map two roles to one
+			// bone; never add/overwrite the same track twice.
+			if (BoneName.IsNone() || AddedTracks.Contains(BoneName))
+			{
+				return;
+			}
+			AddedTracks.Add(BoneName);
+			if (AddProceduralSwingTrack(Controller, RefSkeleton, BoneName, SwingDegrees,
+					PhaseOffset, bKneeBend, NumFrames, NumKeys))
+			{
+				++TrackCount;
+			}
+		};
+
+		AddTrackOnce(Limbs.LeftThigh, ThighSwingDegrees, 0.f, /*bKneeBend=*/false);
+		AddTrackOnce(Limbs.RightThigh, ThighSwingDegrees, UE_PI, /*bKneeBend=*/false);
+		AddTrackOnce(Limbs.LeftCalf, 0.f, CalfPhaseLag, /*bKneeBend=*/true);
+		AddTrackOnce(Limbs.RightCalf, 0.f, UE_PI + CalfPhaseLag, /*bKneeBend=*/true);
+		// Arms counter-swing against the same-side leg (contralateral gait).
+		AddTrackOnce(Limbs.LeftUpperArm, ArmSwingDegrees, UE_PI, /*bKneeBend=*/false);
+		AddTrackOnce(Limbs.RightUpperArm, ArmSwingDegrees, 0.f, /*bKneeBend=*/false);
+
+		if (TrackCount == 0)
+		{
+			Controller.CloseBracket(/*bShouldTransact=*/false);
+			UE_LOG(LogTemp, Error, TEXT("AUD-44: no limb tracks generated for %s; asset not saved"), *AssetName);
+			return nullptr;
+		}
+
+		Controller.NotifyPopulated();
+		Controller.CloseBracket(/*bShouldTransact=*/false);
+		Sequence->MarkPackageDirty();
+
+		FSavePackageArgs Args;
+		Args.TopLevelFlags = RF_Public | RF_Standalone;
+		Args.SaveFlags = SAVE_NoError;
+		if (!UPackage::SavePackage(Package, Sequence,
+				*FPackageName::LongPackageNameToFilename(PackagePath, FPackageName::GetAssetPackageExtension()), Args))
+		{
+			UE_LOG(LogTemp, Error, TEXT("AUD-44: failed to save procedural sequence %s"), *PackagePath);
+			return nullptr;
+		}
+		FAssetRegistryModule::AssetCreated(Sequence);
+
+		UE_LOG(LogTemp, Log, TEXT("AUD-44: generated %s (%d frames, %d tracks, %.2fs)"),
+			*AssetName, NumFrames, TrackCount, Sequence->GetPlayLength());
+		return Sequence;
+	}
+
+	/** Post-save contract check for the generated locomotion assets. */
+	bool VerifyProceduralLocomotionSequence(const FString& AssetName, const USkeleton* ExpectedSkeleton)
+	{
+		const FString PackagePath = FString(HumanCharacterDirectory) / AssetName;
+		const FString ObjectPath = FString::Printf(TEXT("%s.%s"), *PackagePath, *AssetName);
+		UAnimSequence* Loaded = LoadObject<UAnimSequence>(nullptr, *ObjectPath);
+		if (!Loaded)
+		{
+			UE_LOG(LogTemp, Error, TEXT("AUD-44 verify: sequence not loadable at %s"), *ObjectPath);
+			return false;
+		}
+		if (Loaded->GetName() != AssetName || Loaded->GetOutermost()->GetName() != PackagePath)
+		{
+			// The anim instance resolves these assets by convention path, so a
+			// package/object name mismatch must fail the bootstrap.
+			UE_LOG(LogTemp, Error, TEXT("AUD-44 verify: sequence identity mismatch at %s (package=%s object=%s)"),
+				*ObjectPath, *Loaded->GetOutermost()->GetName(), *Loaded->GetName());
+			return false;
+		}
+		if (!Loaded->GetSkeleton())
+		{
+			UE_LOG(LogTemp, Error, TEXT("AUD-44 verify: sequence %s has no skeleton"), *ObjectPath);
+			return false;
+		}
+		if (ExpectedSkeleton && Loaded->GetSkeleton() != ExpectedSkeleton)
+		{
+			UE_LOG(LogTemp, Error, TEXT("AUD-44 verify: sequence %s skeleton '%s' != expected '%s'"),
+				*ObjectPath, *Loaded->GetSkeleton()->GetName(), *ExpectedSkeleton->GetName());
+			return false;
+		}
+		if (Loaded->GetPlayLength() <= 0.f)
+		{
+			UE_LOG(LogTemp, Error, TEXT("AUD-44 verify: sequence %s has zero play length"), *ObjectPath);
+			return false;
+		}
+		if (const IAnimationDataModel* Model = Loaded->GetDataModel())
+		{
+			if (Model->GetNumBoneTracks() <= 0)
+			{
+				UE_LOG(LogTemp, Error, TEXT("AUD-44 verify: sequence %s has no bone tracks"), *ObjectPath);
+				return false;
+			}
+		}
+		UE_LOG(LogTemp, Log, TEXT("AUD-44 verify: %s ok (%.2fs, %d bone tracks)"),
+			*ObjectPath, Loaded->GetPlayLength(),
+			Loaded->GetDataModel() ? Loaded->GetDataModel()->GetNumBoneTracks() : 0);
+		return true;
+	}
 } // namespace
 
 UQinglanAnimBootstrapCommandlet::UQinglanAnimBootstrapCommandlet()
@@ -240,8 +636,54 @@ int32 UQinglanAnimBootstrapCommandlet::Main(const FString& Params)
 	UE_LOG(LogTemp, Log, TEXT("QinglanAnimBootstrap starting"));
 	bool bOk = true;
 
-	// --- Discover imported anim sequences by character group. ---
+	// The asset registry is needed both by the procedural asset creation below
+	// (FAssetRegistryModule::AssetCreated) and by the montage discovery pass.
 	FAssetRegistryModule& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+
+	// --- AUD-44: author placeholder Human Walk/Run sequences. ---
+	// These use conventions matching the existing SK_HumanHuman_Armature_Idle
+	// asset, so UQinglanCharacterAnimInstance picks them up automatically.
+	// Opt-in: the UE 5.8 animation-data controller needs a Sequencer-backed
+	// model for AddBoneCurve (the raw UAnimSequence controller path emits
+	// "No Movie Scene found for SequencerDataModel"), so the default
+	// regeneration leaves locomotion on the Idle fallback until the asset is
+	// authored in the editor or the API path is reworked. Pass
+	// -procedural-locomotion to attempt it.
+	const bool bAuthorProceduralLocomotion = FParse::Param(*Params, TEXT("procedural-locomotion"));
+	if (bAuthorProceduralLocomotion && LoadHumanSkeleton())
+	{
+		USkeleton* const HumanSkeleton = LoadHumanSkeleton();
+		if (HumanSkeleton == nullptr)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("AUD-44: Human skeleton unavailable; procedural Walk/Run generation skipped"));
+		}
+		const TCHAR* const WalkName = TEXT("SK_HumanHuman_Armature_Walk");
+		const TCHAR* const RunName = TEXT("SK_HumanHuman_Armature_Run");
+		UAnimSequence* const WalkSequence =
+			GenerateProceduralLocomotionSequence(HumanSkeleton, WalkName, /*NumFrames=*/30,
+				/*ThighSwingDegrees=*/25.f, /*ArmSwingDegrees=*/18.f, TEXT("walk"));
+		UAnimSequence* const RunSequence =
+			GenerateProceduralLocomotionSequence(HumanSkeleton, RunName, /*NumFrames=*/18,
+				/*ThighSwingDegrees=*/40.f, /*ArmSwingDegrees=*/28.f, TEXT("run"));
+		if (!WalkSequence || !RunSequence)
+		{
+			bOk = false;
+		}
+		if (!VerifyProceduralLocomotionSequence(WalkName, HumanSkeleton))
+		{
+			bOk = false;
+		}
+		if (!VerifyProceduralLocomotionSequence(RunName, HumanSkeleton))
+		{
+			bOk = false;
+		}
+	}
+	else if (!bAuthorProceduralLocomotion)
+	{
+		UE_LOG(LogTemp, Log, TEXT("AUD-44: procedural Walk/Run authoring skipped (opt-in -procedural-locomotion)"));
+	}
+
+	// --- Discover imported anim sequences by character group. ---
 	TArray<FAssetData> AllAssets;
 	AssetRegistry.Get().GetAssetsByClass(
 		FTopLevelAssetPath(TEXT("/Script/Engine"), TEXT("AnimSequence")), AllAssets, /*bSearchSubClasses=*/false);

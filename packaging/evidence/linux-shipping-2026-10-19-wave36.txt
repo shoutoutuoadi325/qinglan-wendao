@@ -1,0 +1,22 @@
+Linux Shipping package evidence (2026-10-19 wave 36, after AUD-42/44 wave)
+Engine: 5.8.3 (tools/build/versions.lock)
+Command: bash tools/build/package-game.sh (BuildCookRun -build -cook -stage -pak
+-compressed -archive, platform=Linux, clientconfig=Shipping), rc=0.
+
+SHA-256
+  c56fed5898981892fcbb68ac1c074f08c81454f4f5a13f730bc1c846f378485e  Binaries/Linux/QinglanAscension-Linux-Shipping
+  d9f0448e7ec55b43cb532299fb2fcacf0b71d6a110e9b6f590852c5637db133a  Content/Paks/QinglanAscension-Linux.pak
+  95ad41e7dc3191411537130b4be713b45ef8aacd05c0d1a3cba566c36805b54c  Content/Paks/QinglanAscension-Linux.ucas
+  2a06117235ecf6570e33f80f542b7eaff13af1b255dbfe8a8ca130701cc4eee1  Content/Paks/QinglanAscension-Linux.utoc
+
+IoStore inventory (UnrealPak <utoc> -List; 1887 entries): includes
+  Qinglan/VFX/NS_Impact.uasset, NS_Telegraph.uasset, NS_Cast.uasset (AUD-42)
+  Characters/{Human,Knight,Monsters}/ABP_*.uasset (AUD-44 per-rig slot graphs)
+  AM_Human_HitReact.uasset, AM_Knight_HitReact.uasset
+  Monsters/SK_Slime, SK_Skeleton, Bat, Dragon meshes
+
+Verification state in this wave: clean content regeneration rc_all=0
+(tools/build/regenerate-content.sh), full automation suite 67/67,
+main journey 30/30, side quests 24/24. Rendered packaged-boot QA from the
+previous package remains the latest rendered evidence; target-backend and
+interactive QA are still outstanding (docs/dev/completion-audit-todo.md).

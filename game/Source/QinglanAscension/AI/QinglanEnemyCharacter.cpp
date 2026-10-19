@@ -175,7 +175,7 @@ namespace
 	// anim graph is skeleton-specific, so the target skeleton is verified
 	// before use; a missing or mismatched graph keeps the native class (the
 	// native state machine still drives locomotion, montage slots go unused).
-	UClass* ResolveHumanoidAnimInstanceClass(const USkeletalMesh* Mesh)
+	UClass* ResolveEnemyAnimInstanceClass(const USkeletalMesh* Mesh)
 	{
 		const USkeleton* const MeshSkeleton = Mesh ? Mesh->GetSkeleton() : nullptr;
 		if (!MeshSkeleton)
@@ -532,7 +532,7 @@ void AQinglanEnemyCharacter::InitializeFromData(UQinglanEnemyDataAsset* InData)
 			// (e.g. an unregistered pooled mesh during tests), keep the old
 			// single-node idle path as the visible fallback.
 			UAnimSequence* const Idle = InData->IdleAnimation.LoadSynchronous();
-			MeshComp->SetAnimInstanceClass(ResolveHumanoidAnimInstanceClass(Mesh));
+			MeshComp->SetAnimInstanceClass(ResolveEnemyAnimInstanceClass(Mesh));
 			if (UQinglanCharacterAnimInstance* const AnimInstance =
 					Cast<UQinglanCharacterAnimInstance>(MeshComp->GetAnimInstance()))
 			{

@@ -133,6 +133,20 @@ done
 [ -f "$CONTENT/Data/DT_Localization.uasset" ] \
   || { echo "regenerate-content.sh: ERROR: bilingual localization table $CONTENT/Data/DT_Localization.uasset missing" >&2; rc_all=1; }
 
+# AUD-42: the cue component loads these Niagara systems by runtime path; the
+# commandlet deletes a package whose post-save verification fails, so absence
+# here means a broken cue pipeline.
+for VFX in NS_Impact NS_Telegraph NS_Cast; do
+  [ -f "$CONTENT/VFX/$VFX.uasset" ] \
+    || { echo "regenerate-content.sh: ERROR: Niagara cue system $CONTENT/VFX/$VFX.uasset missing" >&2; rc_all=1; }
+done
+
+# AUD-44: every shipped rig needs a compiled slot graph for montage playback.
+for ABP in Human/ABP_Human Knight/ABP_Knight Monsters/ABP_Slime Monsters/ABP_Skeleton Monsters/ABP_Bat Monsters/ABP_Dragon; do
+  [ -f "$CONTENT/Characters/$ABP.uasset" ] \
+    || { echo "regenerate-content.sh: ERROR: anim slot graph $CONTENT/Characters/$ABP.uasset missing" >&2; rc_all=1; }
+done
+
 # AUD-56: QinglanAudioBootstrap imports 4 music + 4 SFX sound waves. The
 # commandlet only warns on a missing source, so require the committed assets.
 AUDIO_COUNT=$(find "$CONTENT/Audio" -type f -name '*.uasset' 2>/dev/null | wc -l | tr -d ' ')

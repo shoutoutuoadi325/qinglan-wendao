@@ -200,14 +200,19 @@ Still pending on target machines:
 
 ## 7. Known deferred items
 
-- Benchmark frontend map (docs/06 §4) not authored; first launch goes straight
-  to the hub with profile auto-creation.
-- Profile-select menu (3 slots) — boot continues from slot 0 by default.
+- Benchmark frontend map (docs/06 §4) and a boot-time slot-select frontend are
+  not authored; first launch auto-creates/loads a profile (the pause menu's
+  Profile screen can switch slots). This is the remaining AUD-01/02
+  acceptance gap.
 - Equipped-talisman selection UI — slots seed from charged talismans in
   catalog order (documented in QinglanTalismanComponent).
-- Niagara particle systems for technique cues — the soft references stay null
-  (material/decal VFX and the audio pass cover presentation); authoring
-  Niagara assets programmatically is not supported, needs an editor session.
+- Niagara cue systems are now authored (`NS_Impact`/`NS_Telegraph`/`NS_Cast`,
+  AUD-42) and the cue component prefers them with placeholder fallbacks; the
+  stock emitter templates expose no `User.Color`/`User.SpriteSize`, so element
+  tinting and size scaling stay at template defaults.
+- Enemy presentation paths, per-rig slot graphs, and hit-react montages landed
+  in the 2026-10-19 wave; rendered QA on target graphics backends is still
+  pending (GPU environment).
 - Herbal Knowledge healing percent folds into talisman heals and regen; the
   projectile heal-tick keeps its FIXME-CONTRACT note.
 - Audio pass (2026-10-14): 4 music loops (Hub/Explore/Combat/Boss, crossfade

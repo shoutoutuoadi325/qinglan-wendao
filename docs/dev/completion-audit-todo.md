@@ -1352,8 +1352,14 @@ runtime, combat/AI/VFX, bilingual runtime, content, 44 tests), `f481f03`
 (exit authority, focus, loadout, action gates, animation/VFX, 49 tests).
 Auxiliary: `ac56e83` (AUD-56 ledger), `368445d` (packaging evidence). Later
 waves: `f438ee1` (player menus/journal, textured surfaces, scene dressing,
-53 tests). Packaging evidence: `docs/dev/evidence/package-linux-2026-10-19.log`
-and `packaging/evidence/linux-shipping-2026-10-19.txt`.
+53 tests), `40213bd` (authored Niagara cue systems, Human weapon/cast sockets,
+66 tests), `36e16c5` (enemy presentation object paths, per-rig ABPs, hit-react
+montages, 67 tests). Final wave 36 verification: clean content regeneration
+`rc_all=0`, 67/67 automation, main journey 30/30, side quests 24/24, and a
+Linux Shipping package with `NS_*`/`ABP_*` inventory verified.
+Packaging evidence: `docs/dev/evidence/package-linux-2026-10-19-wave36.log`
+and `packaging/evidence/linux-shipping-2026-10-19-wave36.txt` (earlier:
+`package-linux-2026-10-19.log`, `linux-shipping-2026-10-19.txt`).
 
 | AUD | Disposition | Implementation and coverage | Remaining acceptance |
 | --- | --- | --- | --- |
@@ -1415,8 +1421,7 @@ and `packaging/evidence/linux-shipping-2026-10-19.txt`.
 | AUD-56 | Fixed (source+ledger) | Ledger populated with 42 records. The eight untraceable audio sources were replaced 2026-10-19 with project-original WAVs (generator script in `assets-raw/audio/original/`), the bootstrap imports the new `original/` sources under unchanged `SW_*` paths, `regenerate-content.sh` validates the eight sources and imported assets, and `Qinglan.Content.AudioSourceContract` pins the contract. No unknown or pending ledger rows remain. | Regeneration/cook re-imports the new audio into the committed `SW_*` uassets; human listening QA (loop seams, mix, SFX transients). |
 | AUD-57 | Fixed | Portable build/regenerate scripts, engine revision lock, nonzero on missing inputs, mandatory-output validation, regeneration rc_all=0. | Second-machine reproduction. |
 | AUD-58 | Partially fixed | 53 prior automation cases plus three real-file save fault-injection specs (`SaveBackupRecoveryChain`, `SaveRotationFaultInjection`, `SaveTruncatedTempRejected`) cover the repaired persistence/narrative/trial/combat/localization/UI/content paths. | Functional maps, complete keyboard/controller playthrough, process-kill at promised boundaries. |
-| AUD-59 | Blocked | Linux Shipping package rebuilt after the repairs (rc=0) with a verified
-IoStore inventory and artifact hashes (`packaging/evidence/linux-shipping-2026-10-19.txt`). | Windows DX12 and Apple Silicon Metal builds/devices are unavailable in this environment; owner action required. |
+| AUD-59 | Blocked | Linux Shipping package rebuilt after the repair waves (rc=0) with a verified IoStore inventory (including the Niagara cue systems and per-rig slot graphs) and artifact hashes: `packaging/evidence/linux-shipping-2026-10-19-wave36.txt` (supersedes `linux-shipping-2026-10-19.txt`). | Windows DX12 and Apple Silicon Metal builds/devices are unavailable in this environment; owner action required. |
 | AUD-60 | Fixed | README/CONTRIBUTING/test-report/build guide rewritten around recorded evidence with historical results labeled. | — |
 
 ### Remaining acceptance gates (not satisfied by this repair work)

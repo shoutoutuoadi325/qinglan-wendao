@@ -45,6 +45,7 @@
 #include "Framework/Commands/InputChord.h"
 #include "InputTriggers.h"
 #include "Kismet/GameplayStatics.h"
+#include "Framework/Application/SlateApplication.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -867,6 +868,9 @@ void AQinglanCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCo
 	BindMenuKey(EKeys::Gamepad_DPad_Down, [this]() { MoveMenuSelection(1); });
 	BindMenuKey(EKeys::Enter, [this]() { ConfirmMenuSelection(); });
 	BindMenuKey(EKeys::BackSpace, [this]() { CancelMenu(); });
+	// AUD-51: Escape is the explicit menu back/close key (journal included).
+	BindMenuKey(EKeys::Escape, [this]() { CancelMenu(); });
+	BindMenuKey(EKeys::Gamepad_FaceButton_Right, [this]() { CancelMenu(); });
 	BindMenuKey(EKeys::Gamepad_Special_Left, [this]() { CancelMenu(); });
 	BindMenuKey(EKeys::SpaceBar, [this]()
 	{
@@ -901,6 +905,8 @@ void AQinglanCharacter::InputMove(const FInputActionValue& Value)
 void AQinglanCharacter::InputLook(const FInputActionValue& Value)
 {
 	if (EndingWidget.IsValid() && EndingWidget->IsInViewport()) { return; }
+	// AUD-51: an open menu/journal owns the camera as well as the action gate.
+	if (bMenuOpen) { return; }
 	if (!Controller)
 	{
 		return;
@@ -986,6 +992,8 @@ void AQinglanCharacter::InputTechniqueSlot(int32 Slot)
 void AQinglanCharacter::InputTalismanSlot(int32 Slot)
 {
 	if (EndingWidget.IsValid() && EndingWidget->IsInViewport()) { return; }
+	// AUD-51: menus freeze every gameplay action, talismans included.
+	if (bMenuOpen) { return; }
 	// docs/02 §1 slots Q/R; charge accounting and effect execution live in the
 	// talisman component (docs/03 §5).
 	if (bDefeatHandled)
@@ -1011,6 +1019,11 @@ void AQinglanCharacter::InputInteract(const FInputActionValue& /*Value*/)
 	if (EndingWidget.IsValid() && EndingWidget->IsInViewport())
 	{
 		ConfirmMenuSelection();
+		return;
+	}
+	// AUD-51: menu overlays capture interaction; Enter/row buttons drive them.
+	if (bMenuOpen)
+	{
 		return;
 	}
 	UGameInstance* const Instance = GetGameInstance();
@@ -1075,14 +1088,12 @@ void AQinglanCharacter::InputPause(const FInputActionValue& /*Value*/)
 		CancelMenu();
 		return;
 	}
-	UWorld* const World = GetWorld();
-	if (!World)
+	if (bMenuOpen)
 	{
+		CancelMenu();
 		return;
 	}
-	// docs/01: "Pause freezes combat and timers" - paused game time halts component
-	// ticking (DeltaTime accumulation) and world-time timestamps everywhere.
-	UGameplayStatics::SetGamePaused(World, !UGameplayStatics::IsGamePaused(World));
+	OpenGameMenu();
 }
 
 // ---------------------------------------------------------------------------
@@ -1191,7 +1202,10 @@ void AQinglanCharacter::GetActionGateState(FQinglanActionGateState& OutState) co
 		OutState.bSwordCanDodgeCancel = Sword->CanDodgeCancelNow();
 	}
 	OutState.bSceneChoicePending = PendingSceneChoices.Num() > 0;
-	OutState.bMenuOpen = EndingWidget.IsValid() && EndingWidget->IsInViewport();
+	// AUD-51: pause/profile/settings/equipment/journal/offer overlays share the
+	// same freeze as scene choices; the ending modal remains an additional gate.
+	OutState.bMenuOpen = bMenuOpen
+		|| (EndingWidget.IsValid() && EndingWidget->IsInViewport());
 }
 
 bool AQinglanCharacter::CanStartAction(EQinglanActionKind Kind) const
@@ -1753,21 +1767,243 @@ UQinglanEndingWidget* AQinglanCharacter::EnsureEndingWidget()
 	return Widget;
 }
 
+UQinglanMenuWidget* AQinglanCharacter::EnsureMenuWidget()
+{
+	if (UQinglanMenuWidget* Widget = MenuWidget.Get())
+	{
+		return Widget;
+	}
+	APlayerController* PC = Cast<APlayerController>(Controller);
+	UQinglanMenuWidget* Widget = PC
+		? CreateWidget<UQinglanMenuWidget>(PC, UQinglanMenuWidget::StaticClass()) : nullptr;
+	if (Widget)
+	{
+		MenuWidget = Widget;
+		Widget->OnMenuClosed.AddDynamic(this, &AQinglanCharacter::HandleMenuClosed);
+	}
+	return Widget;
+}
+
+UQinglanJournalWidget* AQinglanCharacter::EnsureJournalWidget()
+{
+	if (UQinglanJournalWidget* Widget = JournalWidget.Get())
+	{
+		return Widget;
+	}
+	APlayerController* PC = Cast<APlayerController>(Controller);
+	UQinglanJournalWidget* Widget = PC
+		? CreateWidget<UQinglanJournalWidget>(PC, UQinglanJournalWidget::StaticClass()) : nullptr;
+	if (Widget)
+	{
+		JournalWidget = Widget;
+		Widget->OnJournalClosed.AddDynamic(this, &AQinglanCharacter::HandleJournalClosed);
+	}
+	return Widget;
+}
+
+void AQinglanCharacter::OpenGameMenu()
+{
+	if (bDefeatHandled || (EndingWidget.IsValid() && EndingWidget->IsInViewport()))
+	{
+		return;
+	}
+	if (!PendingSceneChoices.IsEmpty())
+	{
+		return; // scene choices keep the dialogue presenter
+	}
+	UQinglanMenuWidget* Menu = EnsureMenuWidget();
+	if (!Menu)
+	{
+		return;
+	}
+	bMenuOpen = true;
+	Menu->ShowScreen(EQinglanMenuScreen::Pause);
+	if (!Menu->IsInViewport())
+	{
+		Menu->AddToViewport(50);
+	}
+	// Pending offers persist across menu closes; re-present them rather than
+	// hiding the decision behind the pause screen.
+	if (PendingBlessingChoices.Num() > 0)
+	{
+		PresentBlessingOffer(PendingBlessingChoices);
+	}
+	else if (PendingShopChoices.Num() > 0)
+	{
+		PresentShopOffer(PendingShopChoices);
+	}
+	RefreshMenuInputState();
+}
+
+void AQinglanCharacter::CloseGameMenu()
+{
+	if (UQinglanMenuWidget* Menu = MenuWidget.Get())
+	{
+		Menu->CloseMenu(); // broadcasts; HandleMenuClosed restores input mode
+	}
+	else
+	{
+		bMenuOpen = false;
+		RefreshMenuInputState();
+	}
+}
+
+void AQinglanCharacter::OpenJournal(FName RecordId)
+{
+	if (bDefeatHandled || (EndingWidget.IsValid() && EndingWidget->IsInViewport()))
+	{
+		return;
+	}
+	if (!PendingSceneChoices.IsEmpty())
+	{
+		return; // scene choices own the input focus (AUD-32 gate compatibility)
+	}
+	UQinglanJournalWidget* Journal = EnsureJournalWidget();
+	if (!Journal)
+	{
+		return;
+	}
+	if (MenuWidget.IsValid() && MenuWidget->IsInViewport())
+	{
+		MenuWidget->RemoveFromParent(); // journal is the top overlay
+	}
+	bMenuOpen = true;
+	if (!Journal->IsInViewport())
+	{
+		Journal->AddToViewport(60);
+	}
+	Journal->OpenJournal();
+	if (!RecordId.IsNone())
+	{
+		Journal->OpenRecord(RecordId);
+	}
+	RefreshMenuInputState();
+}
+
+bool AQinglanCharacter::SelectMenuOption(int32 Index)
+{
+	if (!MenuWidget.IsValid() || !MenuWidget->IsMenuOpen())
+	{
+		return false;
+	}
+	return ConsumeMenuSelection(Index);
+}
+
+bool AQinglanCharacter::DismissMenuOffer()
+{
+	UQinglanMenuWidget* Menu = MenuWidget.Get();
+	// Blessing drafts are mandatory: leaving would strand the proof event.
+	if (PendingBlessingChoices.Num() > 0)
+	{
+		if (Menu)
+		{
+			Menu->SetNotice(UQinglanHUDStatics::GameText(FName(TEXT("menu.notice.offer_required"))));
+		}
+		return false;
+	}
+	PendingShopChoices.Reset();
+	if (Menu)
+	{
+		Menu->CloseOffer();
+	}
+	RefreshMenuInputState();
+	return true;
+}
+
+void AQinglanCharacter::QuitToSanctuary()
+{
+	UGameInstance* const Instance = GetGameInstance();
+	UQinglanSaveSubsystem* const Save = Instance ? Instance->GetSubsystem<UQinglanSaveSubsystem>() : nullptr;
+	if (!Save)
+	{
+		// Safe-exit contract: without the save API the only available action is
+		// Resume (closing the menu), never an unsaved map travel.
+		CloseGameMenu();
+		return;
+	}
+	FText SaveError;
+	if (!Save->SaveActiveSession(SaveError))
+	{
+		if (UQinglanMenuWidget* Menu = MenuWidget.Get())
+		{
+			Menu->SetNotice(SaveError.IsEmpty()
+				? UQinglanHUDStatics::GameText(FName(TEXT("menu.notice.save_failed")))
+				: SaveError);
+		}
+		return;
+	}
+	CloseGameMenu();
+	if (!UGameplayStatics::GetCurrentLevelName(this, true).Contains(TEXT("Hub")))
+	{
+		QinglanInteraction::TravelToMap(this, QinglanInteraction::HubMapPath);
+	}
+}
+
+void AQinglanCharacter::RefreshMenuInputState()
+{
+	const bool bJournalShowing = JournalWidget.IsValid() && JournalWidget->IsInViewport();
+	const bool bMenuShowing = MenuWidget.IsValid() && MenuWidget->IsInViewport();
+	bMenuOpen = bJournalShowing || bMenuShowing;
+	UpdateMenuInputMode();
+}
+
+void AQinglanCharacter::HandleMenuClosed()
+{
+	bMenuOpen = JournalWidget.IsValid() && JournalWidget->IsInViewport();
+	UpdateMenuInputMode();
+}
+
+void AQinglanCharacter::HandleJournalClosed()
+{
+	// Closing the record viewer restores gameplay even when it was reached
+	// from the pause menu; the pause menu reopens through its own Journal row.
+	if (UQinglanMenuWidget* Menu = MenuWidget.Get(); Menu && Menu->IsMenuOpen())
+	{
+		Menu->CloseMenu(); // broadcasts HandleMenuClosed
+	}
+	bMenuOpen = false;
+	UpdateMenuInputMode();
+}
+
 void AQinglanCharacter::UpdateMenuInputMode()
 {
 	APlayerController* PC = Cast<APlayerController>(Controller);
 	if (!PC) { return; }
 	UUserWidget* Focus = nullptr;
+	// AUD-51: native menu/journal overlays keep keyboard focus on the game
+	// viewport so the Character's Up/Down/Enter/Escape/number bindings drive
+	// them; mouse clicks still resolve through Slate hit-testing.
+	bool bGameViewportKeyboard = false;
 	if (UQinglanEndingWidget* Ending = EndingWidget.Get(); Ending && Ending->IsInViewport()) { Focus = Ending; }
+	else if (UQinglanJournalWidget* Journal = JournalWidget.Get(); Journal && Journal->IsInViewport())
+	{
+		Focus = Journal;
+		bGameViewportKeyboard = true;
+	}
+	else if (UQinglanMenuWidget* Menu = MenuWidget.Get(); Menu && Menu->IsInViewport())
+	{
+		Focus = Menu;
+		bGameViewportKeyboard = true;
+	}
 	else if (!PendingSceneChoices.IsEmpty()) { Focus = DialogueWidget.Get(); }
 	PC->bShowMouseCursor = Focus != nullptr;
 	if (Focus)
 	{
 		FInputModeGameAndUI Mode;
-		Mode.SetWidgetToFocus(Focus->TakeWidget());
+		if (!bGameViewportKeyboard)
+		{
+			Mode.SetWidgetToFocus(Focus->TakeWidget());
+		}
 		Mode.SetHideCursorDuringCapture(false);
 		PC->SetInputMode(Mode);
-		if (UQinglanEndingWidget* Ending = EndingWidget.Get(); Ending && Ending->IsInViewport())
+		if (bGameViewportKeyboard)
+		{
+			if (FSlateApplication::IsInitialized())
+			{
+				FSlateApplication::Get().SetAllUserFocusToGameViewport();
+			}
+		}
+		else if (UQinglanEndingWidget* Ending = EndingWidget.Get(); Ending && Ending->IsInViewport())
 		{
 			Ending->FocusDefaultControl();
 		}
@@ -1787,6 +2023,18 @@ void AQinglanCharacter::HandleDialogueChoiceSelected(FName ChoiceId)
 
 void AQinglanCharacter::MoveMenuSelection(int32 Direction)
 {
+	// AUD-51: native menus take Up/Down while open; journal navigation moves
+	// the record list instead.
+	if (UQinglanJournalWidget* Journal = JournalWidget.Get(); Journal && Journal->IsInViewport())
+	{
+		Journal->MoveRecordSelection(Direction);
+		return;
+	}
+	if (UQinglanMenuWidget* Menu = MenuWidget.Get(); Menu && Menu->IsMenuOpen())
+	{
+		Menu->MoveSelection(Direction);
+		return;
+	}
 	if (PendingSceneChoices.IsEmpty()) { return; }
 	MenuSelectionIndex = (MenuSelectionIndex + Direction + PendingSceneChoices.Num()) % PendingSceneChoices.Num();
 	if (UQinglanDialogueWidget* Dialogue = Cast<UQinglanDialogueWidget>(DialogueWidget.Get()))
@@ -1802,6 +2050,25 @@ void AQinglanCharacter::ConfirmMenuSelection()
 		Ending->ConfirmCurrentEnding();
 		return;
 	}
+	if (UQinglanJournalWidget* Journal = JournalWidget.Get(); Journal && Journal->IsInViewport())
+	{
+		if (Journal->IsRecordOpen())
+		{
+			// Enter on an open record returns to the list; the list itself
+			// opens the highlighted record.
+			Journal->CloseRecord();
+		}
+		else
+		{
+			Journal->SelectCurrentRecord();
+		}
+		return;
+	}
+	if (UQinglanMenuWidget* Menu = MenuWidget.Get(); Menu && Menu->IsMenuOpen())
+	{
+		Menu->ConfirmSelection();
+		return;
+	}
 	if (!PendingSceneChoices.IsEmpty()) { ConsumeMenuSelection(MenuSelectionIndex); }
 }
 
@@ -1810,6 +2077,23 @@ void AQinglanCharacter::CancelMenu()
 	if (UQinglanEndingWidget* Ending = EndingWidget.Get(); Ending && Ending->IsInViewport())
 	{
 		Ending->CancelPreview();
+		return;
+	}
+	if (UQinglanJournalWidget* Journal = JournalWidget.Get(); Journal && Journal->IsInViewport())
+	{
+		Journal->Back(); // record -> list -> closed (OnJournalClosed restores mode)
+		return;
+	}
+	if (UQinglanMenuWidget* Menu = MenuWidget.Get(); Menu && Menu->IsMenuOpen())
+	{
+		Menu->Back(); // offer dismisses, sub-screens return to Pause, Pause closes
+		return;
+	}
+	if (bMenuOpen)
+	{
+		// Defensive: a stale overlay flag must never trap gameplay input.
+		bMenuOpen = false;
+		RefreshMenuInputState();
 		return;
 	}
 	if (UGameplayStatics::GetCurrentLevelName(this, true).Contains(TEXT("TribulationArena")))
@@ -1892,6 +2176,15 @@ void AQinglanCharacter::HandleSceneLine(const FQinglanScriptLine& Line)
 
 void AQinglanCharacter::HandleChoicesPresented(const TArray<FQinglanSceneChoice>& Choices)
 {
+	// Defensive (e.g. resumed playback): choices outrank any open overlay.
+	if (UQinglanJournalWidget* Journal = JournalWidget.Get(); Journal && Journal->IsInViewport())
+	{
+		Journal->CloseJournal();
+	}
+	else if (bMenuOpen)
+	{
+		CloseGameMenu();
+	}
 	PendingSceneChoices = Choices;
 	MenuSelectionIndex = 0;
 	if (UUserWidget* Widget = EnsureDialogueWidget(); Widget && !Widget->IsInViewport()) { Widget->AddToViewport(); }
@@ -1949,6 +2242,16 @@ void AQinglanCharacter::HandleSceneCompleted(FName SceneId)
 
 void AQinglanCharacter::HandleSceneEntered(FName SceneId)
 {
+	// AUD-51/AUD-32: narrative playback owns the input focus. Close menu or
+	// journal overlays so scene choices never share the numeric/confirm keys.
+	if (UQinglanJournalWidget* Journal = JournalWidget.Get(); Journal && Journal->IsInViewport())
+	{
+		Journal->CloseJournal(); // broadcast restores gameplay/menu state
+	}
+	else if (bMenuOpen)
+	{
+		CloseGameMenu();
+	}
 	// Objective-proof tracking: choice-free scenes stop at script end without
 	// committing (their proof is a gameplay event); choice scenes commit from
 	// the selection itself.
@@ -2012,6 +2315,12 @@ void AQinglanCharacter::HandleRoomCompleted(int32 RoomIndex, int64 ShardsAwarded
 
 void AQinglanCharacter::HandleRecordOpened(FName RecordId, const FText& Title, const FText& Body)
 {
+	// AUD-52: the record title also lands in the HUD text region so a player
+	// who continues after the dialogue notices the collection.
+	if (UQinglanHUDWidget* HUD = Cast<UQinglanHUDWidget>(HudWidget.Get()))
+	{
+		HUD->ShowRecordNotice(Title);
+	}
 	// AUD-11 producer: the read itself is the proof event; authored proofs use
 	// the stable record id (record.opened.<id>).
 	if (RecordId != NAME_None)
@@ -2035,6 +2344,9 @@ void AQinglanCharacter::HandleRecordOpened(FName RecordId, const FText& Title, c
 		{
 			if (Dialogue->ShowRecordEntry(Title, Body))
 			{
+				// AUD-52: the registry has no authored record source, so the
+				// dialogue tag uses the same id-prefix inference as the journal.
+				Dialogue->SetSourceKind(FQinglanJournalState::InferRecordSourceKind(RecordId));
 				return; // rendered into the speaker/line blocks
 			}
 		}
@@ -2271,16 +2583,33 @@ void AQinglanCharacter::UnbindStoryDelegates()
 void AQinglanCharacter::PresentBlessingOffer(const TArray<FQinglanBlessing>& Offers)
 {
 	PendingBlessingChoices = Offers;
-	// FIXME-CONTRACT: menu layout belongs to WBP_Dialogue; keyed on-screen list
-	// until the UMG frontend lands. Names resolve through the string table
-	// (blessing.<id>.name); unauthored keys fall back to the stable id.
+	TArray<FQinglanOfferChoice> MenuOffers;
 	TArray<FString> Lines;
 	for (int32 Index = 0; Index < Offers.Num(); ++Index)
 	{
 		const FText Name = Offers[Index].DisplayName.IsEmpty()
 			? FText::FromString(Offers[Index].BlessingId.ToString())
 			: Offers[Index].DisplayName;
+		FQinglanOfferChoice Choice;
+		Choice.OfferId = Offers[Index].BlessingId;
+		Choice.Title = Name;
+		Choice.bBlessing = true;
+		MenuOffers.Add(Choice);
 		Lines.Add(FString::Printf(TEXT("[%d] %s"), Index + 1, *Name.ToString()));
+	}
+	// AUD-51: native offer menu first; the keyed on-screen list remains the
+	// fallback when a scene choice currently owns the numeric row or the menu
+	// widget cannot be created.
+	if (PendingSceneChoices.IsEmpty())
+	{
+		if (UQinglanMenuWidget* Menu = EnsureMenuWidget())
+		{
+			bMenuOpen = true;
+			Menu->ShowOffers(MenuOffers);
+			if (!Menu->IsInViewport()) { Menu->AddToViewport(50); }
+			RefreshMenuInputState();
+			return;
+		}
 	}
 	ShowGameMessage(FText::FromString(FString::Join(Lines, TEXT("  "))));
 }
@@ -2288,12 +2617,29 @@ void AQinglanCharacter::PresentBlessingOffer(const TArray<FQinglanBlessing>& Off
 void AQinglanCharacter::PresentShopOffer(const TArray<FQinglanShopOfferEntry>& Entries)
 {
 	PendingShopChoices = Entries;
-	// FIXME-CONTRACT: shop layout belongs to WBP_Dialogue; keyed list fallback.
+	TArray<FQinglanOfferChoice> MenuOffers;
 	TArray<FString> Lines;
 	for (int32 Index = 0; Index < Entries.Num(); ++Index)
 	{
+		FQinglanOfferChoice Choice;
+		Choice.OfferId = Entries[Index].ItemId;
+		Choice.Title = Entries[Index].Title;
+		Choice.Cost = Entries[Index].CostSummary;
+		Choice.bBlessing = false;
+		MenuOffers.Add(Choice);
 		Lines.Add(FString::Printf(TEXT("[%d] %s (%s)"),
 			Index + 1, *Entries[Index].Title.ToString(), *Entries[Index].CostSummary.ToString()));
+	}
+	if (PendingSceneChoices.IsEmpty())
+	{
+		if (UQinglanMenuWidget* Menu = EnsureMenuWidget())
+		{
+			bMenuOpen = true;
+			Menu->ShowOffers(MenuOffers);
+			if (!Menu->IsInViewport()) { Menu->AddToViewport(50); }
+			RefreshMenuInputState();
+			return;
+		}
 	}
 	ShowGameMessage(FText::FromString(FString::Join(Lines, TEXT("  "))));
 }
@@ -2318,6 +2664,14 @@ void AQinglanCharacter::ShowGameMessage(const FText& Message)
 
 bool AQinglanCharacter::ConsumeMenuSelection(int32 Slot)
 {
+	// AUD-51: every numeric slot routed while a menu overlay is open is
+	// captured on the menu state; CloseMenu() clears that capture list.
+	UQinglanMenuWidget* Menu = MenuWidget.Get();
+	const bool bMenuOpenNow = Menu && Menu->IsMenuOpen();
+	if (bMenuOpenNow && Slot >= 0)
+	{
+		Menu->CaptureNumberKey(Slot);
+	}
 	if (EndingWidget.IsValid() && EndingWidget->IsInViewport()) { return true; }
 	if (Slot < 0)
 	{
@@ -2353,13 +2707,14 @@ bool AQinglanCharacter::ConsumeMenuSelection(int32 Slot)
 			return true;
 		}
 		const FQinglanBlessing Blessing = PendingBlessingChoices[Slot];
-		PendingBlessingChoices.Reset();
+		bool bAccepted = false;
 		if (UGameInstance* const Instance = GetGameInstance())
 		{
 			if (UQinglanRunSubsystem* const Run = Instance->GetSubsystem<UQinglanRunSubsystem>())
 			{
 				// exactly 1 of 3 (docs/03 section 5)
-				if (Run->AcceptBlessing(Blessing.BlessingId))
+				bAccepted = Run->AcceptBlessing(Blessing.BlessingId);
+				if (bAccepted)
 				{
 					// AUD-11 producer: accepted draft proof (CH01_S02).
 					if (UQinglanStorySubsystem* const Story = Instance->GetSubsystem<UQinglanStorySubsystem>())
@@ -2369,6 +2724,14 @@ bool AQinglanCharacter::ConsumeMenuSelection(int32 Slot)
 				}
 			}
 		}
+		if (!bAccepted)
+		{
+			// Offer persistence (AUD-51): a failed selection leaves the draft.
+			if (Menu) { Menu->SetNotice(UQinglanHUDStatics::GameText(FName(TEXT("menu.notice.offer_failed")))); }
+			return true;
+		}
+		PendingBlessingChoices.Reset();
+		if (Menu) { Menu->CloseOffer(); }
 		ShowGameMessage(Blessing.DisplayName.IsEmpty()
 			? FText::FromString(Blessing.BlessingId.ToString())
 			: Blessing.DisplayName);
@@ -2381,24 +2744,44 @@ bool AQinglanCharacter::ConsumeMenuSelection(int32 Slot)
 			return true;
 		}
 		const FQinglanShopOfferEntry Entry = PendingShopChoices[Slot];
+		if (!BuyShopEntry(Entry))
+		{
+			// Keep the entry selectable after a failed purchase (AUD-51).
+			if (Menu) { Menu->SetNotice(UQinglanHUDStatics::GameText(FName(TEXT("menu.notice.offer_failed")))); }
+			return true;
+		}
 		PendingShopChoices.RemoveAt(Slot);
-		BuyShopEntry(Entry);
 		if (PendingShopChoices.Num() > 0)
 		{
 			PresentShopOffer(PendingShopChoices); // re-present the shortened list
+		}
+		else if (Menu)
+		{
+			Menu->CloseOffer();
+		}
+		return true;
+	}
+	// While a menu overlay is open the number row belongs to the menu even when
+	// no offer is active (techniques must not fire behind it). Outside the
+	// offer screen the digit is a direct row shortcut.
+	if (bMenuOpenNow)
+	{
+		if (Menu->GetScreen() != EQinglanMenuScreen::Offer)
+		{
+			Menu->ActivateRow(Slot);
 		}
 		return true;
 	}
 	return false;
 }
 
-void AQinglanCharacter::BuyShopEntry(const FQinglanShopOfferEntry& Entry)
+bool AQinglanCharacter::BuyShopEntry(const FQinglanShopOfferEntry& Entry)
 {
 	UGameInstance* const Instance = GetGameInstance();
 	UQinglanProfileSubsystem* const Profile = Instance ? Instance->GetSubsystem<UQinglanProfileSubsystem>() : nullptr;
 	if (Profile == nullptr)
 	{
-		return;
+		return false;
 	}
 	const FName TransactionId = *FString::Printf(TEXT("shop.%s.%s"),
 		Entry.bRelic ? TEXT("relic") : TEXT("passive"), *Entry.ItemId.ToString());
@@ -2407,9 +2790,8 @@ void AQinglanCharacter::BuyShopEntry(const FQinglanShopOfferEntry& Entry)
 		: Profile->TryPurchasePassive(TransactionId, Entry.ItemId);
 	if (!bCommitted)
 	{
-		// FIXME-CONTRACT: no string-table key for the declined purchase.
-		ShowGameMessage(NSLOCTEXT("Qinglan", "Shop.Declined", "The keeper declines."));
-		return;
+		ShowGameMessage(UQinglanHUDStatics::GameText(FName(TEXT("menu.notice.offer_failed"))));
+		return false;
 	}
 	// Auto-equip into a free slot so purchases take effect without a separate
 	// equip UI (docs/03 sections 4-5: 1 relic, 2 passives equipped).
@@ -2430,4 +2812,5 @@ void AQinglanCharacter::BuyShopEntry(const FQinglanShopOfferEntry& Entry)
 		}
 	}
 	ShowGameMessage(Entry.Title);
+	return true;
 }

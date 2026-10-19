@@ -165,11 +165,11 @@ namespace
 
 	/**
 	 * Best room-entrance PlayerStart for a room (Core/QinglanGameModeBase.cpp
-	 * FindRoomEntranceStart convention: exact "Qinglan.RoomEntrance.<N>" tag,
+	 * FindInteractableRoomEntranceStart convention: exact "Qinglan.RoomEntrance.<N>" tag,
 	 * then any entrance-tagged start). Maps authored by the bootstrap carry no
 	 * tagged starts, so callers fall back to the layout-contract position.
 	 */
-	static APlayerStart* FindRoomEntranceStart(UWorld* World, int32 RoomIndex)
+	static APlayerStart* FindInteractableRoomEntranceStart(UWorld* World, int32 RoomIndex)
 	{
 		if (World == nullptr)
 		{
@@ -204,7 +204,7 @@ namespace
 			return;
 		}
 		const FVector LayoutPosition = QinglanRoomLayout::RoomEntrance(RoomIndex);
-		if (APlayerStart* Entrance = FindRoomEntranceStart(Player->GetWorld(), RoomIndex))
+		if (APlayerStart* Entrance = FindInteractableRoomEntranceStart(Player->GetWorld(), RoomIndex))
 		{
 			Player->SetActorLocationAndRotation(
 				Entrance->GetActorLocation(), Entrance->GetActorRotation(), /*bSweep=*/false, nullptr, ETeleportType::TeleportPhysics);

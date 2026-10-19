@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
-# Portable content regeneration: data import -> content bootstrap -> mesh
-# import -> UI bootstrap, then mandatory-output validation. The editor
-# commandlets only warn about missing sources in-process; this wrapper makes
-# those conditions fail the run (docs/dev/completion-audit-todo.md AUD-57).
+# Portable content regeneration: data import -> mesh import -> content
+# bootstrap -> animation/UI bootstrap, then mandatory-output validation. Mesh
+# import precedes content bootstrap so generated maps can dress rooms with the
+# imported nature meshes (AUD-55). The editor commandlets only warn about
+# missing sources in-process; this wrapper makes those conditions fail the run
+# (docs/dev/completion-audit-todo.md AUD-57).
 #
-#   QINGLAN_ENGINE_ROOT  source engine checkout (default: beside the repo)
-#   QINGLAN_PROJECT_DIR  game project directory  (default: <repo>/game)
-#   QINGLAN_ASSETS_RAW   raw imported assets root (default: beside the repo)
+#   QINGLAN_ENGINE_ROOT   source engine checkout (default: beside the repo)
+#   QINGLAN_PROJECT_DIR   game project directory  (default: <repo>/game)
+#   QINGLAN_ASSETS_RAW    raw imported assets root (default: beside the repo)
+#   QINGLAN_LOW_QUALITY   set to 1 to bind solid-colour MICs and halve the
+#                         deterministic nature dressing budget (AUD-55)
 #
 # Exits nonzero when the editor or raw sources are missing, a commandlet
 # fails, or the mandatory generated assets are absent afterwards (zero
@@ -19,6 +23,10 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 QINGLAN_ENGINE_ROOT="${QINGLAN_ENGINE_ROOT:-$REPO_ROOT/../UnrealEngine}"
 QINGLAN_PROJECT_DIR="${QINGLAN_PROJECT_DIR:-$REPO_ROOT/game}"
 QINGLAN_ASSETS_RAW="${QINGLAN_ASSETS_RAW:-$REPO_ROOT/../assets-raw}"
+QINGLAN_LOW_QUALITY="${QINGLAN_LOW_QUALITY:-0}"
+
+CONTENT_BOOTSTRAP_ARGS=()
+[ "$QINGLAN_LOW_QUALITY" = "1" ] && CONTENT_BOOTSTRAP_ARGS+=("-lowquality")
 
 EDITOR_CMD="$QINGLAN_ENGINE_ROOT/Engine/Binaries/Linux/UnrealEditor-Cmd"
 UPROJECT="$QINGLAN_PROJECT_DIR/QinglanAscension.uproject"
@@ -61,9 +69,10 @@ rm -f "$CONTENT/UI/WBP_HUD.uasset" "$CONTENT/UI/WBP_Dialogue.uasset" \
 # Project commandlets live in the PostEngineInit editor module, which is not
 # auto-discovered without the "Module.Class" form (-run appends "Commandlet").
 run_cmdlet QinglanAscensionEditor.QinglanDataImport -data="$REPO_ROOT/data" || rc_all=1
-run_cmdlet QinglanAscensionEditor.QinglanContentBootstrap || rc_all=1
-# The Interchange pipeline logs per-take frame-alignment errors that set the
-# editor process exit code even though every mesh imports. The commandlet's own
+# Mesh import runs before the content bootstrap because the map generator
+# dresses rooms with the imported Quaternius nature meshes (AUD-55). The
+# Interchange pipeline logs per-take frame-alignment errors that set the editor
+# process exit code even though every mesh imports. The commandlet's own
 # completion marker (written to its saved log) plus the mandatory-output checks
 # below are the authority for this step.
 if ! run_cmdlet QinglanAscensionEditor.QinglanMeshImport; then
@@ -73,6 +82,7 @@ if ! run_cmdlet QinglanAscensionEditor.QinglanMeshImport; then
     rc_all=1
   fi
 fi
+run_cmdlet QinglanAscensionEditor.QinglanContentBootstrap "${CONTENT_BOOTSTRAP_ARGS[@]}" || rc_all=1
 # Combat montages (AUD-44/45) are rebuilt after the mesh import so each one is
 # saved to its own package with the source skeleton assigned. Existing montage
 # packages are removed first for the same partial-load reason as the widgets.
@@ -99,6 +109,24 @@ done
 # locales must be present in the packaged asset.
 [ -f "$CONTENT/Data/DT_Localization.uasset" ] \
   || { echo "regenerate-content.sh: ERROR: bilingual localization table $CONTENT/Data/DT_Localization.uasset missing" >&2; rc_all=1; }
+
+# AUD-55: the Poly Haven maps must be real Texture2D package assets, not just
+# transient textures referenced by MICs that then fail to save. Require at
+# least eight imported maps and the core surface MICs (both the textured
+# instance and its solid-colour companion).
+TEXTURE_COUNT=$(find "$CONTENT/Textures" -type f -name '*.uasset' 2>/dev/null | wc -l | tr -d ' ')
+if [ "${TEXTURE_COUNT:-0}" -lt 8 ]; then
+  echo "regenerate-content.sh: ERROR: only ${TEXTURE_COUNT:-0} Texture2D assets under $CONTENT/Textures (expected >= 8)" >&2
+  rc_all=1
+fi
+[ -f "$CONTENT/Materials/M_QinglanSolid.uasset" ] \
+  || { echo "regenerate-content.sh: ERROR: solid fallback master $CONTENT/Materials/M_QinglanSolid.uasset missing" >&2; rc_all=1; }
+for MIC in M_BambooWall M_Cobblestone M_CobblestoneAlt M_StonePath M_GrassRock M_Cliff M_DirtFloor M_VolcanicRock M_RoofTiles; do
+  [ -f "$CONTENT/Materials/$MIC.uasset" ] \
+    || { echo "regenerate-content.sh: ERROR: surface material instance $CONTENT/Materials/$MIC.uasset missing" >&2; rc_all=1; }
+  [ -f "$CONTENT/Materials/${MIC}_Solid.uasset" ] \
+    || { echo "regenerate-content.sh: ERROR: solid fallback instance $CONTENT/Materials/${MIC}_Solid.uasset missing" >&2; rc_all=1; }
+done
 
 echo "=== content regeneration done rc_all=$rc_all $(date -Is) ==="
 exit "$rc_all"

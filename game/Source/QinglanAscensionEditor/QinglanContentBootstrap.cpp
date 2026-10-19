@@ -2,25 +2,31 @@
 #include "QinglanContentBootstrap.h"
 #include "Core/QinglanRoomLayout.h"
 
+#include "AssetImportTask.h"
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetToolsModule.h"
 #include "Components/ExponentialHeightFogComponent.h"
+#include "Containers/ArrayView.h"
 #include "Components/StaticMeshComponent.h"
 #include "EditorFramework/AssetImportData.h"
 #include "Components/LightComponent.h" // complete ULightComponent for SetIntensity/SetLightColor
 #include "Components/SkyLightComponent.h"
 #include "Engine/DirectionalLight.h"
+#include "Engine/EngineTypes.h"
 #include "Engine/ExponentialHeightFog.h"
 #include "Engine/SkyLight.h"
+#include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/Texture2D.h"
+#include "Engine/TextureDefines.h"
 #include "Engine/World.h"
+#include "Factories/TextureFactory.h"
 #include "GameFramework/GameModeBase.h" // AGameModeBase for LoadClass<> (not pulled in by WorldSettings.h anymore)
 #include "GameFramework/PlayerStart.h"
 #include "GameFramework/WorldSettings.h"
 #include "Engine/TargetPoint.h"
 #include "EnhancedInputModule.h" // UE 5.8: IEnhancedInputModule moved here from EnhancedInput/Subsystem/
 #include "HAL/FileManager.h"
-#include "ImageUtils.h"
 #include "InputAction.h"
 #include "InputMappingContext.h"
 #include "InputModifiers.h"
@@ -37,6 +43,7 @@
 #include "Materials/MaterialInstanceConstant.h"
 #include "Misc/FileHelper.h"
 #include "Misc/PackageName.h"
+#include "Misc/Parse.h"
 #include "Misc/Paths.h"
 #include "Modules/ModuleManager.h"
 #include "UObject/Package.h"
@@ -50,6 +57,17 @@ namespace
 	const FString ContentRoot = TEXT("/Game/Qinglan");
 	const FString RawAssetsRoot = TEXT("/inspire/hdd/project/qianghuaxuexi/s26044/assets-raw");
 
+	// AUD-55: the content bootstrap can emit a low-cost package variant
+	// (-lowquality) that binds every surface to its solid-colour MIC. The maps
+	// are static content, so runtime quality preset switching cannot remove
+	// these actors later; the contract below keeps both variants generated.
+	bool GUseLowQualitySurfaceMaterials = false;
+
+	// Material names (M_*) that received a real BaseColor texture this run.
+	// Maps use this to avoid binding a texture MIC whose BaseColor is null
+	// (the previous bootstrap produced exactly that black-material failure).
+	TSet<FString> GTexturedSurfaceMaterials;
+
 	UPackage* CreateOrFetchPackage(const FString& ObjectPath)
 	{
 		const FString PackageName = FSoftObjectPath(ObjectPath).GetLongPackageName(); // UE 5.8: FPackageName::GetObjectPathPackage is gone
@@ -60,13 +78,95 @@ namespace
 	}
 }
 
+// AUD-55 texture-set contract. Kept in a named namespace (not exported through
+// the commandlet header, which is frozen) so QinglanAuditFrameworkTests can
+// assert path generation, parameter mapping, and the solid-colour fallback
+// without touching the content on disk.
+namespace QinglanTextureSetContract
+{
+	FString TextureFolderPath(const FString& SetId)
+	{
+		return ContentRoot + TEXT("/Textures/") + SetId;
+	}
+
+	FString TexturePackagePath(const FString& SetId, const FString& Slot)
+	{
+		return TextureFolderPath(SetId) + TEXT("/") + Slot;
+	}
+
+	FString TextureObjectPath(const FString& SetId, const FString& Slot)
+	{
+		return TexturePackagePath(SetId, Slot) + TEXT(".") + Slot;
+	}
+
+	/** Poly Haven file token embedded between underscores, e.g. _diff_2k. */
+	FString SourceFileToken(const FString& Slot)
+	{
+		if (Slot == TEXT("BaseColor")) { return TEXT("diff"); }
+		if (Slot == TEXT("Roughness")) { return TEXT("rough"); }
+		if (Slot == TEXT("AmbientOcclusion")) { return TEXT("ao"); }
+		if (Slot == TEXT("Arm")) { return TEXT("arm"); }
+		if (Slot == TEXT("Normal")) { return TEXT("nor"); }
+		return FString();
+	}
+
+	/** Master-material texture parameter for a slot; ARM is channel-packed and not bound wholesale. */
+	FString MaterialParameterName(const FString& Slot)
+	{
+		if (Slot == TEXT("Arm")) { return FString(); }
+		if (Slot == TEXT("BaseColor") || Slot == TEXT("Roughness")
+			|| Slot == TEXT("AmbientOcclusion") || Slot == TEXT("Normal"))
+		{
+			return Slot;
+		}
+		return FString();
+	}
+
+	/** Only colour data is sRGB; normal/roughness/AO/ARM data must stay linear. */
+	bool IsSRGB(const FString& Slot)
+	{
+		return Slot == TEXT("BaseColor");
+	}
+
+	FString MaterialObjectPath(const FString& MaterialName)
+	{
+		return ContentRoot + TEXT("/Materials/") + MaterialName + TEXT(".") + MaterialName;
+	}
+
+	FString SolidMaterialAssetName(const FString& MaterialName)
+	{
+		return MaterialName + TEXT("_Solid");
+	}
+
+	FString SolidMaterialObjectPath(const FString& MaterialName)
+	{
+		return MaterialObjectPath(SolidMaterialAssetName(MaterialName));
+	}
+
+	bool ShouldUseSolidFallback(bool bLowQuality, bool bHasBaseColor)
+	{
+		return bLowQuality || !bHasBaseColor;
+	}
+
+	FString ResolveSurfaceMaterialObjectPath(const FString& MaterialName, bool bLowQuality, bool bHasBaseColor)
+	{
+		return ShouldUseSolidFallback(bLowQuality, bHasBaseColor)
+			? SolidMaterialObjectPath(MaterialName)
+			: MaterialObjectPath(MaterialName);
+	}
+}
+
 UQinglanContentBootstrapCommandlet::UQinglanContentBootstrapCommandlet()
 {
 }
 
 int32 UQinglanContentBootstrapCommandlet::Main(const FString& Params)
 {
-	UE_LOG(LogTemp, Log, TEXT("QinglanContentBootstrap starting"));
+	// -lowquality emits map bindings to the solid-colour MICs while still
+	// importing the full texture set. Without the flag maps use the textured
+	// MICs (missing BaseColor sets always fall back to solid).
+	GUseLowQualitySurfaceMaterials = FParse::Param(*Params, TEXT("lowquality"));
+	UE_LOG(LogTemp, Log, TEXT("QinglanContentBootstrap starting (lowquality=%d)"), GUseLowQualitySurfaceMaterials ? 1 : 0);
 	bool bOk = true;
 	bOk &= BootstrapInput();
 	bOk &= BootstrapMaterials();
@@ -248,20 +348,51 @@ bool UQinglanContentBootstrapCommandlet::BootstrapInput()
 UMaterial* UQinglanContentBootstrapCommandlet::CreateOrLoadMasterMaterial()
 {
 	const FString Path = ContentRoot + TEXT("/Materials/M_QinglanSurface");
-	if (UMaterial* Existing = LoadObject<UMaterial>(nullptr, *Path))
-	{
-		return Existing;
-	}
+
+	// Rebuild deterministically: the master graph gained UV tiling and sampler
+	// types, and a stale package would silently keep the old untextured graph.
+	// Nothing else is loaded into this fresh commandlet process yet, so deleting
+	// the package before creating it is safe.
+	const FString FileName = FPackageName::LongPackageNameToFilename(Path, FPackageName::GetAssetPackageExtension());
+	IFileManager::Get().Delete(*FileName, /*bRequireExists=*/false, /*bEvenReadOnly=*/true, /*bQuiet=*/true);
+
 	UPackage* Pkg = CreateOrFetchPackage(Path);
 	UMaterial* Mat = NewObject<UMaterial>(Pkg, TEXT("M_QinglanSurface"), RF_Public | RF_Standalone);
 	Mat->BlendMode = BLEND_Opaque;
 	Mat->SetShadingModel(MSM_DefaultLit); // UE 5.8: ShadingModel is private; setter is the engine idiom
 
-	auto AddTextureParam = [Mat](const FName& Name, int32& OutY) -> UMaterialExpressionTextureSampleParameter2D*
+	// Shared tiling: Poly Haven sets are authored to tile, so sample them more
+	// than once per blockout face instead of stretching one 2K image across a
+	// 22 m terrace.
+	UMaterialExpressionTextureCoordinate* TexCoord = NewObject<UMaterialExpressionTextureCoordinate>(Mat);
+	TexCoord->UTiling = 1.f;
+	TexCoord->VTiling = 1.f;
+	TexCoord->MaterialExpressionEditorX = -1100;
+	TexCoord->MaterialExpressionEditorY = -300;
+	Mat->GetExpressionCollection().AddExpression(TexCoord);
+
+	UMaterialExpressionScalarParameter* Tiling = NewObject<UMaterialExpressionScalarParameter>(Mat);
+	Tiling->ParameterName = TEXT("Tiling");
+	Tiling->DefaultValue = 4.f;
+	Tiling->MaterialExpressionEditorX = -1100;
+	Tiling->MaterialExpressionEditorY = -120;
+	Mat->GetExpressionCollection().AddExpression(Tiling);
+
+	UMaterialExpressionMultiply* ScaledUV = NewObject<UMaterialExpressionMultiply>(Mat);
+	ScaledUV->A.Connect(0, TexCoord);
+	ScaledUV->B.Connect(0, Tiling);
+	ScaledUV->MaterialExpressionEditorX = -850;
+	ScaledUV->MaterialExpressionEditorY = -250;
+	Mat->GetExpressionCollection().AddExpression(ScaledUV);
+
+	auto AddTextureParam = [Mat, ScaledUV](const FName& Name, EMaterialSamplerType Sampler, int32& OutY)
+		-> UMaterialExpressionTextureSampleParameter2D*
 	{
 		UMaterialExpressionTextureSampleParameter2D* Param =
 			NewObject<UMaterialExpressionTextureSampleParameter2D>(Mat);
 		Param->ParameterName = Name;
+		Param->SamplerType = Sampler;
+		Param->Coordinates.Connect(0, ScaledUV);
 		Param->MaterialExpressionEditorX = -600;
 		Param->MaterialExpressionEditorY = OutY;
 		OutY += 220;
@@ -270,15 +401,22 @@ UMaterial* UQinglanContentBootstrapCommandlet::CreateOrLoadMasterMaterial()
 	};
 
 	int32 Y = -300;
-	UMaterialExpressionTextureSampleParameter2D* BaseColorParam = AddTextureParam(TEXT("BaseColor"), Y);
-	UMaterialExpressionTextureSampleParameter2D* NormalParam = AddTextureParam(TEXT("Normal"), Y);
-	UMaterialExpressionTextureSampleParameter2D* RoughParam = AddTextureParam(TEXT("Roughness"), Y);
-	UMaterialExpressionTextureSampleParameter2D* AOParam = AddTextureParam(TEXT("AmbientOcclusion"), Y);
+	UMaterialExpressionTextureSampleParameter2D* BaseColorParam = AddTextureParam(TEXT("BaseColor"), SAMPLERTYPE_Color, Y);
+	UMaterialExpressionTextureSampleParameter2D* NormalParam = AddTextureParam(TEXT("Normal"), SAMPLERTYPE_Normal, Y);
+	UMaterialExpressionTextureSampleParameter2D* RoughParam = AddTextureParam(TEXT("Roughness"), SAMPLERTYPE_LinearGrayscale, Y);
+	UMaterialExpressionTextureSampleParameter2D* AOParam = AddTextureParam(TEXT("AmbientOcclusion"), SAMPLERTYPE_LinearGrayscale, Y);
+
+	// No Poly Haven set on disk ships a normal map. Default the Normal sample to
+	// the engine flat normal so the master remains valid when a MIC omits it.
+	if (UTexture2D* FlatNormal = LoadObject<UTexture2D>(nullptr, TEXT("/Engine/EngineMaterials/DefaultNormal.DefaultNormal")))
+	{
+		NormalParam->Texture = FlatNormal;
+	}
 
 	// UE 5.8: material input properties (BaseColor, Normal, ...) live on UMaterialEditorOnlyData.
 	Mat->GetEditorOnlyData()->BaseColor.Connect(0, BaseColorParam);
 	Mat->GetEditorOnlyData()->Normal.Connect(0, NormalParam);
-	Mat->GetEditorOnlyData()->Roughness.Connect(1, RoughParam); // green channel of packed map when packed
+	Mat->GetEditorOnlyData()->Roughness.Connect(1, RoughParam); // R channel (Poly Haven rough maps are grayscale)
 	Mat->GetEditorOnlyData()->AmbientOcclusion.Connect(1, AOParam);
 	Mat->PreEditChange(nullptr);
 	Mat->PostEditChange();
@@ -438,61 +576,115 @@ bool UQinglanContentBootstrapCommandlet::BootstrapVFXMaterials()
 
 namespace
 {
-	UTexture2D* ImportTextureFromDisk(const FString& JpgPath, const FString& DestObjectPath, TextureGroup LODGroup)
-	{
-		if (UTexture2D* Existing = LoadObject<UTexture2D>(nullptr, *DestObjectPath))
-		{
-			return Existing;
-		}
-		TArray<uint8> Bytes;
-		if (!FFileHelper::LoadFileToArray(Bytes, *JpgPath) || Bytes.Num() == 0)
-		{
-			UE_LOG(LogTemp, Warning, TEXT("texture missing on disk: %s"), *JpgPath);
-			return nullptr;
-		}
-		UTexture2D* Tex = FImageUtils::ImportBufferAsTexture2D(Bytes);
-		if (!Tex)
-		{
-			return nullptr;
-		}
-		UPackage* Pkg = CreateOrFetchPackage(DestObjectPath);
-		const FName AssetName(*FPackageName::ObjectPathToObjectName(DestObjectPath));
-		// Rename Fatal-errors when the destination already holds an object of
-		// the same name (a half-finished prior pass); reuse it instead.
-		if (UTexture2D* InMemory = FindObject<UTexture2D>(Pkg, *AssetName.ToString()))
-		{
-			Tex->Rename(nullptr, GetTransientPackage(), REN_DontCreateRedirectors | REN_DoNotDirty);
-			return InMemory;
-		}
-		Tex->Rename(*AssetName.ToString(), Pkg, REN_DontCreateRedirectors | REN_DoNotDirty);
-		Tex->SetFlags(RF_Public | RF_Standalone);
-		Tex->LODGroup = LODGroup;
-		Tex->NeverStream = false;
-		Tex->SRGB = LODGroup != TEXTUREGROUP_WorldNormalMap;
-		Tex->PostEditChange();
-		UQinglanContentBootstrapCommandlet* NullOuter = nullptr; (void)NullOuter;
-		return Tex;
-	}
-
-	bool SaveTexture(UTexture2D* Tex)
-	{
-		UPackage* Pkg = Cast<UPackage>(Tex->GetOutermost());
-		FSavePackageArgs Args;
-		Args.TopLevelFlags = RF_Public | RF_Standalone;
-		FString FileName = FPackageName::LongPackageNameToFilename(Pkg->GetName(), FPackageName::GetAssetPackageExtension());
-		return UPackage::SavePackage(Pkg, Tex, *FileName, Args);
-	}
-
-	/** Material instance set for one Poly Haven texture asset directory. */
 	struct FSurfaceSet
 	{
 		FString AssetId;
-		FString BaseColorFile;
-		FString NormalFile;
-		FString RoughFile;   // may be _rough or packed _arm (G channel used)
-		FString AOFile;      // optional
-		FString MaterialName; // e.g. M_BambooWall
+		FString MaterialName;         // e.g. M_BambooWall
+		FLinearColor FallbackColor;   // solid MIC colour when textures are absent/low quality
 	};
+
+	struct FSlotImportSettings
+	{
+		bool bSRGB = false;
+		TextureCompressionSettings Compression = TC_Default;
+		TextureGroup Group = TEXTUREGROUP_World;
+	};
+
+	FSlotImportSettings ImportSettingsForSlot(const FString& Slot)
+	{
+		FSlotImportSettings Settings;
+		if (Slot == TEXT("BaseColor"))
+		{
+			Settings.bSRGB = true;
+			Settings.Compression = TC_Default;
+			Settings.Group = TEXTUREGROUP_World;
+		}
+		else if (Slot == TEXT("Normal"))
+		{
+			Settings.bSRGB = false;
+			Settings.Compression = TC_Normalmap;
+			Settings.Group = TEXTUREGROUP_WorldNormalMap;
+		}
+		else if (Slot == TEXT("Arm"))
+		{
+			Settings.bSRGB = false;
+			Settings.Compression = TC_Masks;
+			Settings.Group = TEXTUREGROUP_World;
+		}
+		else
+		{
+			// Roughness / AmbientOcclusion: linear single-channel data.
+			Settings.bSRGB = false;
+			Settings.Compression = TC_Grayscale;
+			Settings.Group = TEXTUREGROUP_World;
+		}
+		return Settings;
+	}
+
+	FString FindSourceFile(const TArray<FString>& Files, const FString& Slot)
+	{
+		const FString Token = TEXT("_") + QinglanTextureSetContract::SourceFileToken(Slot) + TEXT("_");
+		for (const FString& File : Files)
+		{
+			if (FPaths::GetBaseFilename(File).Contains(Token, ESearchCase::IgnoreCase))
+			{
+				return File;
+			}
+		}
+		return FString();
+	}
+
+	/**
+	 * Import one Poly Haven JPG as a real UTexture2D package asset at
+	 * /Game/Qinglan/Textures/<Set>/<Slot>.
+	 *
+	 * Do not use FImageUtils::ImportBufferAsTexture2D here: it creates a
+	 * transient, platform-data-only UTexture2D that UPackage::SavePackage
+	 * silently declines to persist (the pre-AUD-55 bootstrap did exactly that,
+	 * leaving every MIC pointing at a missing texture). The editor texture
+	 * factory writes source data and honours SRGB/compression/LOD settings.
+	 */
+	UTexture2D* ImportSlotTexture(const FString& SetId, const FString& Slot, const FString& SourceFile)
+	{
+		const FString ObjectPath = QinglanTextureSetContract::TextureObjectPath(SetId, Slot);
+		if (UTexture2D* Existing = LoadObject<UTexture2D>(nullptr, *ObjectPath))
+		{
+			return Existing;
+		}
+		if (!IFileManager::Get().FileExists(*SourceFile))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("texture source missing: %s"), *SourceFile);
+			return nullptr;
+		}
+
+		const FSlotImportSettings Settings = ImportSettingsForSlot(Slot);
+		UTextureFactory* Options = NewObject<UTextureFactory>(GetTransientPackage());
+		Options->bCreateMaterial = false;
+		Options->CompressionSettings = Settings.Compression;
+		// UE 5.8: UTextureFactory exposes source colour-space mode rather than
+		// a plain SRGB flag. Force Linear for data maps and SRGB for BaseColor.
+		Options->ColorSpaceMode = Settings.bSRGB ? ETextureSourceColorSpace::SRGB : ETextureSourceColorSpace::Linear;
+		Options->LODGroup = Settings.Group;
+		Options->MipGenSettings = TMGS_FromTextureGroup;
+
+		UAssetImportTask* Task = NewObject<UAssetImportTask>();
+		Task->Filename = SourceFile;
+		Task->DestinationPath = QinglanTextureSetContract::TextureFolderPath(SetId);
+		Task->DestinationName = Slot;
+		Task->bAutomated = true;
+		Task->bReplaceExisting = true;
+		Task->bSave = true;
+		Task->Options = Options;
+
+		FAssetToolsModule::GetModule().Get().ImportAssetTasks({ Task });
+
+		UTexture2D* Tex = LoadObject<UTexture2D>(nullptr, *ObjectPath);
+		if (!Tex)
+		{
+			UE_LOG(LogTemp, Error, TEXT("texture import failed: %s -> %s"), *SourceFile, *ObjectPath);
+		}
+		return Tex;
+	}
 }
 
 bool UQinglanContentBootstrapCommandlet::BootstrapMaterials()
@@ -503,94 +695,177 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaterials()
 		return false;
 	}
 
+	// Solid-colour parent used when a texture set has no BaseColor (e.g.
+	// fine_grained_wood on disk) and for the -lowquality package variant.
+	// Keeping this as a material rather than leaving BaseColor unbound avoids
+	// the black/checker default material appearing in the world.
+	UMaterial* Solid = nullptr;
+	{
+		const FString Path = ContentRoot + TEXT("/Materials/M_QinglanSolid");
+		const FString FileName = FPackageName::LongPackageNameToFilename(Path, FPackageName::GetAssetPackageExtension());
+		IFileManager::Get().Delete(*FileName, false, true, true);
+		UPackage* Pkg = CreateOrFetchPackage(Path);
+		Solid = NewObject<UMaterial>(Pkg, TEXT("M_QinglanSolid"), RF_Public | RF_Standalone);
+		Solid->BlendMode = BLEND_Opaque;
+		Solid->SetShadingModel(MSM_DefaultLit);
+
+		UMaterialExpressionVectorParameter* Color = NewObject<UMaterialExpressionVectorParameter>(Solid);
+		Color->ParameterName = TEXT("Color");
+		Color->DefaultValue = FLinearColor(0.34f, 0.32f, 0.29f, 1.f);
+		Color->MaterialExpressionEditorX = -500;
+		Color->MaterialExpressionEditorY = -200;
+		Solid->GetExpressionCollection().AddExpression(Color);
+
+		UMaterialExpressionScalarParameter* Roughness = NewObject<UMaterialExpressionScalarParameter>(Solid);
+		Roughness->ParameterName = TEXT("Roughness");
+		Roughness->DefaultValue = 0.85f;
+		Roughness->MaterialExpressionEditorX = -500;
+		Roughness->MaterialExpressionEditorY = 0;
+		Solid->GetExpressionCollection().AddExpression(Roughness);
+
+		Solid->GetEditorOnlyData()->BaseColor.Connect(0, Color);
+		Solid->GetEditorOnlyData()->Roughness.Connect(0, Roughness);
+		Solid->PreEditChange(nullptr);
+		Solid->PostEditChange();
+		SavePackage(Pkg, Solid);
+	}
+
 	const FString TexRoot = RawAssetsRoot + TEXT("/polyhaven/textures");
 	TArray<FSurfaceSet> Sets;
-	auto AddSet = [&Sets](const FString& Id, const FString& Name)
+	auto AddSet = [&Sets](const FString& Id, const FString& Name, const FLinearColor& Color)
 	{
 		FSurfaceSet S;
 		S.AssetId = Id;
 		S.MaterialName = Name;
+		S.FallbackColor = Color;
 		Sets.Add(S);
 	};
-	AddSet(TEXT("bamboo_wall"), TEXT("M_BambooWall"));
-	AddSet(TEXT("cobblestone_01"), TEXT("M_Cobblestone"));
-	AddSet(TEXT("grey_stone_path"), TEXT("M_StonePath"));
-	AddSet(TEXT("rock_path"), TEXT("M_RockPath"));
-	AddSet(TEXT("dark_wooden_planks"), TEXT("M_DarkWoodPlanks"));
-	AddSet(TEXT("fine_grained_wood"), TEXT("M_FineWood"));
-	AddSet(TEXT("gravel_concrete"), TEXT("M_Gravel"));
-	AddSet(TEXT("aerial_grass_rock"), TEXT("M_GrassRock"));
-	AddSet(TEXT("brown_mud_rocks_01"), TEXT("M_MudRock"));
-	AddSet(TEXT("volcanic_rock_tiles"), TEXT("M_VolcanicRock"));
-	AddSet(TEXT("mossy_brick"), TEXT("M_MossyBrick"));
-	AddSet(TEXT("moss_wood"), TEXT("M_MossWood"));
-	AddSet(TEXT("cliff_side"), TEXT("M_Cliff"));
-	AddSet(TEXT("dirt_floor"), TEXT("M_DirtFloor"));
-	AddSet(TEXT("grey_roof_tiles"), TEXT("M_RoofTiles"));
-	AddSet(TEXT("clay_roof_tiles"), TEXT("M_ClayRoofTiles"));
-	AddSet(TEXT("thatch_roof_angled"), TEXT("M_Thatch"));
-	AddSet(TEXT("concrete_rock_path"), TEXT("M_ConcretePath"));
-	AddSet(TEXT("bamboo_wall_02"), TEXT("M_BambooWallAlt"));
-	AddSet(TEXT("bamboo_veneer"), TEXT("M_BambooVeneer"));
+	AddSet(TEXT("bamboo_wall"), TEXT("M_BambooWall"), FLinearColor(0.24f, 0.28f, 0.14f, 1.f));
+	AddSet(TEXT("cobblestone_01"), TEXT("M_Cobblestone"), FLinearColor(0.33f, 0.32f, 0.30f, 1.f));
+	AddSet(TEXT("cobblestone_04"), TEXT("M_CobblestoneAlt"), FLinearColor(0.34f, 0.33f, 0.31f, 1.f));
+	AddSet(TEXT("grey_stone_path"), TEXT("M_StonePath"), FLinearColor(0.38f, 0.38f, 0.37f, 1.f));
+	AddSet(TEXT("rock_path"), TEXT("M_RockPath"), FLinearColor(0.36f, 0.34f, 0.31f, 1.f));
+	AddSet(TEXT("dark_wooden_planks"), TEXT("M_DarkWoodPlanks"), FLinearColor(0.13f, 0.09f, 0.06f, 1.f));
+	AddSet(TEXT("fine_grained_wood"), TEXT("M_FineWood"), FLinearColor(0.28f, 0.19f, 0.11f, 1.f));
+	AddSet(TEXT("gravel_concrete"), TEXT("M_Gravel"), FLinearColor(0.43f, 0.42f, 0.40f, 1.f));
+	AddSet(TEXT("aerial_grass_rock"), TEXT("M_GrassRock"), FLinearColor(0.20f, 0.29f, 0.11f, 1.f));
+	AddSet(TEXT("brown_mud_rocks_01"), TEXT("M_MudRock"), FLinearColor(0.28f, 0.20f, 0.13f, 1.f));
+	AddSet(TEXT("volcanic_rock_tiles"), TEXT("M_VolcanicRock"), FLinearColor(0.14f, 0.13f, 0.13f, 1.f));
+	AddSet(TEXT("mossy_brick"), TEXT("M_MossyBrick"), FLinearColor(0.26f, 0.30f, 0.20f, 1.f));
+	AddSet(TEXT("moss_wood"), TEXT("M_MossWood"), FLinearColor(0.22f, 0.25f, 0.13f, 1.f));
+	AddSet(TEXT("cliff_side"), TEXT("M_Cliff"), FLinearColor(0.36f, 0.35f, 0.32f, 1.f));
+	AddSet(TEXT("dirt_floor"), TEXT("M_DirtFloor"), FLinearColor(0.30f, 0.23f, 0.15f, 1.f));
+	AddSet(TEXT("grey_roof_tiles"), TEXT("M_RoofTiles"), FLinearColor(0.24f, 0.25f, 0.26f, 1.f));
+	AddSet(TEXT("clay_roof_tiles"), TEXT("M_ClayRoofTiles"), FLinearColor(0.40f, 0.19f, 0.12f, 1.f));
+	AddSet(TEXT("thatch_roof_angled"), TEXT("M_Thatch"), FLinearColor(0.39f, 0.31f, 0.17f, 1.f));
+	AddSet(TEXT("concrete_rock_path"), TEXT("M_ConcretePath"), FLinearColor(0.44f, 0.43f, 0.41f, 1.f));
+	AddSet(TEXT("bamboo_wall_02"), TEXT("M_BambooWallAlt"), FLinearColor(0.22f, 0.26f, 0.13f, 1.f));
+	AddSet(TEXT("bamboo_veneer"), TEXT("M_BambooVeneer"), FLinearColor(0.30f, 0.25f, 0.12f, 1.f));
 
+	static const TCHAR* SlotNames[] = {
+		TEXT("BaseColor"), TEXT("Roughness"), TEXT("AmbientOcclusion"), TEXT("Arm"), TEXT("Normal")
+	};
+
+	auto AcquireMIC = [](const FString& Name) -> UMaterialInstanceConstant*
+	{
+		// Fully-load the package before editing/saving it. LoadObject alone can
+		// leave a package partially loaded, which UE 5.8 refuses to save.
+		UPackage* Pkg = CreateOrFetchPackage(ContentRoot + TEXT("/Materials/") + Name);
+		const FName AssetName(*Name);
+		if (UMaterialInstanceConstant* Existing = FindObject<UMaterialInstanceConstant>(Pkg, *AssetName.ToString()))
+		{
+			return Existing;
+		}
+		return NewObject<UMaterialInstanceConstant>(Pkg, AssetName, RF_Public | RF_Standalone);
+	};
+
+	int32 ImportedTextures = 0;
+	int32 TexturedSets = 0;
 	bool bAnyOk = false;
 	for (const FSurfaceSet& Set : Sets)
 	{
 		const FString Dir = TexRoot + TEXT("/") + Set.AssetId;
 		TArray<FString> Files;
 		IFileManager::Get().FindFilesRecursive(Files, *Dir, TEXT("*.jpg"), true, false, false);
-		if (Files.Num() == 0)
+		Files.Sort(); // deterministic suffix choice across filesystems
+
+		TMap<FString, UTexture2D*> SlotTextures;
+		for (const TCHAR* SlotName : SlotNames)
 		{
-			continue; // textures not fetched yet; skip quietly
-		}
-		auto FindSuffix = [&Files](const TCHAR* Suffix) -> FString
-		{
-			for (const FString& F : Files)
+			const FString Slot(SlotName);
+			const FString Source = FindSourceFile(Files, Slot);
+			if (Source.IsEmpty())
 			{
-				if (F.Contains(Suffix))
+				continue; // this surface set genuinely has no such map
+			}
+			if (UTexture2D* Tex = ImportSlotTexture(Set.AssetId, Slot, Source))
+			{
+				SlotTextures.Add(Slot, Tex);
+				++ImportedTextures;
+			}
+		}
+
+		const bool bHasBaseColor = SlotTextures.Contains(TEXT("BaseColor"));
+		if (bHasBaseColor)
+		{
+			GTexturedSurfaceMaterials.Add(Set.MaterialName);
+			++TexturedSets;
+		}
+
+		// Textured instance. Sets without a BaseColor use the solid parent so a
+		// missing source never yields a black textured material.
+		UMaterialInstanceConstant* MIC = AcquireMIC(Set.MaterialName);
+		MIC->Parent = bHasBaseColor ? Master : Solid; // UE 5.8: SetParentMasterMaterial removed; assign Parent directly
+		MIC->ClearParameterValuesEditorOnly();
+		if (bHasBaseColor)
+		{
+			for (const TCHAR* SlotName : SlotNames)
+			{
+				const FString Slot(SlotName);
+				const FString ParamName = QinglanTextureSetContract::MaterialParameterName(Slot);
+				if (ParamName.IsEmpty())
 				{
-					return F;
+					continue; // ARM is channel-packed; the AO fallback below uses its R channel
+				}
+				UTexture2D** Found = SlotTextures.Find(Slot);
+				// cobblestone_01 / gravel_concrete have no _ao_ map; the packed ARM
+				// map stores AO in R, which is the channel the master samples.
+				if (!Found && Slot == TEXT("AmbientOcclusion"))
+				{
+					Found = SlotTextures.Find(TEXT("Arm"));
+				}
+				if (Found && *Found)
+				{
+					MIC->SetTextureParameterValueEditorOnly(FMaterialParameterInfo(FName(*ParamName)), *Found); // UE 5.8: MIC editor-only setter
 				}
 			}
-			return FString();
-		};
-		FString Diff = FindSuffix(TEXT("diff"));
-		FString Nor = FindSuffix(TEXT("nor"));
-		FString Rough = FindSuffix(TEXT("rough"));
-		FString AO = FindSuffix(TEXT("ao"));
-		if (Diff.IsEmpty())
-		{
-			Diff = Files[0];
 		}
-
-		UPackage* Pkg = CreateOrFetchPackage(ContentRoot + TEXT("/Materials/") + Set.MaterialName);
-		const FName AssetName(*Set.MaterialName);
-		UMaterialInstanceConstant* MIC = NewObject<UMaterialInstanceConstant>(Pkg, AssetName, RF_Public | RF_Standalone);
-		MIC->Parent = Master; // UE 5.8: SetParentMasterMaterial removed; assign Parent directly
-
-		auto ApplyParam = [&](const TCHAR* ParamName, const FString& File, TextureGroup Group)
+		else
 		{
-			if (File.IsEmpty())
-			{
-				return;
-			}
-			const FString TexPath = ContentRoot + TEXT("/Textures/") + Set.AssetId + TEXT("_") + FPaths::GetBaseFilename(File);
-			UTexture2D* Tex = ImportTextureFromDisk(File, TexPath, Group);
-			if (Tex)
-			{
-				SaveTexture(Tex);
-				MIC->SetTextureParameterValueEditorOnly(FMaterialParameterInfo(ParamName), Tex); // UE 5.8: MIC editor-only setter
-			}
-		};
-		ApplyParam(TEXT("BaseColor"), Diff, TEXTUREGROUP_World);
-		ApplyParam(TEXT("Normal"), Nor, TEXTUREGROUP_WorldNormalMap);
-		ApplyParam(TEXT("Roughness"), Rough.IsEmpty() ? FindSuffix(TEXT("arm")) : Rough, TEXTUREGROUP_World);
-		ApplyParam(TEXT("AmbientOcclusion"), AO.IsEmpty() ? FindSuffix(TEXT("arm")) : AO, TEXTUREGROUP_World);
-
+			MIC->SetVectorParameterValueEditorOnly(FMaterialParameterInfo(FName(TEXT("Color"))), Set.FallbackColor);
+			MIC->SetScalarParameterValueEditorOnly(FMaterialParameterInfo(FName(TEXT("Roughness"))), 0.85f);
+		}
 		MIC->PostEditChange();
-		bAnyOk |= SavePackage(Pkg, MIC);
-		UE_LOG(LogTemp, Log, TEXT("material %s from %s"), *Set.MaterialName, *Set.AssetId);
+		bAnyOk |= SavePackage(Cast<UPackage>(MIC->GetOutermost()), MIC);
+
+		// Companion solid instance for Low quality and for map resolution when
+		// the texture set has no BaseColor. Always generated, even in a
+		// fully textured run, so the material contract stays stable.
+		UMaterialInstanceConstant* SolidMIC = AcquireMIC(QinglanTextureSetContract::SolidMaterialAssetName(Set.MaterialName));
+		SolidMIC->Parent = Solid;
+		SolidMIC->ClearParameterValuesEditorOnly();
+		SolidMIC->SetVectorParameterValueEditorOnly(FMaterialParameterInfo(FName(TEXT("Color"))), Set.FallbackColor);
+		SolidMIC->SetScalarParameterValueEditorOnly(FMaterialParameterInfo(FName(TEXT("Roughness"))), 0.85f);
+		SolidMIC->PostEditChange();
+		bAnyOk |= SavePackage(Cast<UPackage>(SolidMIC->GetOutermost()), SolidMIC);
+
+		UE_LOG(LogTemp, Log, TEXT("material %s from %s (%d texture map(s)%s)"),
+			*Set.MaterialName, *Set.AssetId, SlotTextures.Num(),
+			bHasBaseColor ? TEXT("") : TEXT(", solid fallback: no BaseColor"));
 	}
+
+	UE_LOG(LogTemp, Log, TEXT("BootstrapMaterials: %d surface sets, %d textured, %d Texture2D assets"),
+		Sets.Num(), TexturedSets, ImportedTextures);
 	return bAnyOk;
 }
 //----------------------------------------------------------------------------
@@ -650,9 +925,181 @@ namespace
 		return Point;
 	}
 
+	/**
+	 * Resolve a surface material through the AUD-55 contract. Low quality or a
+	 * set with no imported BaseColor binds the solid-colour companion; the last
+	 * resort is the solid master itself, never an unbound textured MIC.
+	 */
 	UMaterialInterface* Mat(const TCHAR* Name)
 	{
-		return LoadObject<UMaterialInterface>(nullptr, *(ContentRoot + TEXT("/Materials/") + Name + TEXT(".") + Name));
+		const FString SetName(Name);
+		const FString ObjectPath = QinglanTextureSetContract::ResolveSurfaceMaterialObjectPath(
+			SetName, GUseLowQualitySurfaceMaterials, GTexturedSurfaceMaterials.Contains(SetName));
+		if (UMaterialInterface* Material = LoadObject<UMaterialInterface>(nullptr, *ObjectPath))
+		{
+			return Material;
+		}
+		UE_LOG(LogTemp, Warning, TEXT("surface material missing: %s; using solid master"), *ObjectPath);
+		return LoadObject<UMaterialInterface>(nullptr, *(ContentRoot + TEXT("/Materials/M_QinglanSolid.M_QinglanSolid")));
+	}
+
+	// -----------------------------------------------------------------------
+	// AUD-55 nature dressing.
+	//
+	// Deterministic, collision-free scatter over the imported Quaternius
+	// nature meshes (Bush/Grass/Rock/Tree; Tree3 is skipped by MeshImport
+	// because the FBX SDK cannot triangulate it). Decoration uses NoCollision
+	// and CanEverAffectNavigation=false so it never blocks the authored
+	// walkable floors or navigation. Placement rejects points near every
+	// interaction anchor / PlayerStart and inside an optional exclusion box
+	// (the hub hall), which also keeps corridor mouths clear because the
+	// scatter radius stays inside the room perimeter.
+	//
+	// Remaining art work (cannot be authored by code alone):
+	// - Niagara hero VFX for techniques/impacts/boss tells; current cue
+	//   materials are placeholder unlit/additive meshes.
+	// - Hand-composed scene composition (architecture silhouettes, landmark
+	//   framing, prop clusters) replacing the deterministic scatter.
+	// - Final lighting/material render screenshots and target-hardware
+	//   performance validation; none of that is asserted by this commandlet.
+	// -----------------------------------------------------------------------
+	UStaticMesh* NatureMesh(const TCHAR* NameRaw)
+	{
+		static TMap<FString, UStaticMesh*> Cache;
+		const FString Name(NameRaw);
+		if (UStaticMesh** Found = Cache.Find(Name))
+		{
+			return *Found;
+		}
+		UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr,
+			*(ContentRoot + TEXT("/Environments/Nature/") + Name + TEXT(".") + Name));
+		Cache.Add(Name, Mesh);
+		if (!Mesh)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("nature mesh not imported (run MeshImport first): %s"), *Name);
+		}
+		return Mesh;
+	}
+
+	UMaterialInterface* NatureMaterialFor(const FString& MeshName)
+	{
+		if (MeshName.StartsWith(TEXT("Rock")))
+		{
+			return Mat(TEXT("M_RockPath"));
+		}
+		if (MeshName.StartsWith(TEXT("Tree")))
+		{
+			return Mat(TEXT("M_MossWood"));
+		}
+		return Mat(TEXT("M_GrassRock"));
+	}
+
+	AStaticMeshActor* SpawnDecoMesh(UWorld* World, UStaticMesh* Mesh, const FString& MeshName,
+		const FVector& Location, float YawDeg, float UniformScale, const FString& Label)
+	{
+		if (!Mesh)
+		{
+			return nullptr;
+		}
+		FActorSpawnParameters Params;
+		Params.Name = MakeUniqueObjectName(World, AStaticMeshActor::StaticClass(), FName(*Label));
+		Params.NameMode = FActorSpawnParameters::ESpawnActorNameMode::Requested;
+		AStaticMeshActor* Actor = World->SpawnActor<AStaticMeshActor>(Location, FRotator(0.f, YawDeg, 0.f), Params);
+		if (!Actor)
+		{
+			return nullptr;
+		}
+		Actor->SetActorLabel(Label);
+		UStaticMeshComponent* Comp = Actor->GetStaticMeshComponent();
+		Comp->SetMobility(EComponentMobility::Static);
+		Comp->SetStaticMesh(Mesh);
+		// Decoration must not block navigation or gameplay traces.
+		Comp->SetCollisionProfileName(TEXT("NoCollision"));
+		Comp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Comp->SetCanEverAffectNavigation(false);
+		Comp->SetGenerateOverlapEvents(false);
+		Actor->SetActorScale3D(FVector(UniformScale));
+		if (UMaterialInterface* Material = NatureMaterialFor(MeshName))
+		{
+			const int32 NumMaterials = Comp->GetNumMaterials();
+			for (int32 Index = 0; Index < NumMaterials; ++Index)
+			{
+				Comp->SetMaterial(Index, Material);
+			}
+		}
+		return Actor;
+	}
+
+	bool DressingSpotAllowed(const FVector& Location, const TArray<FVector>& AvoidPoints,
+		const TArray<FVector>& Placed, const FVector2D& AvoidMin, const FVector2D& AvoidMax, bool bUseAvoidBox)
+	{
+		constexpr float MinAnchorDistanceSq = 450.f * 450.f;
+		constexpr float MinPropSpacingSq = 180.f * 180.f;
+		for (const FVector& Avoid : AvoidPoints)
+		{
+			if (FVector::DistSquared2D(Location, Avoid) < MinAnchorDistanceSq)
+			{
+				return false;
+			}
+		}
+		for (const FVector& Other : Placed)
+		{
+			if (FVector::DistSquared2D(Location, Other) < MinPropSpacingSq)
+			{
+				return false;
+			}
+		}
+		if (bUseAvoidBox
+			&& Location.X >= AvoidMin.X && Location.X <= AvoidMax.X
+			&& Location.Y >= AvoidMin.Y && Location.Y <= AvoidMax.Y)
+		{
+			return false;
+		}
+		return true;
+	}
+
+	/** Fixed-seed ring scatter; Count is a hard cap per call. */
+	void ScatterNature(UWorld* World, const FString& LabelPrefix, int32 Seed,
+		const FVector& Center, float FloorZ, float MinRadius, float MaxRadius, int32 Count,
+		TArrayView<const TCHAR*> MeshNames, const TArray<FVector>& AvoidPoints,
+		TArray<FVector>& Placed, const FVector2D& AvoidMin, const FVector2D& AvoidMax, bool bUseAvoidBox)
+	{
+		if (Count <= 0 || MeshNames.Num() == 0)
+		{
+			return;
+		}
+		// The -lowquality package variant halves the fixed dressing budget.
+		// Runtime quality presets cannot add/remove static actors, so the
+		// standard build keeps the full deterministic set.
+		const int32 EffectiveCount = GUseLowQualitySurfaceMaterials ? FMath::Max(0, Count / 2) : Count;
+		FRandomStream Rand(Seed);
+		int32 Spawned = 0;
+		const int32 MaxAttempts = EffectiveCount * 12;
+		for (int32 Attempt = 0; Attempt < MaxAttempts && Spawned < EffectiveCount; ++Attempt)
+		{
+			const float Angle = Rand.FRandRange(0.f, 2.f * PI);
+			const float Radius = Rand.FRandRange(MinRadius, MaxRadius);
+			const FVector Location(Center.X + FMath::Cos(Angle) * Radius,
+				Center.Y + FMath::Sin(Angle) * Radius, FloorZ);
+			if (!DressingSpotAllowed(Location, AvoidPoints, Placed, AvoidMin, AvoidMax, bUseAvoidBox))
+			{
+				continue;
+			}
+			const TCHAR* MeshName = MeshNames[Rand.RandRange(0, MeshNames.Num() - 1)];
+			UStaticMesh* Mesh = NatureMesh(MeshName);
+			if (!Mesh)
+			{
+				continue;
+			}
+			const float Scale = Rand.FRandRange(0.8f, 1.35f);
+			const float Yaw = Rand.FRandRange(0.f, 360.f);
+			const FString Label = FString::Printf(TEXT("%s_%s_%d"), *LabelPrefix, MeshName, Placed.Num());
+			if (SpawnDecoMesh(World, Mesh, MeshName, Location, Yaw, Scale, Label))
+			{
+				Placed.Add(Location);
+				++Spawned;
+			}
+		}
 	}
 
 	void StandardLighting(UWorld* World, const FLinearColor& SunTint, float SunIntensity, float SunPitchDeg, float SunYawDeg)
@@ -744,9 +1191,11 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaps()
 	// --- L_Hub: mountain sanctuary courtyard on terraces.
 	if (UWorld* Hub = CreateNewMapWorld(TEXT("L_Hub")))
 	{
+		// AUD-55: ground/walls bind textured surface sets (cobblestone and dark
+		// planks both have imported BaseColor maps). Collision stays BlockAll.
 		UMaterialInterface* Cliff = Mat(TEXT("M_Cliff"));
-		UMaterialInterface* Stone = Mat(TEXT("M_StonePath"));
-		UMaterialInterface* Wood = Mat(TEXT("M_FineWood"));
+		UMaterialInterface* Stone = Mat(TEXT("M_Cobblestone"));
+		UMaterialInterface* Wood = Mat(TEXT("M_DarkWoodPlanks"));
 		UMaterialInterface* Roof = Mat(TEXT("M_RoofTiles"));
 
 		// Terrace mountain: stacked slabs leading to a 60 m courtyard plateau.
@@ -805,6 +1254,30 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaps()
 		}
 		APlayerStart* Start = Hub->SpawnActor<APlayerStart>(APlayerStart::StaticClass(), FVector(0, 1000, 600), FRotator(0, 180, 0), FActorSpawnParameters());
 		if (Start) { Start->SetActorLabel(TEXT("PlayerStart")); }
+
+		// Courtyard dressing ring, clear of every anchor/PlayerStart and the
+		// hall interior. Fixed seeds keep regeneration byte-identical.
+		TArray<FVector> HubAvoid;
+		for (const auto& A : HubAnchors)
+		{
+			HubAvoid.Add(A.Value);
+		}
+		HubAvoid.Add(FVector(0, 1000, 600));
+		TArray<FVector> HubPlaced;
+		static const TCHAR* HubGrass[] = { TEXT("Grass1"), TEXT("Grass2"), TEXT("Grass3") };
+		static const TCHAR* HubBush[] = { TEXT("Bush1"), TEXT("Bush2"), TEXT("Bush3") };
+		static const TCHAR* HubRock[] = { TEXT("Rock1"), TEXT("Rock2"), TEXT("Rock3") };
+		static const TCHAR* HubTree[] = { TEXT("Tree1"), TEXT("Tree2"), TEXT("Tree4") }; // Tree3 is unimportable
+		const FVector2D HallMin(-1900.f, -5100.f);
+		const FVector2D HallMax(1900.f, -2700.f);
+		ScatterNature(Hub, TEXT("Hub_Grass"), 101, FVector::ZeroVector, 600.f, 4300.f, 5500.f, 6,
+			MakeArrayView(HubGrass), HubAvoid, HubPlaced, HallMin, HallMax, true);
+		ScatterNature(Hub, TEXT("Hub_Bush"), 102, FVector::ZeroVector, 600.f, 4300.f, 5500.f, 4,
+			MakeArrayView(HubBush), HubAvoid, HubPlaced, HallMin, HallMax, true);
+		ScatterNature(Hub, TEXT("Hub_Rock"), 103, FVector::ZeroVector, 600.f, 4300.f, 5500.f, 4,
+			MakeArrayView(HubRock), HubAvoid, HubPlaced, HallMin, HallMax, true);
+		ScatterNature(Hub, TEXT("Hub_Tree"), 104, FVector::ZeroVector, 600.f, 4300.f, 5500.f, 2,
+			MakeArrayView(HubTree), HubAvoid, HubPlaced, HallMin, HallMax, true);
 
 		bOk &= SaveWorldMap(Hub);
 		UE_LOG(LogTemp, Log, TEXT("L_Hub created"));
@@ -872,6 +1345,70 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaps()
 				PS->Tags.AddUnique(PS->PlayerStartTag);
 			}
 		}
+
+		// AUD-55 dressing: fixed-seed perimeter scatter per room plus two
+		// corridor props outside the 800 cm walkable strip. The ring radius
+		// stays inside the 2250 cm room half-extent, so corridor mouths and
+		// PlayerStarts remain clear; every anchor is also distance-checked.
+		TArray<FVector> BambooAvoid;
+		for (const auto& A : BambooAnchors)
+		{
+			BambooAvoid.Add(A.Value);
+		}
+		for (int32 Room = 0; Room < QinglanRoomLayout::RoomCount; ++Room)
+		{
+			BambooAvoid.Add(QinglanRoomLayout::RoomEntrance(Room));
+		}
+		static const TCHAR* BambooGrass[] = { TEXT("Grass1"), TEXT("Grass2"), TEXT("Grass3") };
+		static const TCHAR* BambooBush[] = { TEXT("Bush1"), TEXT("Bush2"), TEXT("Bush3") };
+		static const TCHAR* BambooRock[] = { TEXT("Rock1"), TEXT("Rock2") };
+		static const TCHAR* BambooTree[] = { TEXT("Tree1"), TEXT("Tree2"), TEXT("Tree4") }; // Tree3 is unimportable
+		for (int32 Room = 0; Room < QinglanRoomLayout::RoomCount; ++Room)
+		{
+			const FVector Center = QinglanRoomLayout::RoomCenter(Room);
+			TArray<FVector> RoomPlaced;
+			ScatterNature(Bamboo, FString::Printf(TEXT("Bamboo_Room%d_Grass"), Room), 2000 + Room * 11,
+				Center, 0.f, 1400.f, 1950.f, 4, MakeArrayView(BambooGrass), BambooAvoid, RoomPlaced,
+				FVector2D::ZeroVector, FVector2D::ZeroVector, false);
+			ScatterNature(Bamboo, FString::Printf(TEXT("Bamboo_Room%d_Bush"), Room), 2100 + Room * 11,
+				Center, 0.f, 1500.f, 1950.f, 2, MakeArrayView(BambooBush), BambooAvoid, RoomPlaced,
+				FVector2D::ZeroVector, FVector2D::ZeroVector, false);
+			ScatterNature(Bamboo, FString::Printf(TEXT("Bamboo_Room%d_Rock"), Room), 2200 + Room * 11,
+				Center, 0.f, 1600.f, 2000.f, 1, MakeArrayView(BambooRock), BambooAvoid, RoomPlaced,
+				FVector2D::ZeroVector, FVector2D::ZeroVector, false);
+			ScatterNature(Bamboo, FString::Printf(TEXT("Bamboo_Room%d_Tree"), Room), 2300 + Room * 11,
+				Center, 0.f, 1700.f, 1950.f, 1, MakeArrayView(BambooTree), BambooAvoid, RoomPlaced,
+				FVector2D::ZeroVector, FVector2D::ZeroVector, false);
+		}
+		TArray<FVector> BambooCorridorPlaced;
+		for (int32 Room = 0; Room + 1 < QinglanRoomLayout::RoomCount; ++Room)
+		{
+			const FVector CorridorCenter = QinglanRoomLayout::RoomCenter(Room) + FVector(2750.f, 0.f, 0.f);
+			for (int32 Side = -1; Side <= 1; Side += 2)
+			{
+				if (GUseLowQualitySurfaceMaterials && Side < 0)
+				{
+					continue; // low-quality variant keeps one prop per corridor
+				}
+				// Corridor floor is 800 cm wide (Y +/-400); sit props just inside
+				// the edge, leaving the centre strip walkable.
+				const FVector Location(CorridorCenter.X, Side * 320.f, 0.f);
+				if (!DressingSpotAllowed(Location, BambooAvoid, BambooCorridorPlaced,
+					FVector2D::ZeroVector, FVector2D::ZeroVector, false))
+				{
+					continue;
+				}
+				FRandomStream Rand(7000 + Room * 13 + (Side > 0 ? 1 : 2));
+				const TCHAR* MeshName = (Side > 0) ? TEXT("Rock1") : TEXT("Grass2");
+				if (SpawnDecoMesh(Bamboo, NatureMesh(MeshName), MeshName, Location,
+					Rand.FRandRange(0.f, 360.f), Rand.FRandRange(0.7f, 0.95f),
+					FString::Printf(TEXT("Bamboo_Corr%d_Dressing%d"), Room, Side > 0 ? 1 : 0)))
+				{
+					BambooCorridorPlaced.Add(Location);
+				}
+			}
+		}
+
 		bOk &= SaveWorldMap(Bamboo);
 		UE_LOG(LogTemp, Log, TEXT("L_BambooHollow created"));
 	}
@@ -929,6 +1466,68 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaps()
 				PS->Tags.AddUnique(PS->PlayerStartTag);
 			}
 		}
+
+		// AUD-55 dressing: volcanic rocks dominate, with sparse grass/bushes and
+		// an occasional dead tree. Same deterministic ring + anchor distance
+		// policy as the bamboo hollow.
+		TArray<FVector> AshenAvoid;
+		for (const auto& A : AshenAnchors)
+		{
+			AshenAvoid.Add(A.Value);
+		}
+		for (int32 Room = 0; Room < QinglanRoomLayout::RoomCount; ++Room)
+		{
+			AshenAvoid.Add(QinglanRoomLayout::RoomEntrance(Room));
+		}
+		static const TCHAR* AshenRock[] = { TEXT("Rock1"), TEXT("Rock2"), TEXT("Rock3") };
+		static const TCHAR* AshenGrass[] = { TEXT("Grass1"), TEXT("Grass3") };
+		static const TCHAR* AshenBush[] = { TEXT("Bush1"), TEXT("Bush3") };
+		static const TCHAR* AshenTree[] = { TEXT("Tree4") };
+		for (int32 Room = 0; Room < QinglanRoomLayout::RoomCount; ++Room)
+		{
+			const FVector Center = QinglanRoomLayout::RoomCenter(Room);
+			TArray<FVector> RoomPlaced;
+			ScatterNature(Ashen, FString::Printf(TEXT("Ashen_Room%d_Rock"), Room), 3000 + Room * 11,
+				Center, 0.f, 1450.f, 2000.f, 3, MakeArrayView(AshenRock), AshenAvoid, RoomPlaced,
+				FVector2D::ZeroVector, FVector2D::ZeroVector, false);
+			ScatterNature(Ashen, FString::Printf(TEXT("Ashen_Room%d_Grass"), Room), 3100 + Room * 11,
+				Center, 0.f, 1550.f, 1950.f, 2, MakeArrayView(AshenGrass), AshenAvoid, RoomPlaced,
+				FVector2D::ZeroVector, FVector2D::ZeroVector, false);
+			ScatterNature(Ashen, FString::Printf(TEXT("Ashen_Room%d_Bush"), Room), 3200 + Room * 11,
+				Center, 0.f, 1600.f, 1950.f, 1, MakeArrayView(AshenBush), AshenAvoid, RoomPlaced,
+				FVector2D::ZeroVector, FVector2D::ZeroVector, false);
+			ScatterNature(Ashen, FString::Printf(TEXT("Ashen_Room%d_Tree"), Room), 3300 + Room * 11,
+				Center, 0.f, 1700.f, 1950.f, 1, MakeArrayView(AshenTree), AshenAvoid, RoomPlaced,
+				FVector2D::ZeroVector, FVector2D::ZeroVector, false);
+		}
+		TArray<FVector> AshenCorridorPlaced;
+		for (int32 Room = 0; Room + 1 < QinglanRoomLayout::RoomCount; ++Room)
+		{
+			const FVector CorridorCenter = QinglanRoomLayout::RoomCenter(Room) + FVector(2750.f, 0.f, 0.f);
+			for (int32 Side = -1; Side <= 1; Side += 2)
+			{
+				if (GUseLowQualitySurfaceMaterials && Side < 0)
+				{
+					continue; // low-quality variant keeps one prop per corridor
+				}
+				// Corridor floor is 800 cm wide (Y +/-400); keep the centre clear.
+				const FVector Location(CorridorCenter.X, Side * 320.f, 0.f);
+				if (!DressingSpotAllowed(Location, AshenAvoid, AshenCorridorPlaced,
+					FVector2D::ZeroVector, FVector2D::ZeroVector, false))
+				{
+					continue;
+				}
+				FRandomStream Rand(8000 + Room * 13 + (Side > 0 ? 1 : 2));
+				const TCHAR* MeshName = (Side > 0) ? TEXT("Rock2") : TEXT("Rock1");
+				if (SpawnDecoMesh(Ashen, NatureMesh(MeshName), MeshName, Location,
+					Rand.FRandRange(0.f, 360.f), Rand.FRandRange(0.7f, 1.0f),
+					FString::Printf(TEXT("Ashen_Corr%d_Dressing%d"), Room, Side > 0 ? 1 : 0)))
+				{
+					AshenCorridorPlaced.Add(Location);
+				}
+			}
+		}
+
 		bOk &= SaveWorldMap(Ashen);
 		UE_LOG(LogTemp, Log, TEXT("L_AshenVerge created"));
 	}
@@ -962,6 +1561,27 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaps()
 		}
 		APlayerStart* PS3 = Arena->SpawnActor<APlayerStart>(APlayerStart::StaticClass(), FVector(0, 2000, 100), FRotator(0, -90, 0), FActorSpawnParameters());
 		if (PS3) { PS3->SetActorLabel(TEXT("PlayerStart")); }
+
+		// AUD-55 dressing: keep the 60 m arena's centre fight space empty and
+		// ring rocks/grass/bushes just inside the platform edge. The bridge and
+		// decision platform (Y <= -3000) are outside the scatter ring.
+		TArray<FVector> ArenaAvoid;
+		for (const auto& A : ArenaAnchors)
+		{
+			ArenaAvoid.Add(A.Value);
+		}
+		ArenaAvoid.Add(FVector(0, 2000, 100));
+		TArray<FVector> ArenaPlaced;
+		static const TCHAR* ArenaRock[] = { TEXT("Rock1"), TEXT("Rock2"), TEXT("Rock3") };
+		static const TCHAR* ArenaGrass[] = { TEXT("Grass1"), TEXT("Grass2") };
+		static const TCHAR* ArenaBush[] = { TEXT("Bush1"), TEXT("Bush2") };
+		ScatterNature(Arena, TEXT("Arena_Rock"), 4100, FVector::ZeroVector, 0.f, 2250.f, 2800.f, 5,
+			MakeArrayView(ArenaRock), ArenaAvoid, ArenaPlaced, FVector2D::ZeroVector, FVector2D::ZeroVector, false);
+		ScatterNature(Arena, TEXT("Arena_Grass"), 4101, FVector::ZeroVector, 0.f, 2250.f, 2800.f, 4,
+			MakeArrayView(ArenaGrass), ArenaAvoid, ArenaPlaced, FVector2D::ZeroVector, FVector2D::ZeroVector, false);
+		ScatterNature(Arena, TEXT("Arena_Bush"), 4102, FVector::ZeroVector, 0.f, 2300.f, 2800.f, 2,
+			MakeArrayView(ArenaBush), ArenaAvoid, ArenaPlaced, FVector2D::ZeroVector, FVector2D::ZeroVector, false);
+
 		bOk &= SaveWorldMap(Arena);
 		UE_LOG(LogTemp, Log, TEXT("L_TribulationArena created"));
 	}

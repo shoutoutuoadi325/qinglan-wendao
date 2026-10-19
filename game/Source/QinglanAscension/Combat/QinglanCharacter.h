@@ -18,6 +18,8 @@ class USpringArmComponent;
 class UCameraComponent;
 class UUserWidget;
 class UQinglanEndingWidget;
+class UQinglanMenuWidget;
+class UQinglanJournalWidget;
 class AQinglanInteractable;
 
 /**
@@ -158,6 +160,21 @@ public:
 	void PresentShopOffer(const TArray<FQinglanShopOfferEntry>& Entries);
 	/** Transient localized notice: dialogue widget when open, on-screen message otherwise. */
 	void ShowGameMessage(const FText& Message);
+
+	// --- AUD-51 native menus ---
+	/** Opens the pause menu (offers re-present themselves when pending). */
+	UFUNCTION(BlueprintCallable) void OpenGameMenu();
+	/** Closes every menu overlay and restores gameplay input. */
+	UFUNCTION(BlueprintCallable) void CloseGameMenu();
+	/** Opens the journal viewer, optionally directly on one record. */
+	UFUNCTION(BlueprintCallable) void OpenJournal(FName RecordId = NAME_None);
+	/** Numeric/row selection forwarded from the menu widget. */
+	UFUNCTION(BlueprintCallable) bool SelectMenuOption(int32 Index);
+	/** Escape on the offer screen: shop offers dismiss, blessings are mandatory. */
+	UFUNCTION(BlueprintCallable) bool DismissMenuOffer();
+	/** Save-before-travel exit used by the pause menu; never leaves unsaved state. */
+	UFUNCTION(BlueprintCallable) void QuitToSanctuary();
+	UFUNCTION(BlueprintPure) bool IsMenuInputActive() const { return bMenuOpen; }
 	/**
 	 * True when SceneId began, delivered at least one line, is choice-free,
 	 * and its playback has ended: the script played out, so a follow-up
@@ -230,6 +247,11 @@ protected:
 	/** Creates (once) and returns the dialogue presenter; null until first shown. */
 	UUserWidget* EnsureDialogueWidget();
 	UQinglanEndingWidget* EnsureEndingWidget();
+	/** AUD-51: lazily created native menu/journal widgets. */
+	UQinglanMenuWidget* EnsureMenuWidget();
+	UQinglanJournalWidget* EnsureJournalWidget();
+	/** Re-applies focus/cursor mode from the active modal (menu > journal > choices). */
+	void RefreshMenuInputState();
 	void UpdateMenuInputMode();
 	void MoveMenuSelection(int32 Direction);
 	void ConfirmMenuSelection();
@@ -240,6 +262,8 @@ protected:
 	UFUNCTION() void HandleCancelConfirmation(FName SceneId);
 	UFUNCTION() void HandleEndingClosed();
 	UFUNCTION() void HandleEndingCommitted(FName EndingId);
+	UFUNCTION() void HandleMenuClosed();
+	UFUNCTION() void HandleJournalClosed();
 	/** Story playback display: line, choices, records (widget or on-screen fallback). */
 	UFUNCTION() void HandleSceneLine(const FQinglanScriptLine& Line);
 	UFUNCTION() void HandleChoicesPresented(const TArray<FQinglanSceneChoice>& Choices);
@@ -270,10 +294,14 @@ protected:
 	TWeakObjectPtr<UUserWidget> HudWidget;
 	TWeakObjectPtr<UUserWidget> DialogueWidget;
 	TWeakObjectPtr<UQinglanEndingWidget> EndingWidget;
+	TWeakObjectPtr<UQinglanMenuWidget> MenuWidget;
+	TWeakObjectPtr<UQinglanJournalWidget> JournalWidget;
 	int32 MenuSelectionIndex = 0;
 	bool bHudCreated = false;
 	bool bStoryDelegatesBound = false;
 	bool bDefeatHandled = false;
+	/** AUD-51 gameplay input gate; mirrors any open menu/journal overlay. */
+	bool bMenuOpen = false;
 
 	/** AUD-26 focus cache; the prompt is shown only when the selection changes. */
 	TWeakObjectPtr<AQinglanInteractable> FocusedInteractable;
@@ -304,6 +332,7 @@ protected:
 
 	/** One technique-key press routed into the open menu, if any. */
 	bool ConsumeMenuSelection(int32 Slot);
-	/** Buys one pending shop entry; auto-equips into a free slot (docs/03 sections 4-5). */
-	void BuyShopEntry(const FQinglanShopOfferEntry& Entry);
+	/** Buys one pending shop entry; auto-equips into a free slot (docs/03 sections 4-5).
+	 *  False leaves the offer pending so a failed purchase is retryable. */
+	bool BuyShopEntry(const FQinglanShopOfferEntry& Entry);
 };

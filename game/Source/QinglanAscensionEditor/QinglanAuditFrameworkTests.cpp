@@ -27,6 +27,7 @@
 #include "Progression/QinglanProfileSubsystem.h"
 #include "Progression/QinglanRunSubsystem.h"
 #include "Progression/QinglanProgressionTables.h"
+#include "UI/QinglanUIWidgets.h"
 #include "UObject/UObjectGlobals.h"
 
 // AUD-45 path-contract helpers live in QinglanAnimBootstrap.cpp (same module).
@@ -36,6 +37,24 @@ namespace QinglanAnimBootstrapPaths
 	FString MontageDirectory(const FString& Group);
 	FString MontagePackagePath(const FString& Directory, const FString& MontageName);
 	FString MontageObjectPath(const FString& PackagePath, const FString& MontageName);
+}
+
+// AUD-55 texture/material contract helpers live in QinglanContentBootstrap.cpp
+// (same module). These are pure string/policy functions; the test does not
+// touch the content on disk.
+namespace QinglanTextureSetContract
+{
+	FString TextureFolderPath(const FString& SetId);
+	FString TexturePackagePath(const FString& SetId, const FString& Slot);
+	FString TextureObjectPath(const FString& SetId, const FString& Slot);
+	FString SourceFileToken(const FString& Slot);
+	FString MaterialParameterName(const FString& Slot);
+	bool IsSRGB(const FString& Slot);
+	FString MaterialObjectPath(const FString& MaterialName);
+	FString SolidMaterialAssetName(const FString& MaterialName);
+	FString SolidMaterialObjectPath(const FString& MaterialName);
+	bool ShouldUseSolidFallback(bool bLowQuality, bool bHasBaseColor);
+	FString ResolveSurfaceMaterialObjectPath(const FString& MaterialName, bool bLowQuality, bool bHasBaseColor);
 }
 
 namespace
@@ -1750,6 +1769,265 @@ bool FQinglanAuditLoadoutSync::RunTest(const FString& Parameters)
 	}
 
 	UQinglanTechniqueComponent::SetTechniqueCatalogForTesting(TArray<UQinglanTechniqueDataAsset*>());
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// AUD-52: journal open -> record -> close -> reopen state machine. Pure state
+// only, so no rendering world (or Slate) is required.
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditJournalStateMachine,
+	"Qinglan.UI.JournalOpenCloseReopen", AuditFrameworkTestFlags)
+
+bool FQinglanAuditJournalStateMachine::RunTest(const FString& Parameters)
+{
+	FQinglanJournalState Journal;
+	const FName RecordA(TEXT("L01"));
+	const FName RecordB(TEXT("L02"));
+	TestFalse(TEXT("Journal starts closed"), Journal.IsOpen());
+	TestFalse(TEXT("No record starts open"), Journal.IsRecordOpen());
+
+	Journal.OpenJournal();
+	TestTrue(TEXT("Journal opens to the record list"), Journal.IsOpen());
+	TestFalse(TEXT("Opening the journal does not open a record"), Journal.IsRecordOpen());
+	TestTrue(TEXT("First record opens"), Journal.OpenRecord(RecordA));
+	TestTrue(TEXT("Record body is active"), Journal.IsRecordOpen());
+	TestEqual(TEXT("Current record is the opened record"), Journal.GetCurrentRecordId(), RecordA);
+	TestEqual(TEXT("Most recent record is remembered"), Journal.LastRecordId, RecordA);
+
+	TestTrue(TEXT("Closing the record succeeds"), Journal.CloseRecord());
+	TestFalse(TEXT("Record body closes"), Journal.IsRecordOpen());
+	TestTrue(TEXT("Record list/journal stays open"), Journal.IsOpen());
+	TestEqual(TEXT("Closing a record clears the current id"), Journal.GetCurrentRecordId(), NAME_None);
+	TestEqual(TEXT("Closing a record keeps the reopen target"), Journal.LastRecordId, RecordA);
+
+	TestTrue(TEXT("Reopen restores the last record"), Journal.ReopenLastRecord());
+	TestEqual(TEXT("Reopened record is the last record"), Journal.GetCurrentRecordId(), RecordA);
+
+	TestTrue(TEXT("Second record replaces the current body"), Journal.OpenRecord(RecordB));
+	TestEqual(TEXT("Current record follows the second open"), Journal.GetCurrentRecordId(), RecordB);
+	TestEqual(TEXT("Reopen target follows the second open"), Journal.LastRecordId, RecordB);
+	TestTrue(TEXT("Whole journal closes"), Journal.CloseJournal());
+	TestFalse(TEXT("Journal is closed"), Journal.IsOpen());
+	TestFalse(TEXT("No record remains open after journal close"), Journal.IsRecordOpen());
+	TestEqual(TEXT("Reopen target survives journal close"), Journal.LastRecordId, RecordB);
+
+	Journal.OpenJournal();
+	TestTrue(TEXT("A closed journal can be reopened"), Journal.IsOpen());
+	TestTrue(TEXT("The last record reopens after journal close"), Journal.ReopenLastRecord());
+	TestEqual(TEXT("Reopen after journal close returns the same record"),
+		Journal.GetCurrentRecordId(), RecordB);
+
+	// Source classification: the registry has no source field, so the journal
+	// infers it from the stable authored id prefix (documented in the header).
+	TestEqual(TEXT("Lore L-ids classify as paper"),
+		static_cast<int32>(FQinglanJournalState::InferRecordSourceKind(RecordA)),
+		static_cast<int32>(EQinglanSourceKind::Paper));
+	TestEqual(TEXT("Memory M-ids classify as memory"),
+		static_cast<int32>(FQinglanJournalState::InferRecordSourceKind(FName(TEXT("M03")))),
+		static_cast<int32>(EQinglanSourceKind::Memory));
+	TestEqual(TEXT("Live transcript ids classify as live"),
+		static_cast<int32>(FQinglanJournalState::InferRecordSourceKind(FName(TEXT("LIVE_02")))),
+		static_cast<int32>(EQinglanSourceKind::Live));
+	TestEqual(TEXT("Paper records expose the paper source label"),
+		FQinglanJournalState::SourceKindLabelKey(EQinglanSourceKind::Paper),
+		FName(TEXT("story.speaker.source.paper")));
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// AUD-51: pause -> settings -> back, gameplay input freeze, numeric capture
+// clearing on close.
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditMenuStateMachine,
+	"Qinglan.UI.MenuStateMachine", AuditFrameworkTestFlags)
+
+bool FQinglanAuditMenuStateMachine::RunTest(const FString& Parameters)
+{
+	FQinglanMenuState Menu;
+	TestFalse(TEXT("Menu starts closed"), Menu.IsOpen());
+	TestFalse(TEXT("Closed menu does not block gameplay"), Menu.IsGameplayInputBlocked());
+
+	Menu.Open(EQinglanMenuScreen::Pause);
+	TestTrue(TEXT("Pause opens the menu"), Menu.IsOpen());
+	TestTrue(TEXT("Open menu blocks gameplay input"), Menu.IsGameplayInputBlocked());
+	TestEqual(TEXT("Pause is the initial screen"),
+		static_cast<int32>(Menu.Screen), static_cast<int32>(EQinglanMenuScreen::Pause));
+
+	TestTrue(TEXT("Pause navigates to Settings"),
+		Menu.NavigateTo(EQinglanMenuScreen::Settings));
+	TestEqual(TEXT("Settings screen is active"),
+		static_cast<int32>(Menu.Screen), static_cast<int32>(EQinglanMenuScreen::Settings));
+	TestTrue(TEXT("Gameplay stays blocked while navigating"), Menu.IsGameplayInputBlocked());
+
+	Menu.SetOptionCount(3);
+	Menu.MoveSelection(1);
+	TestEqual(TEXT("Down changes the selected row"), Menu.SelectionIndex, 1);
+	Menu.MoveSelection(-1);
+	TestEqual(TEXT("Up returns to the first row"), Menu.SelectionIndex, 0);
+
+	Menu.CaptureNumberKey(2);
+	TestTrue(TEXT("Numeric selection is captured while open"), Menu.WasNumberKeyCaptured(2));
+	TestTrue(TEXT("Back returns Settings to Pause"), Menu.Back());
+	TestEqual(TEXT("Pause is active after back"),
+		static_cast<int32>(Menu.Screen), static_cast<int32>(EQinglanMenuScreen::Pause));
+	TestTrue(TEXT("Numeric capture persists across sub-screens until close"),
+		Menu.WasNumberKeyCaptured(2));
+	TestFalse(TEXT("Back from Pause closes the menu"), Menu.Back());
+	TestFalse(TEXT("Menu is closed"), Menu.IsOpen());
+	TestFalse(TEXT("Closed menu restores gameplay input"), Menu.IsGameplayInputBlocked());
+	TestFalse(TEXT("Closing clears all numeric capture"), Menu.WasNumberKeyCaptured(2));
+	TestEqual(TEXT("Closing empties the capture list"), Menu.CapturedNumberKeys.Num(), 0);
+
+	// Explicit Close has the same cleanup contract.
+	Menu.Open(EQinglanMenuScreen::Profile);
+	Menu.CaptureNumberKey(1);
+	TestTrue(TEXT("Capture before explicit close"), Menu.WasNumberKeyCaptured(1));
+	Menu.Close();
+	TestFalse(TEXT("Explicit close clears capture"), Menu.WasNumberKeyCaptured(1));
+	TestFalse(TEXT("Explicit close restores gameplay"), Menu.IsGameplayInputBlocked());
+
+	// The AUD-32 gate consumes the same flag on the character snapshot.
+	FQinglanActionGateState Gate;
+	Gate.bMenuOpen = true;
+	TestFalse(TEXT("Open menu blocks the sword gate"),
+		AQinglanCharacter::IsActionAllowed(EQinglanActionKind::Sword, Gate));
+	TestTrue(TEXT("Open menu rejects dodge outright"),
+		AQinglanCharacter::EvaluateDodgeRequest(Gate, true) == EQinglanDodgeRequest::Reject);
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// AUD-51: offers persist until an explicit selection or dismissal.
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditOfferPersistence,
+	"Qinglan.UI.OfferPersistence", AuditFrameworkTestFlags)
+
+bool FQinglanAuditOfferPersistence::RunTest(const FString& Parameters)
+{
+	TArray<FQinglanOfferChoice> Entries;
+	FQinglanOfferChoice First;
+	First.OfferId = FName(TEXT("relic_a"));
+	First.Title = FText::FromString(TEXT("Relic A"));
+	Entries.Add(First);
+	FQinglanOfferChoice Second;
+	Second.OfferId = FName(TEXT("relic_b"));
+	Second.Title = FText::FromString(TEXT("Relic B"));
+	Entries.Add(Second);
+
+	FQinglanOfferState Offers;
+	TestTrue(TEXT("Offer set becomes active"), Offers.BeginOffer(Entries));
+	TestTrue(TEXT("Offer set is active"), Offers.IsActive());
+	TestEqual(TEXT("Both offers are retained"), Offers.Entries.Num(), 2);
+	TestNotNull(TEXT("First offer is selected initially"), Offers.GetSelected());
+
+	// Screen changes and navigation do not clear an offer.
+	FQinglanMenuState Menu;
+	Menu.Open(EQinglanMenuScreen::Offer);
+	Menu.NavigateTo(EQinglanMenuScreen::Settings);
+	Menu.NavigateTo(EQinglanMenuScreen::Offer);
+	TestTrue(TEXT("Offer survives menu screen changes"), Offers.IsActive());
+	TestTrue(TEXT("Offer selection can move"), Offers.MoveSelection(1));
+	TestEqual(TEXT("Second offer is selected"), Offers.SelectedIndex, 1);
+	TestTrue(TEXT("Offer remains active after selection movement"), Offers.IsActive());
+
+	// Unknown selection is rejected without consuming the offer.
+	TestFalse(TEXT("Unknown offer id is rejected"), Offers.Select(FName(TEXT("missing"))));
+	TestTrue(TEXT("Rejected selection keeps the offer"), Offers.IsActive());
+	TestEqual(TEXT("Rejected selection keeps every entry"), Offers.Entries.Num(), 2);
+
+	// A valid selection consumes the whole set.
+	TestTrue(TEXT("Valid selection succeeds"), Offers.Select(FName(TEXT("relic_a"))));
+	TestFalse(TEXT("Selection clears the offer"), Offers.IsActive());
+	TestEqual(TEXT("Selection clears every entry"), Offers.Entries.Num(), 0);
+
+	// Dismiss is the other explicit exit.
+	TestTrue(TEXT("Offer can begin again"), Offers.BeginOffer(Entries));
+	TestTrue(TEXT("Dismiss clears the active offer"), Offers.Dismiss());
+	TestFalse(TEXT("Dismissed offer is inactive"), Offers.IsActive());
+	TestEqual(TEXT("Dismissed offer retains no entries"), Offers.Entries.Num(), 0);
+	TestFalse(TEXT("Second dismiss is a no-op"), Offers.Dismiss());
+
+	// An empty offer is never active, so dismiss/select cannot leak state.
+	TestFalse(TEXT("Empty offer does not activate"), Offers.BeginOffer(TArray<FQinglanOfferChoice>()));
+	TestFalse(TEXT("Empty offer is inactive"), Offers.IsActive());
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// AUD-55: texture-set contract. Asserts generated asset paths, Poly Haven
+// suffix/parameter mapping, sRGB policy, and the solid-colour fallback path
+// without importing or loading any content.
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanContentTextureSetContract,
+	"Qinglan.Content.TextureSetContract", AuditFrameworkTestFlags)
+
+bool FQinglanContentTextureSetContract::RunTest(const FString& Parameters)
+{
+	using namespace QinglanTextureSetContract;
+
+	TestEqual(TEXT("Texture folder is per surface set"),
+		TextureFolderPath(TEXT("bamboo_wall")),
+		FString(TEXT("/Game/Qinglan/Textures/bamboo_wall")));
+	TestEqual(TEXT("Texture package is <Set>/<Type>"),
+		TexturePackagePath(TEXT("bamboo_wall"), TEXT("BaseColor")),
+		FString(TEXT("/Game/Qinglan/Textures/bamboo_wall/BaseColor")));
+	TestEqual(TEXT("Texture object path is package.Type"),
+		TextureObjectPath(TEXT("bamboo_wall"), TEXT("BaseColor")),
+		FString(TEXT("/Game/Qinglan/Textures/bamboo_wall/BaseColor.BaseColor")));
+
+	TestEqual(TEXT("BaseColor comes from the _diff_ file"),
+		SourceFileToken(TEXT("BaseColor")), FString(TEXT("diff")));
+	TestEqual(TEXT("Roughness comes from the _rough_ file"),
+		SourceFileToken(TEXT("Roughness")), FString(TEXT("rough")));
+	TestEqual(TEXT("AO comes from the _ao_ file"),
+		SourceFileToken(TEXT("AmbientOcclusion")), FString(TEXT("ao")));
+	TestEqual(TEXT("Packed ARM comes from the _arm_ file"),
+		SourceFileToken(TEXT("Arm")), FString(TEXT("arm")));
+	TestEqual(TEXT("Normal would come from the _nor_ file"),
+		SourceFileToken(TEXT("Normal")), FString(TEXT("nor")));
+
+	TestEqual(TEXT("BaseColor binds the BaseColor parameter"),
+		MaterialParameterName(TEXT("BaseColor")), FString(TEXT("BaseColor")));
+	TestEqual(TEXT("Roughness binds the Roughness parameter"),
+		MaterialParameterName(TEXT("Roughness")), FString(TEXT("Roughness")));
+	TestEqual(TEXT("AO binds the AmbientOcclusion parameter"),
+		MaterialParameterName(TEXT("AmbientOcclusion")), FString(TEXT("AmbientOcclusion")));
+	TestEqual(TEXT("Normal binds the Normal parameter"),
+		MaterialParameterName(TEXT("Normal")), FString(TEXT("Normal")));
+	TestEqual(TEXT("ARM is channel-packed, not a wholesale parameter"),
+		MaterialParameterName(TEXT("Arm")), FString());
+
+	TestTrue(TEXT("BaseColor is sRGB"),
+		IsSRGB(TEXT("BaseColor")));
+	TestFalse(TEXT("Roughness is linear"),
+		IsSRGB(TEXT("Roughness")));
+	TestFalse(TEXT("AO is linear"),
+		IsSRGB(TEXT("AmbientOcclusion")));
+	TestFalse(TEXT("ARM is linear"),
+		IsSRGB(TEXT("Arm")));
+	TestFalse(TEXT("Normal is linear (normal-map sampler)"),
+		IsSRGB(TEXT("Normal")));
+
+	TestEqual(TEXT("Textured material path"),
+		ResolveSurfaceMaterialObjectPath(TEXT("M_BambooWall"), false, true),
+		FString(TEXT("/Game/Qinglan/Materials/M_BambooWall.M_BambooWall")));
+	TestEqual(TEXT("Low quality resolves the solid companion"),
+		ResolveSurfaceMaterialObjectPath(TEXT("M_BambooWall"), true, true),
+		FString(TEXT("/Game/Qinglan/Materials/M_BambooWall_Solid.M_BambooWall_Solid")));
+	TestEqual(TEXT("Missing BaseColor resolves the solid companion"),
+		ResolveSurfaceMaterialObjectPath(TEXT("M_FineWood"), false, false),
+		FString(TEXT("/Game/Qinglan/Materials/M_FineWood_Solid.M_FineWood_Solid")));
+	TestEqual(TEXT("Solid asset name is stable"),
+		SolidMaterialAssetName(TEXT("M_FineWood")), FString(TEXT("M_FineWood_Solid")));
+
+	TestFalse(TEXT("Textured set and standard quality keep textures"),
+		ShouldUseSolidFallback(false, true));
+	TestTrue(TEXT("Low quality falls back to solid"),
+		ShouldUseSolidFallback(true, true));
+	TestTrue(TEXT("Missing BaseColor falls back to solid"),
+		ShouldUseSolidFallback(false, false));
+
 	return true;
 }
 #endif // WITH_DEV_AUTOMATION_TESTS

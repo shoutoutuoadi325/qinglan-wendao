@@ -33,6 +33,12 @@ without the acceptance evidence that document requires.
 
 
 
+- Camera-relative interaction focus capped the camera leg at the 300 cm
+  proximity range, but the spring arm is 350 cm, so nearby stations were never
+  focusable (found while driving the packaged client with real input). The
+  camera leg now allows the arm length plus the proximity reach; player
+  proximity, aim cone, and visibility remain the binding checks.
+
 **Interactive play attempt:** driving WASD/E through xdotool was attempted on the
 packaged client. The client renders and accepts input, but the cluster's
 `gpu_keeper` process intermittently re-claims the GPUs, causing a SIGSEGV at

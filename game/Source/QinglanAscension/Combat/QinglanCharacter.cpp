@@ -190,6 +190,11 @@ namespace
 
 	// --- Playable-loop glue tunables (task contract; interaction layer) ---
 	constexpr float QinglanInteractRange = 300.f;        // cm proximity for interact aiming
+	// The camera sits a full arm length behind the player, so a station at the
+	// player's feet is already ~350 cm from the camera. Capping the camera leg
+	// at the proximity range made every nearby station unfocusable (AUD-26):
+	// allow the arm length plus the proximity reach.
+	constexpr float QinglanInteractCameraReach = QinglanInteractRange + 350.f + 100.f;
 	constexpr float QinglanInteractAimDot = 0.5f;        // camera-aim cone half-angle (~60 deg)
 	constexpr float QinglanDefeatTravelDelay = 1.75f;    // s death beat before the hub reload
 	constexpr float QinglanOnScreenMessageSeconds = 8.f; // fallback notice duration
@@ -244,7 +249,7 @@ namespace
 				continue;
 			}
 			const FVector CameraDelta = TargetLocation - AimOrigin;
-			if (CameraDelta.Size() > QinglanInteractRange)
+			if (CameraDelta.Size() > QinglanInteractCameraReach)
 			{
 				continue;
 			}

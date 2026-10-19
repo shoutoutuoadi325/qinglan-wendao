@@ -761,6 +761,10 @@ AQinglanEncounterDirector* AQinglanTrialDirector::EnsureWaveEngine()
 	Params.Owner = this;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	Params.Name = TEXT("QinglanTrialWaveEngine");
+	// A prior attempt's engine can still be pending kill when the arena world
+	// restarts (retry or second trial); let the engine uniquify instead of the
+	// Required_Fatal default.
+	Params.NameMode = FActorSpawnParameters::ESpawnActorNameMode::Requested;
 	AQinglanEncounterDirector* Engine = World->SpawnActor<AQinglanEncounterDirector>(
 		AQinglanEncounterDirector::StaticClass(), GetActorLocation(), FRotator::ZeroRotator, Params);
 	if (!Engine)

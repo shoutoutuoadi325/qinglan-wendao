@@ -9,6 +9,7 @@
 #include "Internationalization/StringTableCore.h"
 
 #include "Abilities/QinglanProjectile.h"
+#include "AI/QinglanEnemyCatalog.h"
 #include "Abilities/QinglanTechniqueExecutors.h"
 #include "Abilities/QinglanTechniqueTypes.h"
 #include "Combat/QinglanCharacter.h"
@@ -2709,6 +2710,85 @@ bool FQinglanAuditSkeletonSocketContract::RunTest(const FString& Parameters)
 		}
 		TestEqual(FString::Printf(TEXT("socket %s is on the hand bone"), Spec.Socket),
 			Socket->BoneName, FName(Spec.Bone));
+	}
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// AUD-42/44: every archetype's presentation references must resolve on disk.
+// This caught the Bat/Dragon meshes being addressed as SK_Bat/SK_Dragon (the
+// FBX importer keeps the pack's internal names) — those two archetypes would
+// otherwise spawn without a visible body and without a slot graph.
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditEnemyPresentationAssets,
+	"Qinglan.Content.EnemyPresentationAssets", AuditFrameworkTestFlags)
+
+bool FQinglanAuditEnemyPresentationAssets::RunTest(const FString& Parameters)
+{
+	TArray<FQinglanArchetypeSpec> Specs = QinglanEnemyCatalog::GetAllArchetypes();
+	Specs.Append(QinglanEnemyCatalog::GetAllBosses());
+	if (!TestFalse(TEXT("enemy catalog is populated"), Specs.IsEmpty()))
+	{
+		return false;
+	}
+
+	auto CheckSoftPath = [this](const FString& Label, const FSoftObjectPath& Path) -> bool
+	{
+		if (Path.IsNull())
+		{
+			return TestTrue(*FString::Printf(TEXT("%s has no authored path"), *Label), false);
+		}
+		// Resolve the object, not just its package: a package-only path (no
+		// ".Object") loads the package but yields no mesh/montage.
+		UObject* const Loaded = Path.TryLoad();
+		return TestNotNull(*FString::Printf(TEXT("%s loads: %s"), *Label, *Path.ToString()), Loaded);
+	};
+
+	for (const FQinglanArchetypeSpec& Spec : Specs)
+	{
+		UQinglanEnemyDataAsset* Asset = QinglanEnemyCatalog::CreateDataAssetFromSpec(
+			Spec, GetTransientPackage());
+		if (!TestNotNull(*FString::Printf(TEXT("asset for %s"), *Spec.EnemyId.ToString()), Asset))
+		{
+			continue;
+		}
+		CheckSoftPath(FString::Printf(TEXT("%s mesh"), *Spec.EnemyId.ToString()),
+			Asset->Mesh.ToSoftObjectPath());
+		CheckSoftPath(FString::Printf(TEXT("%s idle"), *Spec.EnemyId.ToString()),
+			Asset->IdleAnimation.ToSoftObjectPath());
+		CheckSoftPath(FString::Printf(TEXT("%s attack montage"), *Spec.EnemyId.ToString()),
+			Asset->AttackMontage.ToSoftObjectPath());
+		CheckSoftPath(FString::Printf(TEXT("%s hit-react montage"), *Spec.EnemyId.ToString()),
+			Asset->HitReactMontage.ToSoftObjectPath());
+
+		// Every rig needs a slot graph for those montages to produce pose; the
+		// runtime derives ABP_<MeshBase> beside the mesh and verifies its target
+		// skeleton, so the same derivation is asserted here.
+		USkeletalMesh* Mesh = Cast<USkeletalMesh>(Asset->Mesh.LoadSynchronous());
+		if (Mesh == nullptr)
+		{
+			TestTrue(*FString::Printf(TEXT("%s mesh loads"), *Spec.EnemyId.ToString()), false);
+			continue;
+		}
+		const FString MeshPackage = Mesh->GetOutermost()->GetName();
+		FString MeshBase = FPackageName::GetShortName(MeshPackage);
+		MeshBase.RemoveFromStart(TEXT("SK_"));
+		const FString AbpName = FString::Printf(TEXT("ABP_%s"), *MeshBase);
+		const FString AbpPackage = FPackageName::GetLongPackagePath(MeshPackage) / AbpName;
+		if (!TestTrue(*FString::Printf(TEXT("%s slot graph exists: %s"), *Spec.EnemyId.ToString(), *AbpPackage),
+				FPackageName::DoesPackageExist(AbpPackage)))
+		{
+			continue;
+		}
+		UAnimBlueprint* Abp = LoadObject<UAnimBlueprint>(nullptr,
+			*FString::Printf(TEXT("%s.%s"), *AbpPackage, *AbpName));
+		if (!TestNotNull(*FString::Printf(TEXT("%s slot graph loads"), *Spec.EnemyId.ToString()), Abp))
+		{
+			continue;
+		}
+		const UAnimBlueprintGeneratedClass* Generated = Cast<UAnimBlueprintGeneratedClass>(Abp->GeneratedClass);
+		TestTrue(*FString::Printf(TEXT("%s slot graph targets the mesh skeleton"), *Spec.EnemyId.ToString()),
+			Generated && Generated->GetTargetSkeleton() == Mesh->GetSkeleton());
 	}
 	return true;
 }

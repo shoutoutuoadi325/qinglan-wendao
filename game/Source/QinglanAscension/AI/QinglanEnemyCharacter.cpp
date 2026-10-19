@@ -169,20 +169,33 @@ namespace
 		}
 	}
 
-	// AUD-44: use ABP_Human only for meshes on its target skeleton. Enemy
-	// archetypes span several rigs (Human/Knight/Monsters); the compiled graph
-	// is skeleton-specific, so incompatible meshes keep the native class.
-	const TCHAR* const HumanAnimBlueprintPackage = TEXT("/Game/Qinglan/Characters/Human/ABP_Human");
-	const TCHAR* const HumanAnimBlueprintClassPath =
-		TEXT("/Game/Qinglan/Characters/Human/ABP_Human.ABP_Human_C");
-
+	// AUD-44: every rig gets a sibling slot graph beside its mesh (ABP_Human for
+	// the player rig, ABP_Knight / ABP_Slime / ABP_Skeleton / ABP_Bat /
+	// ABP_Dragon for enemy rigs), authored by QinglanAnimBootstrap. A compiled
+	// anim graph is skeleton-specific, so the target skeleton is verified
+	// before use; a missing or mismatched graph keeps the native class (the
+	// native state machine still drives locomotion, montage slots go unused).
 	UClass* ResolveHumanoidAnimInstanceClass(const USkeletalMesh* Mesh)
 	{
 		const USkeleton* const MeshSkeleton = Mesh ? Mesh->GetSkeleton() : nullptr;
-		if (MeshSkeleton && FPackageName::DoesPackageExist(HumanAnimBlueprintPackage))
+		if (!MeshSkeleton)
+		{
+			return UQinglanCharacterAnimInstance::StaticClass();
+		}
+
+		// Derive the sibling ABP from the mesh package: SK_<Name> -> ABP_<Name>
+		// in the same folder (e.g. .../Monsters/SK_Slime -> .../Monsters/ABP_Slime).
+		const FString MeshPackage = Mesh->GetOutermost()->GetName();
+		FString MeshBase = FPackageName::GetShortName(MeshPackage);
+		MeshBase.RemoveFromStart(TEXT("SK_"), ESearchCase::CaseSensitive);
+		const FString AbpName = FString::Printf(TEXT("ABP_%s"), *MeshBase);
+		const FString AbpPackage = FPackageName::GetLongPackagePath(MeshPackage) / AbpName;
+		const FString AbpClassPath = FString::Printf(TEXT("%s.%s_C"), *AbpPackage, *AbpName);
+
+		if (FPackageName::DoesPackageExist(AbpPackage))
 		{
 			if (UClass* const AnimBlueprintClass =
-					LoadClass<UQinglanCharacterAnimInstance>(nullptr, HumanAnimBlueprintClassPath))
+					LoadClass<UQinglanCharacterAnimInstance>(nullptr, *AbpClassPath))
 			{
 				const UAnimBlueprintGeneratedClass* const GeneratedClass =
 					Cast<UAnimBlueprintGeneratedClass>(AnimBlueprintClass);
@@ -191,6 +204,9 @@ namespace
 					return AnimBlueprintClass;
 				}
 			}
+			UE_LOG(LogQinglan, Warning,
+				TEXT("Enemy anim graph %s exists but does not target %s; native class used"),
+				*AbpClassPath, *MeshSkeleton->GetName());
 		}
 		return UQinglanCharacterAnimInstance::StaticClass();
 	}

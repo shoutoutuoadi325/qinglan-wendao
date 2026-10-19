@@ -106,7 +106,13 @@ namespace
 	FName CategoryForCue(FName CueId)
 	{
 		const FString Id = CueId.ToString();
-		if (Id.Contains(TEXT("impact"), ESearchCase::IgnoreCase))
+		// Strike-shaped cues (blade arcs/impacts, strikes, trails, death
+		// dissolves) read as one-shot bursts; everything else is a cast/aura.
+		if (Id.Contains(TEXT("impact"), ESearchCase::IgnoreCase)
+			|| Id.Contains(TEXT("arc"), ESearchCase::IgnoreCase)
+			|| Id.Contains(TEXT("strike"), ESearchCase::IgnoreCase)
+			|| Id.Contains(TEXT("trail"), ESearchCase::IgnoreCase)
+			|| Id.Contains(TEXT("dissolve"), ESearchCase::IgnoreCase))
 		{
 			return NiagaraCueCategory::Impact;
 		}

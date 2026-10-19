@@ -594,23 +594,29 @@ namespace
 	const TCHAR* const HumanAnimBlueprintObjectPath = TEXT("/Game/Qinglan/Characters/Human/ABP_Human.ABP_Human");
 	const TCHAR* const HumanAnimBlueprintClassPath = TEXT("/Game/Qinglan/Characters/Human/ABP_Human.ABP_Human_C");
 
-	UAnimBlueprint* GenerateHumanAnimBlueprint(USkeleton* Skeleton)
+	/**
+	 * AUD-44: one compiled slot graph per rig. ABP_Human covers the player and
+	 * Human-skeleton enemies; non-Human enemies each get a sibling
+	 * ABP_<MeshBase> in their mesh folder so their montages produce pose too.
+	 */
+	UAnimBlueprint* GenerateSlotAnimBlueprint(USkeleton* Skeleton, const FString& BlueprintName,
+		const FString& BlueprintPackagePath, const FString& BlueprintObjectPath)
 	{
 		if (!Skeleton)
 		{
-			UE_LOG(LogTemp, Error, TEXT("AUD-44 ABP: no skeleton; cannot generate %s"), HumanAnimBlueprintName);
+			UE_LOG(LogTemp, Error, TEXT("AUD-44 ABP: no skeleton; cannot generate %s"), *BlueprintName);
 			return nullptr;
 		}
 
 		// Never overwrite an authored/previous blueprint.
-		if (FPackageName::DoesPackageExist(HumanAnimBlueprintPackagePath))
+		if (FPackageName::DoesPackageExist(BlueprintPackagePath))
 		{
-			if (UAnimBlueprint* Existing = LoadObject<UAnimBlueprint>(nullptr, HumanAnimBlueprintObjectPath))
+			if (UAnimBlueprint* Existing = LoadObject<UAnimBlueprint>(nullptr, *BlueprintObjectPath))
 			{
-				UE_LOG(LogTemp, Log, TEXT("AUD-44 ABP: %s already exists; leaving it untouched"), HumanAnimBlueprintName);
+				UE_LOG(LogTemp, Log, TEXT("AUD-44 ABP: %s already exists; leaving it untouched"), *BlueprintName);
 				return Existing;
 			}
-			UE_LOG(LogTemp, Error, TEXT("AUD-44 ABP: %s exists but failed to load; not overwriting"), HumanAnimBlueprintName);
+			UE_LOG(LogTemp, Error, TEXT("AUD-44 ABP: %s exists but failed to load; not overwriting"), *BlueprintName);
 			return nullptr;
 		}
 
@@ -630,10 +636,10 @@ namespace
 			return nullptr;
 		}
 
-		UPackage* const Package = CreatePackage(HumanAnimBlueprintPackagePath);
+		UPackage* const Package = CreatePackage(*BlueprintPackagePath);
 		if (!Package)
 		{
-			UE_LOG(LogTemp, Error, TEXT("AUD-44 ABP: could not create package %s"), HumanAnimBlueprintPackagePath);
+			UE_LOG(LogTemp, Error, TEXT("AUD-44 ABP: could not create package %s"), *BlueprintPackagePath);
 			return nullptr;
 		}
 
@@ -648,12 +654,12 @@ namespace
 		// Call through the exported UFactory base so MinimalAPI on the concrete
 		// factory does not require a derived-method import.
 		UObject* const CreatedAsset = static_cast<UFactory*>(Factory)->FactoryCreateNew(
-			UAnimBlueprint::StaticClass(), Package, FName(HumanAnimBlueprintName),
+			UAnimBlueprint::StaticClass(), Package, FName(*BlueprintName),
 			RF_Public | RF_Standalone, nullptr, GWarn);
 		UAnimBlueprint* const AnimBlueprint = Cast<UAnimBlueprint>(CreatedAsset);
 		if (!AnimBlueprint)
 		{
-			UE_LOG(LogTemp, Error, TEXT("AUD-44 ABP: factory failed to create %s"), HumanAnimBlueprintName);
+			UE_LOG(LogTemp, Error, TEXT("AUD-44 ABP: factory failed to create %s"), *BlueprintName);
 			return nullptr;
 		}
 		// Factory sets this too; keep it explicit because the compiler needs it.
@@ -789,7 +795,7 @@ namespace
 			}
 			return false;
 		};
-		const FTCHARToUTF8 GeneratedNameANSI(*(FString(HumanAnimBlueprintName) + TEXT("_C")));
+		const FTCHARToUTF8 GeneratedNameANSI(*(BlueprintName + TEXT("_C")));
 		const FTCHARToUTF8 GeneratedTypeANSI(TEXT("AnimBlueprintGeneratedClass"));
 		const FTCHARToUTF8 SlotNameANSI(TEXT("DefaultSlot"));
 		if (!ContainsToken(GeneratedNameANSI.Get()) || !ContainsToken(GeneratedTypeANSI.Get()) || !ContainsToken(SlotNameANSI.Get()))
@@ -801,17 +807,18 @@ namespace
 			return nullptr;
 		}
 
-		UE_LOG(LogTemp, Log, TEXT("AUD-44 ABP: %s generated, compiled, saved to %s"), HumanAnimBlueprintName, *FileName);
+		UE_LOG(LogTemp, Log, TEXT("AUD-44 ABP: %s generated, compiled, saved to %s"), *BlueprintName, *FileName);
 		return AnimBlueprint;
 	}
 
-	/** Post-save contract check for ABP_Human. */
-	bool VerifyHumanAnimBlueprint(const USkeleton* ExpectedSkeleton)
+	/** Post-save contract check for a generated slot blueprint. */
+	bool VerifySlotAnimBlueprint(const USkeleton* ExpectedSkeleton,
+		const FString& BlueprintObjectPath, const FString& BlueprintClassPath)
 	{
-		UAnimBlueprint* const Loaded = LoadObject<UAnimBlueprint>(nullptr, HumanAnimBlueprintObjectPath);
+		UAnimBlueprint* const Loaded = LoadObject<UAnimBlueprint>(nullptr, *BlueprintObjectPath);
 		if (!Loaded)
 		{
-			UE_LOG(LogTemp, Error, TEXT("AUD-44 ABP verify: could not load %s"), HumanAnimBlueprintObjectPath);
+			UE_LOG(LogTemp, Error, TEXT("AUD-44 ABP verify: could not load %s"), *BlueprintObjectPath);
 			return false;
 		}
 		if (Loaded->ParentClass.Get() != UQinglanCharacterAnimInstance::StaticClass())
@@ -833,14 +840,14 @@ namespace
 				*GetNameSafe(GeneratedClass ? GeneratedClass->GetTargetSkeleton() : nullptr));
 			return false;
 		}
-		if (!LoadClass<UQinglanCharacterAnimInstance>(nullptr, HumanAnimBlueprintClassPath))
+		if (!LoadClass<UQinglanCharacterAnimInstance>(nullptr, *BlueprintClassPath))
 		{
 			UE_LOG(LogTemp, Error, TEXT("AUD-44 ABP verify: runtime class path does not load: %s"),
-				HumanAnimBlueprintClassPath);
+				*BlueprintClassPath);
 			return false;
 		}
 		UE_LOG(LogTemp, Log, TEXT("AUD-44 ABP verify: %s ok (generated class %s)"),
-			HumanAnimBlueprintObjectPath, *GetNameSafe(Loaded->GeneratedClass));
+			*BlueprintObjectPath, *GetNameSafe(Loaded->GeneratedClass));
 		return true;
 	}
 } // namespace
@@ -995,8 +1002,10 @@ int32 UQinglanAnimBootstrapCommandlet::Main(const FString& Params)
 	// node in a compiled graph, every action montage stays invisible.
 	if (HumanSkeleton)
 	{
-		UAnimBlueprint* const AnimBlueprint = GenerateHumanAnimBlueprint(HumanSkeleton);
-		if (!AnimBlueprint || !VerifyHumanAnimBlueprint(HumanSkeleton))
+		UAnimBlueprint* const AnimBlueprint = GenerateSlotAnimBlueprint(HumanSkeleton,
+			HumanAnimBlueprintName, HumanAnimBlueprintPackagePath, HumanAnimBlueprintObjectPath);
+		if (!AnimBlueprint || !VerifySlotAnimBlueprint(HumanSkeleton,
+				HumanAnimBlueprintObjectPath, HumanAnimBlueprintClassPath))
 		{
 			bOk = false;
 		}
@@ -1004,6 +1013,49 @@ int32 UQinglanAnimBootstrapCommandlet::Main(const FString& Params)
 	else
 	{
 		UE_LOG(LogTemp, Warning, TEXT("AUD-44 ABP: Human skeleton unavailable; ABP_Human generation skipped"));
+	}
+
+	// AUD-44: non-Human enemies span several rigs (Knight, Slime, Skeleton,
+	// Bat, Dragon). A slot graph is skeleton-specific, so author one sibling
+	// ABP_<MeshBase> per rig beside its mesh. EnemyCharacter resolves it by
+	// deriving this same path from the mesh package.
+	{
+		TArray<FAssetData> CharacterMeshes;
+		AssetRegistry.Get().GetAssetsByClass(
+			FTopLevelAssetPath(TEXT("/Script/Engine"), TEXT("SkeletalMesh")), CharacterMeshes, /*bSearchSubClasses=*/false);
+		for (const FAssetData& Asset : CharacterMeshes)
+		{
+			const FString PackageName = Asset.PackageName.ToString();
+			if (!PackageName.StartsWith(TEXT("/Game/Qinglan/Characters/")) || PackageName.Contains(TEXT("/Montages/")))
+			{
+				continue;
+			}
+			const FString MeshName = Asset.AssetName.ToString();
+			if (MeshName == TEXT("SK_Human") || MeshName.Contains(TEXT("Armature")))
+			{
+				continue; // player rig is covered by ABP_Human
+			}
+			USkeletalMesh* const Mesh = Cast<USkeletalMesh>(Asset.GetAsset());
+			USkeleton* const MeshSkeleton = Mesh ? Mesh->GetSkeleton() : nullptr;
+			if (!MeshSkeleton || MeshSkeleton == HumanSkeleton)
+			{
+				continue;
+			}
+			FString AbpName = MeshName;
+			AbpName.RemoveFromStart(TEXT("SK_"));
+			AbpName = FString::Printf(TEXT("ABP_%s"), *AbpName);
+			const FString Folder = FPackageName::GetLongPackagePath(PackageName);
+			const FString AbpPackage = Folder / AbpName;
+			const FString AbpObject = FString::Printf(TEXT("%s.%s"), *AbpPackage, *AbpName);
+			const FString AbpClass = FString::Printf(TEXT("%s.%s_C"), *AbpPackage, *AbpName);
+			UAnimBlueprint* const AnimBlueprint = GenerateSlotAnimBlueprint(MeshSkeleton,
+				AbpName, AbpPackage, AbpObject);
+			if (!AnimBlueprint || !VerifySlotAnimBlueprint(MeshSkeleton, AbpObject, AbpClass))
+			{
+				UE_LOG(LogTemp, Error, TEXT("AUD-44 ABP: %s for %s failed"), *AbpName, *MeshName);
+				bOk = false;
+			}
+		}
 	}
 
 	// --- AUD-44: weapon/cast sockets on the Human skeleton ------------------
@@ -1179,6 +1231,24 @@ int32 UQinglanAnimBootstrapCommandlet::Main(const FString& Params)
 				if (!Plan.Takes.Contains(FName(TEXT("Cast"))))
 				{
 					Plan.Takes.FindOrAdd(FName(TEXT("Cast"))) = *CutOne;
+				}
+			}
+		}
+		// Every group's data asset references AM_<Group>_HitReact. Human and
+		// Knight rigs ship no hurt take, so clone the closest body motion
+		// (player dodge jump / knight attack) into a hit-react montage instead
+		// of leaving the catalog path dangling.
+		if (!Plan.Takes.Contains(FName(TEXT("HitReact"))))
+		{
+			const TCHAR* FallbackSuffixes[] = { TEXT("Dodge"), TEXT("Attack"), TEXT("SwordCut_1") };
+			for (const TCHAR* Fallback : FallbackSuffixes)
+			{
+				if (const TObjectPtr<UAnimSequence>* Source = Plan.Takes.Find(FName(Fallback)))
+				{
+					Plan.Takes.FindOrAdd(FName(TEXT("HitReact"))) = *Source;
+					UE_LOG(LogTemp, Log, TEXT("AUD-44 montage: %s HitReact cloned from %s"),
+						*Plan.Group, Fallback);
+					break;
 				}
 			}
 		}

@@ -6,6 +6,7 @@
 // stay the reference.
 #include "AI/QinglanEnemyCatalog.h"
 
+#include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "UObject/SoftObjectPath.h"
 
@@ -471,31 +472,44 @@ namespace QinglanEnemyCatalog
 		static const TMap<FName, FPresent> MeshGroups = {
 			{ FName(TEXT("spirit_wolf")),         { TEXT("Monsters/SK_Skeleton"), TEXT("Monsters/SK_SkeletonSkeletonArmature_Skeleton_Idle") } },
 			{ FName(TEXT("corrupted_disciple")),  { TEXT("Human/SK_Human"),       TEXT("Human/SK_HumanHuman_Armature_Idle") } },
-			{ FName(TEXT("hollow_archer")),       { TEXT("Monsters/SK_Bat"),      TEXT("Monsters/SK_BatBatArmature_Bat_Flying") } },
+			// The Bat/Dragon FBX imports keep the pack's internal object names
+			// (Bat/Dragon); the SK_-prefixed assets are only the anim takes.
+			{ FName(TEXT("hollow_archer")),       { TEXT("Monsters/Bat"),         TEXT("Monsters/SK_BatBatArmature_Bat_Flying") } },
 			{ FName(TEXT("stone_sentinel")),      { TEXT("Knight/SK_Knight"),     TEXT("Knight/SK_KnightHumanArmature_Idle") } },
 			{ FName(TEXT("ember_wisp")),          { TEXT("Monsters/SK_Slime"),    TEXT("Monsters/SK_SlimeArmature_Slime_Idle") } },
 			{ FName(TEXT("rootbound_keeper")),    { TEXT("Monsters/SK_Slime"),    TEXT("Monsters/SK_SlimeArmature_Slime_Idle") } },
 			{ FName(TEXT("bamboo_guardian")),     { TEXT("Knight/SK_Knight"),     TEXT("Knight/SK_KnightHumanArmature_Idle") } },
 			{ FName(TEXT("ashen_guardian")),      { TEXT("Knight/SK_Knight"),     TEXT("Knight/SK_KnightHumanArmature_Idle") } },
-			{ FName(TEXT("broken_guardian")),     { TEXT("Monsters/SK_Dragon"),   TEXT("Monsters/SK_DragonDragonArmature_Dragon_Flying") } },
+			{ FName(TEXT("broken_guardian")),     { TEXT("Monsters/Dragon"),      TEXT("Monsters/SK_DragonDragonArmature_Dragon_Flying") } },
 			{ FName(TEXT("elite_construct")),     { TEXT("Knight/SK_Knight"),     TEXT("Knight/SK_KnightHumanArmature_Idle") } },
 		};
 		if (const FPresent* Group = MeshGroups.Find(Spec.EnemyId))
 		{
 			const FString GroupPath = FString::Printf(TEXT("/Game/Qinglan/Characters/%s"), Group->Mesh);
-			const FString GroupDir = GroupPath.Left(GroupPath.Find(TEXT("/SK_")));
-			const FString GroupName = FPaths::GetBaseFilename(GroupDir);
-			Asset->Mesh = TSoftObjectPtr<USkeletalMesh>(FSoftObjectPath(GroupPath));
-			Asset->IdleAnimation = TSoftObjectPtr<UAnimSequence>(FSoftObjectPath(
-				FString::Printf(TEXT("/Game/Qinglan/Characters/%s"), Group->Idle)));
+			// Group folder is the first path segment after Characters (works for
+			// both SK_-prefixed and pack-named meshes like Monsters/Bat).
+			const FString RelativeMeshPath(Group->Mesh);
+			const FString GroupName = RelativeMeshPath.Left(
+				RelativeMeshPath.Contains(TEXT("/")) ? RelativeMeshPath.Find(TEXT("/")) : RelativeMeshPath.Len());
+			const FString GroupDir = FString::Printf(TEXT("/Game/Qinglan/Characters/%s"), *GroupName);
+			// FSoftObjectPath needs "Package.Object": a package-only path loads
+			// the package but resolves no asset, so the mesh/montage stayed null
+			// and every enemy spawned without presentation.
+			auto MakeObjectPath = [](const FString& PackagePath)
+			{
+				return FString::Printf(TEXT("%s.%s"), *PackagePath, *FPackageName::GetShortName(PackagePath));
+			};
+			Asset->Mesh = TSoftObjectPtr<USkeletalMesh>(FSoftObjectPath(MakeObjectPath(GroupPath)));
+			Asset->IdleAnimation = TSoftObjectPtr<UAnimSequence>(FSoftObjectPath(MakeObjectPath(
+				FString::Printf(TEXT("/Game/Qinglan/Characters/%s"), Group->Idle))));
 			// The anim bootstrap names montages AM_<GroupFolder>_<Suffix>; the
 			// Human folder holds the player combo cuts, so humanoid enemies
 			// reuse the first cut as their attack swing.
 			const TCHAR* AttackSuffix = GroupName == TEXT("Human") ? TEXT("SwordCut_1") : TEXT("Attack");
-			Asset->AttackMontage = TSoftObjectPtr<UAnimMontage>(FSoftObjectPath(
-				FString::Printf(TEXT("%s/Montages/AM_%s_%s"), *GroupDir, *GroupName, AttackSuffix)));
-			Asset->HitReactMontage = TSoftObjectPtr<UAnimMontage>(FSoftObjectPath(
-				FString::Printf(TEXT("%s/Montages/AM_%s_HitReact"), *GroupDir, *GroupName)));
+			Asset->AttackMontage = TSoftObjectPtr<UAnimMontage>(FSoftObjectPath(MakeObjectPath(
+				FString::Printf(TEXT("%s/Montages/AM_%s_%s"), *GroupDir, *GroupName, AttackSuffix))));
+			Asset->HitReactMontage = TSoftObjectPtr<UAnimMontage>(FSoftObjectPath(MakeObjectPath(
+				FString::Printf(TEXT("%s/Montages/AM_%s_HitReact"), *GroupDir, *GroupName))));
 		}
 
 		if (UQinglanBossDataAsset* BossAsset = Cast<UQinglanBossDataAsset>(Asset))

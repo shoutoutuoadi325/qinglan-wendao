@@ -24,6 +24,10 @@
 #include "Engine/World.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialParameterCollectionInstance.h" // IWYU
+#include "NiagaraComponent.h"
+#include "NiagaraFunctionLibrary.h"
+#include "NiagaraSystem.h"
+#include "NiagaraTypes.h"
 #include "Platform/QinglanGraphicsSettingsService.h"
 #include "UObject/SoftObjectPath.h"
 
@@ -78,6 +82,41 @@ namespace
 	/** AUD-43: bounded cosmetic-light budget per component (docs/06 VFX GPU
 	 *  budget); exceeded cues keep their mesh silhouette but spawn no light. */
 	constexpr int32 MaxActiveCueLights = 16;
+
+	/** AUD-42: bounded Niagara budget per component. Spawns beyond the budget
+	 *  keep the mesh/light placeholder so presentation stays bounded even when
+	 *  many cues land in one frame (also protects automation worlds). */
+	constexpr int32 MaxActiveNiagaraCues = 8;
+
+	namespace NiagaraCueCategory
+	{
+		const FName Impact(TEXT("impact"));
+		const FName Telegraph(TEXT("telegraph"));
+		const FName Cast(TEXT("cast"));
+	}
+
+	/** Authored by QinglanContentBootstrap::BootstrapNiagaraEffects. */
+	namespace NiagaraCuePath
+	{
+		const TCHAR* Impact = TEXT("/Game/Qinglan/VFX/NS_Impact.NS_Impact");
+		const TCHAR* Telegraph = TEXT("/Game/Qinglan/VFX/NS_Telegraph.NS_Telegraph");
+		const TCHAR* Cast = TEXT("/Game/Qinglan/VFX/NS_Cast.NS_Cast");
+	}
+
+	FName CategoryForCue(FName CueId)
+	{
+		const FString Id = CueId.ToString();
+		if (Id.Contains(TEXT("impact"), ESearchCase::IgnoreCase))
+		{
+			return NiagaraCueCategory::Impact;
+		}
+		if (Id.Contains(TEXT("telegraph"), ESearchCase::IgnoreCase)
+			|| Id.Contains(TEXT("ground_marker"), ESearchCase::IgnoreCase))
+		{
+			return NiagaraCueCategory::Telegraph;
+		}
+		return NiagaraCueCategory::Cast;
+	}
 
 	/** Actual player configuration, resolved from the graphics service. A
 	 *  headless/test world without a GameInstance keeps the Balanced preset
@@ -152,6 +191,142 @@ UMaterialInterface* UQinglanVFXCueComponent::GetCueMaterial(FName MaterialKey)
 	return Mat;
 }
 
+UNiagaraSystem* UQinglanVFXCueComponent::ResolveNiagaraSystemForCue(FName CueId)
+{
+	const FName Category = CategoryForCue(CueId);
+	if (TObjectPtr<UNiagaraSystem>* Cached = CachedNiagaraSystems.Find(Category))
+	{
+		return Cached->Get(); // null here is a cached miss (placeholder-only path)
+	}
+
+	const TCHAR* Path = NiagaraCuePath::Cast;
+	if (Category == NiagaraCueCategory::Impact)
+	{
+		Path = NiagaraCuePath::Impact;
+	}
+	else if (Category == NiagaraCueCategory::Telegraph)
+	{
+		Path = NiagaraCuePath::Telegraph;
+	}
+
+	UNiagaraSystem* System = LoadObject<UNiagaraSystem>(nullptr, Path);
+	if (System == nullptr)
+	{
+		// Expected until QinglanContentBootstrap authors the systems. Keep the
+		// mesh/light placeholder; never treat this as a gameplay failure.
+		UE_LOG(LogQinglanCombat, Verbose,
+			TEXT("Niagara cue system %s missing (category %s); placeholder cue only (AUD-42)"),
+			Path, *Category.ToString());
+	}
+	else
+	{
+		UE_LOG(LogQinglanCombat, Verbose, TEXT("Niagara cue system %s loaded for category %s"),
+			Path, *Category.ToString());
+	}
+	CachedNiagaraSystems.Add(Category, System);
+	return System;
+}
+
+void UQinglanVFXCueComponent::ApplyNiagaraElementParameters(UNiagaraComponent* NiagaraComponent,
+	UNiagaraSystem* System, EQinglanElement Element, float Intensity) const
+{
+	if (!NiagaraComponent || !System)
+	{
+		return;
+	}
+
+	// Only drive user parameters the system actually exposes; SetVariable* on a
+	// missing parameter is a no-op with a warning, which would spam per cue.
+	TArray<FNiagaraVariable> Parameters;
+	System->GetExposedParameters().GetParameters(Parameters);
+	bool bHasColor = false;
+	bool bHasSpriteSize = false;
+	for (const FNiagaraVariable& Parameter : Parameters)
+	{
+		const FName Name = Parameter.GetName();
+		bHasColor |= Name == FName(TEXT("User.Color"));
+		bHasSpriteSize |= Name == FName(TEXT("User.SpriteSize"));
+	}
+	if (bHasColor)
+	{
+		NiagaraComponent->SetVariableLinearColor(FName(TEXT("User.Color")), ElementColor(Element));
+	}
+	if (bHasSpriteSize)
+	{
+		NiagaraComponent->SetVariableFloat(FName(TEXT("User.SpriteSize")),
+			12.f * FMath::Clamp(Intensity, 0.1f, 4.f));
+	}
+}
+
+int32 UQinglanVFXCueComponent::GetActiveNiagaraCount() const
+{
+	int32 Count = 0;
+	for (const FCueInstance& Inst : ActiveCues)
+	{
+		if (Inst.Niagara.IsValid())
+		{
+			++Count;
+		}
+	}
+	return Count;
+}
+
+void UQinglanVFXCueComponent::SpawnNiagaraForCue(FName CueId, const FTransform& Source,
+	FVector TargetPoint, EQinglanElement Element, float Intensity,
+	TWeakObjectPtr<UNiagaraComponent>& OutNiagara)
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return; // headless contexts keep the logical cue only
+	}
+	UNiagaraSystem* System = ResolveNiagaraSystemForCue(CueId);
+	if (!System)
+	{
+		return; // placeholder geometry already covers the cue
+	}
+	// Quality/low-flash policy: Niagara systems are additive decorative bursts,
+	// so Low quality and low-flash mode keep the static-mesh silhouette only
+	// (telegraphs stay readable because PlayTelegraph/PlaySafeLane always draw
+	// their quality-independent ground markers).
+	const FQinglanResolvedCueSettings CueSettings = ResolveCueSettings(World);
+	if (CueSettings.bLowFlash || CueSettings.Quality == EQinglanVFXQuality::Low)
+	{
+		UE_LOG(LogQinglanCombat, Verbose,
+			TEXT("Niagara cue %s suppressed by Low quality / low-flash; placeholder remains"),
+			*CueId.ToString());
+		return;
+	}
+	if (GetActiveNiagaraCount() >= MaxActiveNiagaraCues)
+	{
+		UE_LOG(LogQinglanCombat, Verbose,
+			TEXT("Niagara cue budget reached (%d); placeholder only for %s"),
+			MaxActiveNiagaraCues, *CueId.ToString());
+		return;
+	}
+
+	// bAutoDestroy: the system ends and destroys itself; we only keep a weak
+	// reference so ResetForPool/decay cannot dangle (and can cut it short when
+	// the cue budget needs the slot back). No dynamic light is created here,
+	// preserving the low-flash policy.
+	const FVector SpawnLocation = Source.GetLocation().IsNearlyZero() && !TargetPoint.IsNearlyZero()
+		? TargetPoint
+		: Source.GetLocation();
+	UNiagaraComponent* NiagaraComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+		World, System, SpawnLocation, Source.GetRotation().Rotator(), FVector::OneVector,
+		/*bAutoDestroy=*/true, /*bAutoActivate=*/true, ENCPoolMethod::None, /*bPreCullCheck=*/true);
+	if (!NiagaraComponent)
+	{
+		UE_LOG(LogQinglanCombat, Warning,
+			TEXT("Niagara spawn failed for cue %s (%s); placeholder cue remains"),
+			*CueId.ToString(), *System->GetName());
+		return;
+	}
+	ApplyNiagaraElementParameters(NiagaraComponent, System, Element,
+		Intensity * IntensityScaleForQuality(CueSettings.Quality));
+	OutNiagara = NiagaraComponent;
+}
+
 void UQinglanVFXCueComponent::PlayTelegraph(FVector Center, float Radius, float Duration, EQinglanElement Element)
 {
 	UWorld* World = GetWorld();
@@ -190,6 +365,12 @@ void UQinglanVFXCueComponent::PlayTelegraph(FVector Center, float Radius, float 
 	Inst.Total = Duration;
 	Inst.BaseRadius = Radius;
 	Inst.bRing = true;
+
+	// AUD-42: real Niagara telegraph when the authored system exists; the decal
+	// and disc above remain the fallback and the quality-independent silhouette.
+	FTransform NiagaraSource;
+	NiagaraSource.SetLocation(Center);
+	SpawnNiagaraForCue(QinglanVFXCues::TelegraphRing, NiagaraSource, Center, Element, 1.f, Inst.Niagara);
 	ActiveCues.Add(Inst);
 
 	// AUD-42: the decal alone disappears when the bootstrap material is missing
@@ -284,6 +465,10 @@ void UQinglanVFXCueComponent::PlaySafeLane(FVector Center, float Radius, float S
 	Inst.Total = Duration;
 	Inst.BaseRadius = Radius;
 	Inst.bRing = false;
+	FTransform NiagaraSource;
+	NiagaraSource.SetLocation(Center);
+	NiagaraSource.SetRotation(FQuat(FRotator(0.f, SafeLaneDegrees, 0.f)));
+	SpawnNiagaraForCue(QinglanVFXCues::TelegraphRing, NiagaraSource, Center, Element, 0.8f, Inst.Niagara);
 	ActiveCues.Add(Inst);
 }
 
@@ -369,6 +554,10 @@ void UQinglanVFXCueComponent::PlayCue(FName CueId, const FTransform& Source, FVe
 		Inst.Light = Light;
 		Inst.LightBaseIntensity = 8000.f * Intensity;
 	}
+
+	// AUD-42: layer the authored Niagara system over the placeholder geometry.
+	// Missing systems (pre-bootstrap) leave the static mesh exactly as before.
+	SpawnNiagaraForCue(CueId, Source, TargetPoint, Element, Intensity, Inst.Niagara);
 	ActiveCues.Add(Inst);
 }
 
@@ -396,6 +585,13 @@ void UQinglanVFXCueComponent::ResetForPool()
 		if (UPointLightComponent* Light = Inst.Light.Get())
 		{
 			Light->DestroyComponent();
+		}
+		// AUD-42: release real Niagara instances with the pool reset. The weak
+		// pointer is safe if the system already auto-destroyed (null).
+		if (UNiagaraComponent* Niagara = Inst.Niagara.Get())
+		{
+			Niagara->Deactivate();
+			Niagara->DestroyComponent();
 		}
 	}
 	ActiveCues.Reset();
@@ -440,6 +636,15 @@ void UQinglanVFXCueComponent::DecayCues(float DeltaTime)
 			if (UPointLightComponent* Light = Inst.Light.Get())
 			{
 				Light->DestroyComponent();
+			}
+			// AUD-42: end the real emitter with the cue. bAutoDestroy would
+			// also handle this; destroying here frees the per-component budget
+			// deterministically. The weak reference is never dereferenced
+			// unguarded.
+			if (UNiagaraComponent* Niagara = Inst.Niagara.Get())
+			{
+				Niagara->Deactivate();
+				Niagara->DestroyComponent();
 			}
 			ActiveCues.RemoveAtSwap(i);
 		}

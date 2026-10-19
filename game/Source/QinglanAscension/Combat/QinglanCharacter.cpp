@@ -1558,7 +1558,8 @@ FVector AQinglanCharacter::GetAimPoint() const
 	{
 		return GetActorLocation() + GetActorForwardVector() * QinglanAimTraceDistance;
 	}
-	static const FName CastSocketName(TEXT("cast_source")); // socket name not authored; rig-side tunable
+	// Authored on SK_Human_Skeleton at RightHand by QinglanAnimBootstrap (AUD-44).
+	static const FName CastSocketName(TEXT("cast_source"));
 
 	const FVector CameraLocation = FollowCamera->GetComponentLocation();
 	const FVector CameraForward = FollowCamera->GetComponentRotation().Vector();

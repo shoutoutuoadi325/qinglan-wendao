@@ -22,8 +22,9 @@
 //     with a minimal Root + DefaultSlot graph so slot montages produce pose.
 //     Aim offsets, a layered combat slot and richer transition rules are still
 //     authoring work.
-//   - Socket authoring/validation is still missing: sword_base/sword_tip for
-//     the blade sweep and cast_source for technique aim.
+//   - QinglanAnimBootstrap authors sword_base/sword_tip (blade sweep) and
+//     cast_source (technique aim) on SK_Human_Skeleton at RightHand; the mesh
+//     inherits them, so sword/cast resolution needs no rig-side setup.
 #pragma once
 
 #include "CoreMinimal.h"

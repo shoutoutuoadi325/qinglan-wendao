@@ -2,6 +2,9 @@
 // These do not prove disk durability, save migration, or gameplay entry wiring.
 #include "Misc/AutomationTest.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Animation/Skeleton.h"
+#include "Engine/SkeletalMeshSocket.h"
+#include "NiagaraSystem.h"
 #include "Internationalization/StringTable.h"
 #include "Internationalization/StringTableCore.h"
 
@@ -2643,6 +2646,70 @@ bool FQinglanContentTextureSetContract::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Missing BaseColor falls back to solid"),
 		ShouldUseSolidFallback(false, false));
 
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// AUD-42: the cue component resolves these three authored systems by path.
+// Loading each asset from disk proves the shipped package has a real emitter
+// (the bootstrap deletes the package when post-save verification fails).
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditNiagaraCueContract,
+	"Qinglan.VFX.NiagaraCueContract", AuditFrameworkTestFlags)
+
+bool FQinglanAuditNiagaraCueContract::RunTest(const FString& Parameters)
+{
+	struct FCueSystemSpec { const TCHAR* ObjectPath; const TCHAR* Label; };
+	const FCueSystemSpec Specs[] = {
+		{ TEXT("/Game/Qinglan/VFX/NS_Impact.NS_Impact"), TEXT("impact") },
+		{ TEXT("/Game/Qinglan/VFX/NS_Telegraph.NS_Telegraph"), TEXT("telegraph") },
+		{ TEXT("/Game/Qinglan/VFX/NS_Cast.NS_Cast"), TEXT("cast") },
+	};
+	for (const FCueSystemSpec& Spec : Specs)
+	{
+		UNiagaraSystem* System = LoadObject<UNiagaraSystem>(nullptr, Spec.ObjectPath);
+		if (!TestNotNull(FString::Printf(TEXT("%s cue system loads"), Spec.Label), System))
+		{
+			continue;
+		}
+		TestTrue(FString::Printf(TEXT("%s cue system has an emitter"), Spec.Label),
+			System->GetEmitterHandles().Num() > 0);
+	}
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// AUD-44: sword sweep and cast aim resolve these sockets through the skeletal
+// mesh (skeleton sockets are inherited by every mesh on the rig).
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditSkeletonSocketContract,
+	"Qinglan.Animation.SkeletonSocketContract", AuditFrameworkTestFlags)
+
+bool FQinglanAuditSkeletonSocketContract::RunTest(const FString& Parameters)
+{
+	USkeleton* Skeleton = LoadObject<USkeleton>(nullptr,
+		TEXT("/Game/Qinglan/Characters/Human/SK_Human_Skeleton"));
+	if (!TestNotNull(TEXT("Human skeleton loads"), Skeleton))
+	{
+		return false;
+	}
+
+	struct FSocketSpec { const TCHAR* Socket; const TCHAR* Bone; };
+	const FSocketSpec Specs[] = {
+		{ TEXT("sword_base"), TEXT("RightHand") },
+		{ TEXT("sword_tip"), TEXT("RightHand") },
+		{ TEXT("cast_source"), TEXT("RightHand") },
+	};
+	for (const FSocketSpec& Spec : Specs)
+	{
+		const USkeletalMeshSocket* Socket = Skeleton->FindSocket(FName(Spec.Socket));
+		if (!TestNotNull(FString::Printf(TEXT("socket %s exists"), Spec.Socket), Socket))
+		{
+			continue;
+		}
+		TestEqual(FString::Printf(TEXT("socket %s is on the hand bone"), Spec.Socket),
+			Socket->BoneName, FName(Spec.Bone));
+	}
 	return true;
 }
 #endif // WITH_DEV_AUTOMATION_TESTS

@@ -28,7 +28,7 @@
 #include "GameFramework/WorldSettings.h"
 #include "Engine/TargetPoint.h"
 #include "EnhancedInputModule.h" // UE 5.8: IEnhancedInputModule moved here from EnhancedInput/Subsystem/
-#include "HAL/FileManager.h"
+#include "HAL/FileManager.h" // AUD-42: remove a just-written Niagara package if post-save verification fails
 #include "InputAction.h"
 #include "InputMappingContext.h"
 #include "InputModifiers.h"
@@ -51,6 +51,11 @@
 #include "UObject/Package.h"
 #include "UObject/SavePackage.h"
 #include "UObject/SoftObjectPath.h" // UE 5.8: FSoftObjectPath replaces FPackageName::GetObjectPathPackage
+#include "NiagaraEmitter.h"
+#include "NiagaraSettings.h" // default effect type (mirrors UNiagaraSystemFactoryNew)
+#include "NiagaraSystem.h"
+#include "NiagaraEditorUtilities.h" // FNiagaraEditorUtilities::AddEmitterToSystem (AUD-42)
+#include "NiagaraSystemFactoryNew.h" // UNiagaraSystemFactoryNew::InitializeSystem (AUD-42)
 
 #define LOCTEXT_NAMESPACE "QinglanContentBootstrap"
 
@@ -79,6 +84,11 @@ namespace
 		return Package;
 	}
 }
+
+/** AUD-42: authors /Game/Qinglan/VFX/NS_{Impact,Telegraph,Cast} from engine
+ *  emitter templates. A free function (not a commandlet member) so the frozen
+ *  commandlet header needs no new declaration; called from Main. */
+bool BootstrapNiagaraEffects();
 
 // AUD-55 texture-set contract. Kept in a named namespace (not exported through
 // the commandlet header, which is frozen) so QinglanAuditFrameworkTests can
@@ -173,6 +183,7 @@ int32 UQinglanContentBootstrapCommandlet::Main(const FString& Params)
 	bOk &= BootstrapInput();
 	bOk &= BootstrapMaterials();
 	bOk &= BootstrapVFXMaterials();
+	bOk &= BootstrapNiagaraEffects(); // AUD-42: real Niagara cue systems (placeholder fallback kept)
 	bOk &= BootstrapMaps();
 	UE_LOG(LogTemp, Log, TEXT("QinglanContentBootstrap finished ok=%d"), bOk);
 	return bOk ? 0 : 1;
@@ -573,6 +584,208 @@ bool UQinglanContentBootstrapCommandlet::BootstrapVFXMaterials()
 			bOk &= FinishMaterial(Pkg, Mat);
 		}
 	}
+	return bOk;
+}
+
+// ---------------------------------------------------------------------------
+// AUD-42: real Niagara cue systems from the engine emitter templates.
+//
+// Engine content is mounted at /Niagara. The three systems are deliberately
+// thin wrappers around stock emitters (SimpleSpriteBurst / DirectionalBurst /
+// ConfettiBurst) so the runtime has a real particle asset while the static
+// mesh placeholders remain the fallback. Assets that already exist on disk are
+// kept untouched. A system is only saved after its emitter handle was added;
+// every asset is re-loaded after saving and required to expose >= 1 emitter.
+// ---------------------------------------------------------------------------
+bool BootstrapNiagaraEffects()
+{
+	struct FNiagaraEffectSpec
+	{
+		const TCHAR* AssetName;
+		const TCHAR* TemplateObjectPath;
+	};
+
+	// Engine templates (verified present in this engine install).
+	static const FNiagaraEffectSpec Specs[] = {
+		{ TEXT("NS_Impact"),    TEXT("/Niagara/DefaultAssets/Templates/Emitters/SimpleSpriteBurst.SimpleSpriteBurst") },
+		{ TEXT("NS_Telegraph"), TEXT("/Niagara/DefaultAssets/Templates/Emitters/DirectionalBurst.DirectionalBurst") },
+		{ TEXT("NS_Cast"),      TEXT("/Niagara/DefaultAssets/Templates/Emitters/ConfettiBurst.ConfettiBurst") },
+	};
+
+	bool bOk = true;
+	const FString Directory = ContentRoot + TEXT("/VFX");
+
+	for (const FNiagaraEffectSpec& Spec : Specs)
+	{
+		const FString AssetName(Spec.AssetName);
+		const FString PackageName = Directory + TEXT("/") + AssetName;
+		const FString ObjectPath = PackageName + TEXT(".") + AssetName;
+
+		// "若已存在则跳过保存，保留已有": never overwrite an authored system.
+		if (FPackageName::DoesPackageExist(PackageName))
+		{
+			UNiagaraSystem* Existing = LoadObject<UNiagaraSystem>(nullptr, *ObjectPath);
+			if (Existing == nullptr || Existing->GetEmitterHandles().Num() == 0)
+			{
+				UE_LOG(LogTemp, Warning,
+					TEXT("BootstrapNiagaraEffects: existing asset %s is not a usable Niagara system; keeping it untouched"),
+					*ObjectPath);
+				bOk = false;
+			}
+			else
+			{
+				UE_LOG(LogTemp, Log, TEXT("BootstrapNiagaraEffects: %s already exists; skipped"), *ObjectPath);
+			}
+			continue;
+		}
+
+		UNiagaraEmitter* TemplateEmitter = LoadObject<UNiagaraEmitter>(nullptr, Spec.TemplateObjectPath);
+		if (TemplateEmitter == nullptr)
+		{
+			// Template/API unavailable: keep the runtime placeholder path and
+			// report the failure rather than authoring a broken system.
+			UE_LOG(LogTemp, Error,
+				TEXT("BootstrapNiagaraEffects: template emitter missing at %s; %s not created (placeholder cues remain)"),
+				Spec.TemplateObjectPath, *AssetName);
+			bOk = false;
+			continue;
+		}
+
+		UPackage* Package = CreateOrFetchPackage(ObjectPath);
+		if (Package == nullptr)
+		{
+			UE_LOG(LogTemp, Error, TEXT("BootstrapNiagaraEffects: package creation failed for %s"), *ObjectPath);
+			bOk = false;
+			continue;
+		}
+
+		UNiagaraSystem* System = NewObject<UNiagaraSystem>(
+			Package, FName(*AssetName), RF_Public | RF_Standalone | RF_Transactional);
+		if (System == nullptr)
+		{
+			UE_LOG(LogTemp, Error, TEXT("BootstrapNiagaraEffects: system allocation failed for %s"), *ObjectPath);
+			bOk = false;
+			continue;
+		}
+		// Use the engine factory's initialization path (system scripts + graph),
+		// including the factory's default effect-type assignment.
+		UNiagaraSystemFactoryNew::InitializeSystem(System, /*bCreateDefaultNodes=*/true);
+		if (System->GetEffectType() == nullptr)
+		{
+			if (UNiagaraEffectType* DefaultEffectType = GetDefault<UNiagaraSettings>()->GetDefaultEffectType())
+			{
+				System->SetEffectType(DefaultEffectType);
+			}
+		}
+
+		const FNiagaraAssetVersion ExposedVersion = TemplateEmitter->GetExposedVersion();
+		const FGuid EmitterVersion = ExposedVersion.VersionGuid.IsValid() ? ExposedVersion.VersionGuid : FGuid();
+		FNiagaraEditorUtilities::AddEmitterToSystem(
+			*System, *TemplateEmitter, EmitterVersion, /*bCreateCopy=*/true);
+
+		if (System->GetEmitterHandles().Num() == 0)
+		{
+			// Never save an emitter-less system (would be an unusable asset).
+			UE_LOG(LogTemp, Error,
+				TEXT("BootstrapNiagaraEffects: %s has no emitter handle after AddEmitterToSystem; not saved"),
+				*ObjectPath);
+			bOk = false;
+			continue;
+		}
+
+		// Compile before reading exposed parameters: the store is populated by
+		// the compile pass. Script VM only (no GPU shader wait) so the editor
+		// commandlet stays reasonably fast.
+		System->RequestCompile(false);
+		System->WaitForCompilationComplete(/*bIncludingGPUShaders=*/false, /*bShowProgress=*/false);
+
+		// Optional user-parameter defaults. The stock templates do not expose
+		// User.Color/User.SpriteSize, so a miss is expected and harmless; the
+		// log makes it explicit rather than silently ignoring it.
+		TArray<FNiagaraVariable> Parameters;
+		System->GetExposedParameters().GetParameters(Parameters);
+		TSet<FName> ParameterNames;
+		for (const FNiagaraVariable& Parameter : Parameters)
+		{
+			ParameterNames.Add(Parameter.GetName());
+		}
+		auto SetColorDefault = [System, &ParameterNames](const TCHAR* ParameterName, const FLinearColor& Value)
+		{
+			const FName Name(ParameterName);
+			if (!ParameterNames.Contains(Name))
+			{
+				UE_LOG(LogTemp, Log,
+					TEXT("BootstrapNiagaraEffects: user parameter %s not exposed by template; default skipped"),
+					ParameterName);
+				return;
+			}
+			const FNiagaraVariable Variable(FNiagaraTypeDefinition::GetColorDef(), Name);
+			if (System->GetExposedParameters().SetParameterValue(Value, Variable))
+			{
+				UE_LOG(LogTemp, Log, TEXT("BootstrapNiagaraEffects: set %s default"), ParameterName);
+			}
+			else
+			{
+				UE_LOG(LogTemp, Warning, TEXT("BootstrapNiagaraEffects: could not set %s default"), ParameterName);
+			}
+		};
+		auto SetFloatDefault = [System, &ParameterNames](const TCHAR* ParameterName, float Value)
+		{
+			const FName Name(ParameterName);
+			if (!ParameterNames.Contains(Name))
+			{
+				UE_LOG(LogTemp, Log,
+					TEXT("BootstrapNiagaraEffects: user parameter %s not exposed by template; default skipped"),
+					ParameterName);
+				return;
+			}
+			const FNiagaraVariable Variable(FNiagaraTypeDefinition::GetFloatDef(), Name);
+			if (System->GetExposedParameters().SetParameterValue(Value, Variable))
+			{
+				UE_LOG(LogTemp, Log, TEXT("BootstrapNiagaraEffects: set %s default"), ParameterName);
+			}
+			else
+			{
+				UE_LOG(LogTemp, Warning, TEXT("BootstrapNiagaraEffects: could not set %s default"), ParameterName);
+			}
+		};
+		SetColorDefault(TEXT("User.Color"), FLinearColor(0.55f, 0.85f, 1.f, 1.f));
+		SetFloatDefault(TEXT("User.SpriteSize"), 12.f);
+
+		Package->MarkPackageDirty();
+		FSavePackageArgs Args;
+		Args.TopLevelFlags = RF_Public | RF_Standalone;
+		Args.Error = GError;
+		Args.SaveFlags = SAVE_NoError;
+		const FString FileName = FPackageName::LongPackageNameToFilename(
+			PackageName, FPackageName::GetAssetPackageExtension());
+		if (!UPackage::SavePackage(Package, System, *FileName, Args))
+		{
+			UE_LOG(LogTemp, Error, TEXT("BootstrapNiagaraEffects: save failed for %s"), *ObjectPath);
+			bOk = false;
+			continue;
+		}
+		FAssetRegistryModule::AssetCreated(System);
+
+		// Post-save contract: loadable and carrying at least one emitter.
+		UNiagaraSystem* Verified = LoadObject<UNiagaraSystem>(nullptr, *ObjectPath);
+		if (Verified == nullptr || Verified->GetEmitterHandles().Num() == 0)
+		{
+			UE_LOG(LogTemp, Error,
+				TEXT("BootstrapNiagaraEffects: post-save verification failed for %s (loadable=%d emitters=%d); removing the bad package"),
+				*ObjectPath, Verified ? 1 : 0, Verified ? Verified->GetEmitterHandles().Num() : 0);
+			// The file did not exist before this run, so remove the just-written
+			// package rather than leaving a bad asset for the runtime to load.
+			IFileManager::Get().Delete(*FileName);
+			bOk = false;
+			continue;
+		}
+
+		UE_LOG(LogTemp, Log,
+			TEXT("BootstrapNiagaraEffects: created %s from %s (%d emitter handle(s))"),
+			*ObjectPath, Spec.TemplateObjectPath, Verified->GetEmitterHandles().Num());
+	}
+
 	return bOk;
 }
 

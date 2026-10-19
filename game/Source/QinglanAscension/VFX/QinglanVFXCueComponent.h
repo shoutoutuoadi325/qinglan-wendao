@@ -13,6 +13,7 @@
 class UDecalComponent;
 class UPointLightComponent;
 class UStaticMeshComponent;
+class UNiagaraComponent;
 class UNiagaraSystem;
 
 /**
@@ -64,6 +65,9 @@ private:
 	{
 		TWeakObjectPtr<USceneComponent> Root;
 		TWeakObjectPtr<UPointLightComponent> Light;
+		/** AUD-42: optional real Niagara component; weak so auto-destruction
+		 *  (bAutoDestroy) can never leave a dangling pointer. */
+		TWeakObjectPtr<UNiagaraComponent> Niagara;
 		float Remaining = 0.f;
 		float Total = 0.f;
 		float BaseRadius = 0.f;
@@ -76,6 +80,20 @@ private:
 	class UMaterialInterface* GetCueMaterial(FName MaterialKey);
 	FLinearColor ElementColor(EQinglanElement Element) const;
 
+	/** AUD-42: resolves/loads the authored Niagara system for a cue category
+	 *  (impact / telegraph / cast). Caches misses too; absence is not an
+	 *  error, the placeholder shapes remain authoritative for presentation. */
+	UNiagaraSystem* ResolveNiagaraSystemForCue(FName CueId);
+	/** Spawns the category system at Source and sets exposed user params when
+	 *  present. Bounded by MaxActiveNiagaraCues; failure logs and returns. */
+	void SpawnNiagaraForCue(FName CueId, const FTransform& Source, FVector TargetPoint,
+		EQinglanElement Element, float Intensity, TWeakObjectPtr<UNiagaraComponent>& OutNiagara);
+	void ApplyNiagaraElementParameters(UNiagaraComponent* NiagaraComponent,
+		UNiagaraSystem* System, EQinglanElement Element, float Intensity) const;
+	int32 GetActiveNiagaraCount() const;
+
 	TArray<FCueInstance> ActiveCues;
 	UPROPERTY(Transient) TMap<FName, TObjectPtr<UMaterialInterface>> CachedMaterials;
+	/** Category -> loaded system (null entries cache a known miss). */
+	UPROPERTY(Transient) TMap<FName, TObjectPtr<UNiagaraSystem>> CachedNiagaraSystems;
 };

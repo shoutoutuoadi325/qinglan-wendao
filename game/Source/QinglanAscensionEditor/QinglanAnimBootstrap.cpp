@@ -6,6 +6,7 @@
 //
 // Run: UnrealEditor-Cmd QinglanAscension.uproject -run=QinglanAnimBootstrap
 #include "QinglanAnimBootstrap.h"
+#include "Engine/SkeletalMeshSocket.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetToolsModule.h"
@@ -13,6 +14,7 @@
 #include "Combat/QinglanCharacterAnimInstance.h"
 #include "EditorFramework/AssetImportData.h"
 #include "Engine/AssetManager.h"
+#include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/PackageName.h"
 #include "Modules/ModuleManager.h"
@@ -872,6 +874,24 @@ UAnimMontage* UQinglanAnimBootstrapCommandlet::BuildComboMontage(const FString& 
 		UE_LOG(LogTemp, Error, TEXT("AUD-45: invalid montage package path '%s'"), *PackagePath);
 		return nullptr;
 	}
+	// Re-running the commandlet without the regeneration clean step used to
+	// build a second in-memory package over the existing file, and SavePackage
+	// refused to overwrite loaded content (the whole run failed). A montage
+	// that still matches its source skeleton and has the slot track is already
+	// the product of this function; reuse it. A stale one is deleted from disk
+	// so the rebuild below starts from a clean package name.
+	if (UAnimMontage* Existing = LoadObject<UAnimMontage>(nullptr, *PackagePath))
+	{
+		if (Existing->GetSkeleton() == Sequence->GetSkeleton() && Existing->SlotAnimTracks.Num() > 0)
+		{
+			UE_LOG(LogTemp, Log, TEXT("AUD-45: montage %s already valid; reusing"), *PackagePath);
+			return Existing;
+		}
+		Existing->GetOutermost()->SetDirtyFlag(false);
+		IFileManager::Get().Delete(*FPackageName::LongPackageNameToFilename(
+			PackagePath, FPackageName::GetAssetPackageExtension()));
+		CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
+	}
 	UPackage* Package = CreatePackage(*PackagePath);
 	if (Package == nullptr)
 	{
@@ -984,6 +1004,79 @@ int32 UQinglanAnimBootstrapCommandlet::Main(const FString& Params)
 	else
 	{
 		UE_LOG(LogTemp, Warning, TEXT("AUD-44 ABP: Human skeleton unavailable; ABP_Human generation skipped"));
+	}
+
+	// --- AUD-44: weapon/cast sockets on the Human skeleton ------------------
+	// The sword sweep and technique casting resolve these names on the mesh;
+	// skeleton sockets are inherited by every mesh using the skeleton.
+	if (HumanSkeleton)
+	{
+		struct FSockSpec { const TCHAR* Name; const TCHAR* Bone; FVector Location; };
+		const FSockSpec Sockets[] = {
+			{ TEXT("sword_base"), TEXT("RightHand"), FVector(0.f, 0.f, 0.f) },
+			{ TEXT("sword_tip"), TEXT("RightHand"), FVector(0.f, 0.f, 60.f) },
+			{ TEXT("cast_source"), TEXT("RightHand"), FVector(0.f, 0.f, 0.f) },
+		};
+		bool bSocketsChanged = false;
+		for (const FSockSpec& Spec : Sockets)
+		{
+			const FName SocketName(Spec.Name);
+			const bool bExists = HumanSkeleton->Sockets.ContainsByPredicate(
+				[&SocketName](const USkeletalMeshSocket* Existing)
+				{
+					return Existing && Existing->SocketName == SocketName;
+				});
+			if (bExists)
+			{
+				continue;
+			}
+			USkeletalMeshSocket* Socket = NewObject<USkeletalMeshSocket>(HumanSkeleton);
+			Socket->SocketName = SocketName;
+			Socket->BoneName = FName(Spec.Bone);
+			Socket->RelativeLocation = Spec.Location;
+			Socket->RelativeRotation = FRotator::ZeroRotator;
+			HumanSkeleton->Sockets.Add(Socket);
+			bSocketsChanged = true;
+			UE_LOG(LogTemp, Log, TEXT("AUD-44: authored skeleton socket %s on %s"), Spec.Name, Spec.Bone);
+		}
+		if (bSocketsChanged)
+		{
+			HumanSkeleton->PreEditChange(nullptr);
+			HumanSkeleton->PostEditChange();
+			UPackage* const SkeletonPackage = HumanSkeleton->GetOutermost();
+			const FString SkeletonFileName = FPackageName::LongPackageNameToFilename(
+				SkeletonPackage->GetName(), FPackageName::GetAssetPackageExtension());
+			FSavePackageArgs Args;
+			Args.TopLevelFlags = RF_Public | RF_Standalone;
+			Args.SaveFlags = SAVE_NoError;
+			if (!UPackage::SavePackage(SkeletonPackage, HumanSkeleton, *SkeletonFileName, Args))
+			{
+				UE_LOG(LogTemp, Error, TEXT("AUD-44: failed to save skeleton sockets"));
+				bOk = false;
+			}
+		}
+		// Contract verification: every consumer (sword sweep, cast aim) resolves
+		// these through USkeletalMeshComponent, so the skeleton must report them.
+		for (const FSockSpec& Spec : Sockets)
+		{
+			const USkeletalMeshSocket* const Socket = HumanSkeleton->FindSocket(FName(Spec.Name));
+			if (Socket == nullptr || Socket->BoneName != FName(Spec.Bone))
+			{
+				UE_LOG(LogTemp, Error, TEXT("AUD-44 verify: socket %s missing or not on bone %s"),
+					Spec.Name, Spec.Bone);
+				bOk = false;
+			}
+			else
+			{
+				UE_LOG(LogTemp, Log, TEXT("AUD-44 verify: socket %s on %s at %s ok"),
+					Spec.Name, Spec.Bone, *Socket->RelativeLocation.ToString());
+			}
+		}
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("AUD-44: Human skeleton unavailable; sockets not authored"));
+		bOk = false;
 	}
 
 	// --- Discover imported anim sequences by character group. ---

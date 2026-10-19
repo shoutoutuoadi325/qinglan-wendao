@@ -31,6 +31,36 @@ public:
 	/** v2 adds the narrative courier clock + per-quest delivery entries. */
 	static constexpr int32 CurrentSchemaVersion = 2;
 
+#if WITH_DEV_AUTOMATION_TESTS
+	/** Test-only file operations whose next invocation can be failed. */
+	enum class EQinglanSaveFileOperationForTesting : uint8
+	{
+		Move,
+		Delete,
+		/**
+		 * Simulates a torn temp write: the next durable write persists only a
+		 * prefix and reports success, so the post-write verification (step 3)
+		 * must reject it.
+		 */
+		Write
+	};
+
+	/**
+	 * Test-only: redirects all save files to Directory. An empty string
+	 * restores ProjectSavedDir/SaveGames. Tests must clear this when done.
+	 */
+	static void SetSaveDirectoryOverrideForTesting(const FString& Directory);
+
+	/**
+	 * Test-only one-shot fault injection: the (SkipCount + 1)-th matching
+	 * operation returns failure. SkipCount 0 fails the next matching
+	 * operation, 1 lets the next one through and fails the one after it, and
+	 * so on. A negative SkipCount disarms. A triggered injection disarms
+	 * itself, so recovery/cleanup operations run normally.
+	 */
+	static void SetFileOperationFailureForTesting(EQinglanSaveFileOperationForTesting Operation, int32 SkipCount);
+#endif
+
 	/** Slot 0..2. Loads the primary or, when corrupt, the latest valid backup. */
 	UFUNCTION(BlueprintCallable) bool LoadProfile(int32 Slot, FText& OutNotice);
 	/** Writes now (safe boundary only); see SaveGame docs for boundary rules. */

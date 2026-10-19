@@ -4,6 +4,7 @@
 #include "Combat/QinglanCharacter.h"
 
 #include "QinglanAscension.h"
+#include "Combat/QinglanCharacterAnimInstance.h"
 #include "Combat/QinglanSwordComponent.h"
 #include "Combat/QinglanDodgeComponent.h"
 #include "Combat/QinglanCombatComponent.h"
@@ -648,12 +649,17 @@ void AQinglanCharacter::BeginPlay()
 	// Presentation wiring: resolve the imported player rig by convention
 	// (mesh import + anim bootstrap authors these); null-safe in test worlds.
 	//
-	// AUD-44 STATUS: OPEN. This remains a single-node looping idle with montage
-	// overlays driven by UQinglanSwordComponent (cuts) and the technique
-	// executors (release CastMontage). There is no AnimBP locomotion/aim/combat
-	// state machine yet; adding one is out of scope for this repair. Editor
-	// verification: montage slot DefaultSlot, sword sockets sword_base/sword_tip,
-	// cast socket cast_source.
+	// AUD-44: the mesh runs UQinglanCharacterAnimInstance instead of the old
+	// single-node looping idle. The native instance derives planar speed and
+	// selects Idle/Walk/Run/Airborne, while the action layer (Attack/Cast/
+	// Dodge/Hit/Death) pauses locomotion selection for montage-driven states.
+	// Montage playback stays on DefaultSlot. If creating the instance fails
+	// (unregistered mesh or class failure), fall back to the single-node idle.
+	//
+	// Still missing from the art/content side: authored Human Walk/Run takes
+	// (the Human rig ships Idle/Jump/Action only), an AnimBP editor asset with
+	// a DefaultSlot node (slot montages need a graph to produce pose), and
+	// sword_base/sword_tip/cast_source socket validation.
 	if (USkeletalMeshComponent* const MeshComp = GetMesh())
 	{
 		if (USkeletalMesh* const Mesh = Cast<USkeletalMesh>(
@@ -673,9 +679,18 @@ void AQinglanCharacter::BeginPlay()
 			const float MeshMinZ = static_cast<float>(MeshBounds.Origin.Z - MeshBounds.BoxExtent.Z);
 			MeshComp->SetRelativeLocation(FVector(0.f, 0.f, -QinglanCapsuleHalfHeight - MeshMinZ * MeshScale));
 			MeshComp->SetRelativeRotation(FRotator(0.f, -90.f, 0.f)); // rig faces +Y in the export
-			if (UAnimSequence* const Idle = Cast<UAnimSequence>(
+
+			MeshComp->SetAnimInstanceClass(UQinglanCharacterAnimInstance::StaticClass());
+			if (UQinglanCharacterAnimInstance* const AnimInstance =
+					Cast<UQinglanCharacterAnimInstance>(MeshComp->GetAnimInstance()))
+			{
+				AnimInstance->SetActionState(EQinglanAnimActionState::Idle);
+			}
+			else if (UAnimSequence* const Idle = Cast<UAnimSequence>(
 					FSoftObjectPath(TEXT("/Game/Qinglan/Characters/Human/SK_HumanHuman_Armature_Idle")).TryLoad()))
 			{
+				// AUD-44 fallback: retain the old visible idle when no anim
+				// instance could be created, rather than showing the ref pose.
 				MeshComp->SetAnimationMode(EAnimationMode::AnimationSingleNode);
 				MeshComp->PlayAnimation(Idle, /*bLooping=*/true);
 			}
@@ -767,6 +782,10 @@ void AQinglanCharacter::Tick(float DeltaSeconds)
 	}
 	// A buffered dodge fires as soon as its action window opens (0.15 s max).
 	ProcessBufferedDodge();
+
+	// AUD-44: keep the native anim instance's action layer in sync with the
+	// authoritative gameplay components (idle/attack/cast/dodge/hit/death).
+	UpdateAnimationActionState();
 
 	// HUD lands on the first player-controlled tick (possession may complete
 	// after BeginPlay on dedicated-client flows; UI/QinglanHUDStatics ids).
@@ -950,6 +969,7 @@ void AQinglanCharacter::InputSwordAttack(const FInputActionValue& /*Value*/)
 	if (UQinglanSwordComponent* const Sword = QinglanFindComponent<UQinglanSwordComponent>(this))
 	{
 		Sword->RequestAttack(); // buffering and combo-window rules live in the sword component
+		UpdateAnimationActionState();
 	}
 }
 
@@ -997,6 +1017,7 @@ void AQinglanCharacter::InputTechniqueSlot(int32 Slot)
 	if (TechniqueComponent)
 	{
 		TechniqueComponent->TryCast(Slot); // validation/anticipation/release pipeline is there
+		UpdateAnimationActionState();
 	}
 }
 
@@ -1293,6 +1314,7 @@ void AQinglanCharacter::StartDodgeNow()
 
 	bHasBufferedDodge = false;
 	Dodge->StartDodge(QinglanComputeDodgeDirection(this), DodgeDistance, DodgeDuration, GetDodgeIFrameStart(), GetDodgeIFrameEnd());
+	UpdateAnimationActionState();
 }
 
 void AQinglanCharacter::ProcessBufferedDodge()
@@ -1706,6 +1728,7 @@ void AQinglanCharacter::HandleDamageResolved(const FQinglanDamageEvent& Event)
 		Movement->StopMovementImmediately();
 	}
 	PlayHitReactionMontage();
+	UpdateAnimationActionState();
 	UE_LOG(LogQinglanCombat, Verbose, TEXT("Forced hit reaction for %.2fs"), HitReactionSeconds);
 }
 
@@ -1726,6 +1749,46 @@ void AQinglanCharacter::PlayHitReactionMontage()
 		UE_LOG(LogQinglanCombat, Verbose,
 			TEXT("Hit-reaction montage unavailable; action gate supplies the forced reaction"));
 	}
+}
+
+void AQinglanCharacter::UpdateAnimationActionState()
+{
+	// AUD-44: presentation-only mirror of the authoritative action gates. The
+	// animation instance never feeds back into gameplay; if the instance or the
+	// rig is absent this is a no-op (headless/automation worlds).
+	USkeletalMeshComponent* const MeshComp = GetMesh();
+	UQinglanCharacterAnimInstance* const AnimInstance =
+		MeshComp ? Cast<UQinglanCharacterAnimInstance>(MeshComp->GetAnimInstance()) : nullptr;
+	if (!AnimInstance)
+	{
+		return;
+	}
+
+	EQinglanAnimActionState DesiredState = EQinglanAnimActionState::Idle;
+	const UQinglanDodgeComponent* const Dodge = QinglanFindComponent<UQinglanDodgeComponent>(this);
+	const UQinglanSwordComponent* const Sword = QinglanFindComponent<UQinglanSwordComponent>(this);
+	if (bDefeatHandled || (CombatComponent && !CombatComponent->IsAlive()))
+	{
+		DesiredState = EQinglanAnimActionState::Death;
+	}
+	else if (bInHitReaction)
+	{
+		DesiredState = EQinglanAnimActionState::Hit;
+	}
+	else if (Dodge && Dodge->IsDodging())
+	{
+		DesiredState = EQinglanAnimActionState::Dodge;
+	}
+	else if (TechniqueComponent && TechniqueComponent->IsCasting())
+	{
+		DesiredState = EQinglanAnimActionState::Cast;
+	}
+	else if (Sword && Sword->IsSwinging())
+	{
+		DesiredState = EQinglanAnimActionState::Attack;
+	}
+
+	AnimInstance->SetActionState(DesiredState);
 }
 
 void AQinglanCharacter::EnsureHudCreated()
@@ -2468,6 +2531,7 @@ void AQinglanCharacter::HandleHealthChanged(float Current, float Maximum)
 		return;
 	}
 	bDefeatHandled = true;
+	UpdateAnimationActionState(); // AUD-44: Death action state, locomotion paused
 	if (UCharacterMovementComponent* const Movement = GetCharacterMovement())
 	{
 		Movement->DisableMovement();

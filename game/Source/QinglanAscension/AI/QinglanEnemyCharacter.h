@@ -74,6 +74,12 @@ protected:
 	void UpdateAttack(float DeltaSeconds);
 	/** Ashen Guardian phase-two ember volley producer (AUD-41). */
 	void UpdatePhaseTwoEmbers(float DeltaSeconds);
+	/**
+	 * AUD-44: mirror EQinglanAIState into the native anim instance's action
+	 * layer (Windup/Attack/Recover -> Attack, Stagger -> Hit, Dead -> Death).
+	 * Polled at the end of Tick and pushed from the direct transition sites.
+	 */
+	void UpdateAnimationActionState();
 
 	// AUD-42: telegraph presentation subscribers. Every telegraph broadcast now
 	// has at least one listener (the enemy's own cue component), which draws a

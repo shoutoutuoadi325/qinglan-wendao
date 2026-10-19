@@ -48,6 +48,20 @@ run_as_build_user() {
 # Mandatory raw sources: skeletal/character FBX (QinglanMeshImport raw root).
 find "$QINGLAN_ASSETS_RAW/quaternius" -iname '*.fbx' -print -quit 2>/dev/null | grep -q . \
   || fail "skeletal source files missing under $QINGLAN_ASSETS_RAW/quaternius"
+# AUD-56: the eight project-original audio sources (4 music loops, 4 SFX).
+for Audio in \
+  original/music/music_boss_epic_boss_battle_loop.wav \
+  original/music/music_combat_alt_prepare_your_swords.wav \
+  original/music/music_combat_fast_fight_loop.wav \
+  original/music/music_hub_calm_orient_peace_valley.wav \
+  original/sfx/sfx_sword_swing.wav \
+  original/sfx/sfx_hit_impact.wav \
+  original/sfx/sfx_technique_release.wav \
+  original/sfx/sfx_telegraph_warn.wav
+do
+  [ -f "$QINGLAN_ASSETS_RAW/audio/$Audio" ] \
+    || fail "audio source missing: $QINGLAN_ASSETS_RAW/audio/$Audio"
+done
 
 run_cmdlet() {
   local name="$1"; shift
@@ -95,6 +109,8 @@ run_cmdlet QinglanAscensionEditor.QinglanContentBootstrap "${CONTENT_BOOTSTRAP_A
 # packages are removed first for the same partial-load reason as the widgets.
 find "$CONTENT/Characters" \( -path '*/Montages/AM_*.uasset' -o -name 'Montages.uasset' \) -delete 2>/dev/null
 run_cmdlet QinglanAscensionEditor.QinglanAnimBootstrap || rc_all=1
+# AUD-56: import the project-original music/SFX (deterministic synthesized WAVs).
+run_cmdlet QinglanAscensionEditor.QinglanAudioBootstrap || rc_all=1
 run_cmdlet QinglanAscensionEditor.QinglanUIBootstrap || rc_all=1
 
 # Mandatory outputs: the commandlets can report success without producing
@@ -116,6 +132,14 @@ done
 # locales must be present in the packaged asset.
 [ -f "$CONTENT/Data/DT_Localization.uasset" ] \
   || { echo "regenerate-content.sh: ERROR: bilingual localization table $CONTENT/Data/DT_Localization.uasset missing" >&2; rc_all=1; }
+
+# AUD-56: QinglanAudioBootstrap imports 4 music + 4 SFX sound waves. The
+# commandlet only warns on a missing source, so require the committed assets.
+AUDIO_COUNT=$(find "$CONTENT/Audio" -type f -name '*.uasset' 2>/dev/null | wc -l | tr -d ' ')
+if [ "${AUDIO_COUNT:-0}" -lt 8 ]; then
+  echo "regenerate-content.sh: ERROR: only ${AUDIO_COUNT:-0} audio assets under $CONTENT/Audio (expected >= 8)" >&2
+  rc_all=1
+fi
 
 # AUD-55: the Poly Haven maps must be real Texture2D package assets, not just
 # transient textures referenced by MICs that then fail to save. Require at

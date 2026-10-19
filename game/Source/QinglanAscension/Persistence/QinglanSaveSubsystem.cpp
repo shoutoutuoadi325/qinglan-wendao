@@ -79,11 +79,70 @@ namespace
 		return GSaveBookkeeping.FindOrAdd(Key);
 	}
 
+#if WITH_DEV_AUTOMATION_TESTS
+	FString GSaveDirectoryOverrideForTesting;
+
+	/** One-shot fault injection state; RemainingSkips == INDEX_NONE is disarmed. */
+	struct FFailureInjectionForTesting
+	{
+		int32 RemainingSkips = INDEX_NONE;
+	};
+
+	FFailureInjectionForTesting GMoveFailureForTesting;
+	FFailureInjectionForTesting GDeleteFailureForTesting;
+	FFailureInjectionForTesting GWriteFailureForTesting;
+
+	bool ConsumeInjectedFailure(FFailureInjectionForTesting& Injection)
+	{
+		if (Injection.RemainingSkips == INDEX_NONE)
+		{
+			return false;
+		}
+		if (Injection.RemainingSkips > 0)
+		{
+			--Injection.RemainingSkips;
+			return false;
+		}
+		// One-shot: recovery/cleanup calls after the injected failure run normally.
+		Injection.RemainingSkips = INDEX_NONE;
+		return true;
+	}
+#endif
+
 	FString GetSaveDirectory()
 	{
+#if WITH_DEV_AUTOMATION_TESTS
+		if (!GSaveDirectoryOverrideForTesting.IsEmpty())
+		{
+			return GSaveDirectoryOverrideForTesting;
+		}
+#endif
 		// Platform-mapped engine Saved location (docs/05 §6 "Use engine Saved
 		// locations resolved by platform APIs, not the installation directory").
 		return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("SaveGames"));
+	}
+
+	/** Rotation file operations go through these wrappers so tests can fail one step. */
+	bool MoveSaveFile(IFileManager& FileManager, const FString& Dest, const FString& Src)
+	{
+#if WITH_DEV_AUTOMATION_TESTS
+		if (ConsumeInjectedFailure(GMoveFailureForTesting))
+		{
+			return false;
+		}
+#endif
+		return FileManager.Move(*Dest, *Src);
+	}
+
+	bool DeleteSaveFile(IFileManager& FileManager, const FString& Path)
+	{
+#if WITH_DEV_AUTOMATION_TESTS
+		if (ConsumeInjectedFailure(GDeleteFailureForTesting))
+		{
+			return false;
+		}
+#endif
+		return FileManager.Delete(*Path);
 	}
 
 	bool IsValidSlot(int32 Slot)
@@ -441,6 +500,18 @@ namespace
 			}
 			return 2;
 		}
+#if WITH_DEV_AUTOMATION_TESTS
+		if (ConsumeInjectedFailure(GWriteFailureForTesting))
+		{
+			// Torn-write injection: persist only a prefix and report success so
+			// SaveNow's re-open/verify step is what rejects the temp file.
+			const int32 TruncatedBytes = Bytes.Num() / 2;
+			const bool bWrotePrefix = TruncatedBytes > 0 && Handle->Write(Bytes.GetData(), TruncatedBytes);
+			Handle->Flush(true);
+			delete Handle;
+			return bWrotePrefix ? 0 : 1;
+		}
+#endif
 		const bool bWrote = Handle->Write(Bytes.GetData(), Bytes.Num());
 		Handle->Flush(true); // durable-write step 3: flush before verification
 		delete Handle;
@@ -464,7 +535,7 @@ namespace
 		FText CheckError;
 		if (TryLoadValidSave(BackupPath, Check, CheckError) != EFileLoadOutcome::Ok)
 		{
-			IFileManager::Get().Delete(*BackupPath);
+			DeleteSaveFile(IFileManager::Get(), BackupPath);
 		}
 	}
 
@@ -532,6 +603,30 @@ namespace
 		return FName(*FString::Printf(TEXT("profile_%d"), Slot));
 	}
 }
+
+#if WITH_DEV_AUTOMATION_TESTS
+void UQinglanSaveSubsystem::SetSaveDirectoryOverrideForTesting(const FString& Directory)
+{
+	GSaveDirectoryOverrideForTesting = Directory;
+}
+
+void UQinglanSaveSubsystem::SetFileOperationFailureForTesting(EQinglanSaveFileOperationForTesting Operation, int32 SkipCount)
+{
+	const int32 RemainingSkips = SkipCount < 0 ? INDEX_NONE : SkipCount;
+	switch (Operation)
+	{
+	case EQinglanSaveFileOperationForTesting::Move:
+		GMoveFailureForTesting.RemainingSkips = RemainingSkips;
+		break;
+	case EQinglanSaveFileOperationForTesting::Delete:
+		GDeleteFailureForTesting.RemainingSkips = RemainingSkips;
+		break;
+	case EQinglanSaveFileOperationForTesting::Write:
+		GWriteFailureForTesting.RemainingSkips = RemainingSkips;
+		break;
+	}
+}
+#endif
 
 bool UQinglanSaveSubsystem::SerializeVerified(const UQinglanSaveGame* Save, TArray<uint8>& OutBytes) const
 {
@@ -853,7 +948,7 @@ bool UQinglanSaveSubsystem::SaveNow(FText& OutError)
 	if (WriteResult != 0)
 	{
 		Phase = EQinglanSavePhase::Failed;
-		IFileManager::Get().Delete(*TempPath);
+		DeleteSaveFile(IFileManager::Get(), TempPath);
 		OutError = IoErrorText(WriteResult); // localized disk-full / permission, retry by re-invoking
 		OnSaveFailed.Broadcast(Bookkeeping.ProfileId, OutError);
 		return false; // last valid primary untouched
@@ -872,7 +967,7 @@ bool UQinglanSaveSubsystem::SaveNow(FText& OutError)
 		ComputeSaveFingerprint(ReopenedSave) != ComputeSaveFingerprint(Save))
 	{
 		Phase = EQinglanSavePhase::Failed;
-		IFileManager::Get().Delete(*TempPath);
+		DeleteSaveFile(IFileManager::Get(), TempPath);
 		OutError = QinglanSave::Loc(TEXT("save.corrupt"));
 		UE_LOG(LogQinglanSave, Error, TEXT("SaveNow: temp file failed re-open verification"));
 		OnSaveFailed.Broadcast(Bookkeeping.ProfileId, OutError);
@@ -899,10 +994,10 @@ bool UQinglanSaveSubsystem::SaveNow(FText& OutError)
 	{
 		// bak2 only ever receives a validated file; its previous bytes are
 		// superseded while bak1 and (below) the primary keep valid copies.
-		if (!FileManager.Move(*Bak2Path, *Bak1Path))
+		if (!MoveSaveFile(FileManager, Bak2Path, Bak1Path))
 		{
 			Phase = EQinglanSavePhase::Failed;
-			FileManager.Delete(*TempPath);
+			DeleteSaveFile(FileManager, TempPath);
 			OutError = IoErrorText(3);
 			UE_LOG(LogQinglanSave, Error, TEXT("SaveNow: bak1 -> bak2 rotation failed"));
 			OnSaveFailed.Broadcast(Bookkeeping.ProfileId, OutError);
@@ -913,21 +1008,31 @@ bool UQinglanSaveSubsystem::SaveNow(FText& OutError)
 	{
 		// An unloadable bak1 is dead weight; removing it cannot reduce the
 		// loadable-file count, and bak2 (the recovery copy) is never touched.
-		FileManager.Delete(*Bak1Path);
+		// A failure here still aborts the write: the storage is unhealthy, so
+		// fail safe with the primary and bak2 still holding the last commits.
+		if (!DeleteSaveFile(FileManager, Bak1Path))
+		{
+			Phase = EQinglanSavePhase::Failed;
+			DeleteSaveFile(FileManager, TempPath);
+			OutError = IoErrorText(3);
+			UE_LOG(LogQinglanSave, Error, TEXT("SaveNow: could not remove the invalid bak1 before rotation"));
+			OnSaveFailed.Broadcast(Bookkeeping.ProfileId, OutError);
+			return false; // primary/bak2 keep the last valid saves
+		}
 	}
 	UQinglanSaveGame* PrimarySave = nullptr;
 	FText PrimaryError;
 	const bool bPrimaryValid = FileManager.FileExists(*PrimaryPath) &&
 		TryLoadValidSave(PrimaryPath, PrimarySave, PrimaryError) == EFileLoadOutcome::Ok;
-	if (bPrimaryValid && !FileManager.Move(*Bak1Path, *PrimaryPath))
+	if (bPrimaryValid && !MoveSaveFile(FileManager, Bak1Path, PrimaryPath))
 	{
 		Phase = EQinglanSavePhase::Failed;
 		// Best-effort restore of the rotation, then abort with primary intact.
 		if (bBak1Valid && FileManager.FileExists(*Bak2Path))
 		{
-			FileManager.Move(*Bak1Path, *Bak2Path);
+			MoveSaveFile(FileManager, Bak1Path, Bak2Path);
 		}
-		FileManager.Delete(*TempPath);
+		DeleteSaveFile(FileManager, TempPath);
 		OutError = IoErrorText(3);
 		UE_LOG(LogQinglanSave, Error, TEXT("SaveNow: could not stage primary into backup"));
 		OnSaveFailed.Broadcast(Bookkeeping.ProfileId, OutError);
@@ -935,15 +1040,15 @@ bool UQinglanSaveSubsystem::SaveNow(FText& OutError)
 	}
 
 	// ---- Step 5: atomic replace; recovery metadata retained until success ----
-	if (!FileManager.Move(*PrimaryPath, *TempPath))
+	if (!MoveSaveFile(FileManager, PrimaryPath, TempPath))
 	{
 		Phase = EQinglanSavePhase::Failed;
 		if (bPrimaryValid && !FileManager.FileExists(*PrimaryPath))
 		{
 			// Replace failed after the primary was moved aside: restore it.
-			FileManager.Move(*PrimaryPath, *Bak1Path);
+			MoveSaveFile(FileManager, PrimaryPath, Bak1Path);
 		}
-		FileManager.Delete(*TempPath);
+		DeleteSaveFile(FileManager, TempPath);
 		OutError = IoErrorText(3);
 		UE_LOG(LogQinglanSave, Error, TEXT("SaveNow: atomic replace failed"));
 		OnSaveFailed.Broadcast(Bookkeeping.ProfileId, OutError);

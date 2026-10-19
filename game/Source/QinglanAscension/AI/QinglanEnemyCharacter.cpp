@@ -27,6 +27,7 @@
 #include "AI/QinglanEncounterDirector.h"
 #include "AI/QinglanEnemyCatalog.h"
 #include "Combat/QinglanCharacter.h"
+#include "Combat/QinglanCharacterAnimInstance.h"
 #include "Combat/QinglanCombatComponent.h"
 #include "Combat/QinglanDamageMath.h"
 #include "Components/CapsuleComponent.h"
@@ -285,6 +286,7 @@ void AQinglanEnemyCharacter::Tick(float DeltaSeconds)
 	UpdateAttack(DeltaSeconds);
 	UpdateDecisions(DeltaSeconds);
 	UpdatePhaseTwoEmbers(DeltaSeconds);
+	UpdateAnimationActionState();
 }
 
 FName AQinglanEnemyCharacter::GetEnemyId() const
@@ -348,6 +350,7 @@ void AQinglanEnemyCharacter::EnterStagger()
 			PlayAnimMontage(Montage);
 		}
 	}
+	UpdateAnimationActionState();
 }
 
 void AQinglanEnemyCharacter::Die()
@@ -366,6 +369,7 @@ void AQinglanEnemyCharacter::Die()
 	bAttackCommitted = false;
 	bProximityActivePhase = false;
 	bEmberTelegraphActive = false;
+	UpdateAnimationActionState(); // AUD-44: Death freezes locomotion selection
 
 	if (GetCharacterMovement())
 	{
@@ -476,7 +480,25 @@ void AQinglanEnemyCharacter::InitializeFromData(UQinglanEnemyDataAsset* InData)
 			const float MeshMinZ = static_cast<float>(MeshBounds.Origin.Z - MeshBounds.BoxExtent.Z);
 			MeshComp->SetRelativeLocation(FVector(0.f, 0.f, -CapsuleHalfHeight - MeshMinZ * MeshScale));
 			MeshComp->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));
-			if (UAnimSequence* Idle = InData->IdleAnimation.LoadSynchronous())
+
+			// AUD-44: the shared native anim instance replaces the single-node
+			// idle. Enemy archetypes carry their own take (different Quaternius
+			// skeletons), so pass it as the idle override; Walk/Run fall back to
+			// that idle until authored takes exist. If instance creation fails
+			// (e.g. an unregistered pooled mesh during tests), keep the old
+			// single-node idle path as the visible fallback.
+			UAnimSequence* const Idle = InData->IdleAnimation.LoadSynchronous();
+			MeshComp->SetAnimInstanceClass(UQinglanCharacterAnimInstance::StaticClass());
+			if (UQinglanCharacterAnimInstance* const AnimInstance =
+					Cast<UQinglanCharacterAnimInstance>(MeshComp->GetAnimInstance()))
+			{
+				if (Idle)
+				{
+					AnimInstance->SetLocomotionAnimations(Idle, /*InWalk=*/nullptr, /*InRun=*/nullptr);
+				}
+				AnimInstance->SetActionState(EQinglanAnimActionState::Idle);
+			}
+			else if (Idle)
 			{
 				MeshComp->SetAnimationMode(EAnimationMode::AnimationSingleNode);
 				MeshComp->SetAnimation(Idle);
@@ -538,6 +560,7 @@ void AQinglanEnemyCharacter::ResetForPool()
 	EmberTelegraphRemaining = 0.f;
 	EmberSafeLaneDeg = 0.f;
 	EnemyData = nullptr;
+	UpdateAnimationActionState(); // AIState is Idle again: resume native locomotion
 	if (EnemyCombat)
 	{
 		EnemyCombat->ResetForPool(); // stale hit keys could reject fresh hits
@@ -1006,4 +1029,46 @@ void AQinglanEnemyCharacter::UpdatePhaseTwoEmbers(float DeltaSeconds)
 		// and Metal still receive it (the minimum 0.9 s warning is unchanged).
 		OnEmberVolleyTelegraph.Broadcast(this, EmberSafeLaneDeg, EmberVolleyWarningSeconds);
 	}
+}
+
+void AQinglanEnemyCharacter::UpdateAnimationActionState()
+{
+	// AUD-44: presentation-only mirror of the AI state machine. Locomotion
+	// (Idle/Walk/Run/Airborne) is driven natively from the pawn velocity while
+	// ActionState is Idle; committed attack/stagger/death states freeze that
+	// selection so the montage owns the pose.
+	USkeletalMeshComponent* const MeshComp = GetMesh();
+	UQinglanCharacterAnimInstance* const AnimInstance =
+		MeshComp ? Cast<UQinglanCharacterAnimInstance>(MeshComp->GetAnimInstance()) : nullptr;
+	if (!AnimInstance)
+	{
+		return;
+	}
+
+	EQinglanAnimActionState DesiredState = EQinglanAnimActionState::Idle;
+	switch (AIState)
+	{
+	case EQinglanAIState::Windup:
+	case EQinglanAIState::Attack:
+	case EQinglanAIState::Recover:
+		DesiredState = EQinglanAnimActionState::Attack;
+		break;
+
+	case EQinglanAIState::Stagger:
+		DesiredState = EQinglanAnimActionState::Hit;
+		break;
+
+	case EQinglanAIState::Dead:
+		DesiredState = EQinglanAnimActionState::Death;
+		break;
+
+	case EQinglanAIState::Idle:
+	case EQinglanAIState::Acquire:
+	case EQinglanAIState::Approach:
+	default:
+		DesiredState = EQinglanAnimActionState::Idle;
+		break;
+	}
+
+	AnimInstance->SetActionState(DesiredState);
 }

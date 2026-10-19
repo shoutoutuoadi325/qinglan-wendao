@@ -239,6 +239,12 @@ protected:
 	UFUNCTION() void HandleDamageResolved(const FQinglanDamageEvent& Event);
 	/** Cosmetic hit-reaction montage; the input gate is authoritative if absent. */
 	void PlayHitReactionMontage();
+	/**
+	 * AUD-44: derive the animation action layer (Attack/Cast/Dodge/Hit/Death)
+	 * from the live component state and push it to the native anim instance.
+	 * Polled once per tick plus at the key transition sites.
+	 */
+	void UpdateAnimationActionState();
 
 	// --- Playable-loop glue state ---
 

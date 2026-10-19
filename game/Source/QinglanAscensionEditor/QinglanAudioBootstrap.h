@@ -1,4 +1,5 @@
-// Audio bootstrap: imports the music/SFX WAV set into /Game/Qinglan/Audio.
+// Audio bootstrap: imports the project-original music/SFX WAV set from
+// assets-raw/audio/original into /Game/Qinglan/Audio (AUD-56).
 //
 // Run: UnrealEditor-Cmd QinglanAscension.uproject
 //      -run=QinglanAscensionEditor.QinglanAudioBootstrapCommandlet

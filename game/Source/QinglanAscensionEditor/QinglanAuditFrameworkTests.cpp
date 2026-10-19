@@ -1,6 +1,7 @@
 // AUD-07/08/09/18: direct helper and profile regression coverage, without a world.
 // These do not prove disk durability, save migration, or gameplay entry wiring.
 #include "Misc/AutomationTest.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Internationalization/StringTable.h"
 #include "Internationalization/StringTableCore.h"
 
@@ -8,6 +9,7 @@
 #include "Abilities/QinglanTechniqueExecutors.h"
 #include "Abilities/QinglanTechniqueTypes.h"
 #include "Combat/QinglanCharacter.h"
+#include "Combat/QinglanCharacterAnimInstance.h"
 #include "Combat/QinglanCombatComponent.h"
 #include "Combat/QinglanStatusComponent.h"
 #include "Combat/QinglanSwordComponent.h"
@@ -27,11 +29,16 @@
 #include "Persistence/QinglanProfileSnapshot.h"
 #include "Persistence/QinglanSaveGame.h"
 #include "Persistence/QinglanSaveMigration.h"
+#include "Persistence/QinglanSaveSubsystem.h"
 #include "Progression/QinglanProfileSubsystem.h"
 #include "Progression/QinglanRunSubsystem.h"
 #include "Progression/QinglanProgressionTables.h"
 #include "UI/QinglanUIWidgets.h"
 #include "UObject/UObjectGlobals.h"
+#include "HAL/FileManager.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Guid.h"
+#include "Misc/Paths.h"
 
 // AUD-45 path-contract helpers live in QinglanAnimBootstrap.cpp (same module).
 // Declared here because the commandlet header is intentionally frozen.
@@ -58,6 +65,17 @@ namespace QinglanTextureSetContract
 	FString SolidMaterialObjectPath(const FString& MaterialName);
 	bool ShouldUseSolidFallback(bool bLowQuality, bool bHasBaseColor);
 	FString ResolveSurfaceMaterialObjectPath(const FString& MaterialName, bool bLowQuality, bool bHasBaseColor);
+}
+
+// AUD-56 audio source/asset contract helpers live in QinglanAudioBootstrap.cpp
+// (same module). Pure string/list logic; the test never decodes audio.
+namespace QinglanAudioContract
+{
+	int32 NumEntries();
+	FString SourceRelativePath(int32 Index);
+	FString GroupName(int32 Index);
+	bool IsLooping(int32 Index);
+	FString TargetPackagePath(int32 Index);
 }
 
 namespace
@@ -877,6 +895,349 @@ bool FQinglanAuditSaveV1DeliveryMigration::RunTest(const FString& Parameters)
 	return true;
 }
 
+// ---------------------------------------------------------------------------
+// AUD-03: real-file backup rotation and disk-fault injection. These specs use
+// the save subsystem's overridable directory and one-shot Move/Delete/Write
+// failure hooks, so they exercise the same IFileManager/FFileHelper paths as
+// production without touching ProjectSavedDir/SaveGames.
+// ---------------------------------------------------------------------------
+namespace
+{
+#if WITH_DEV_AUTOMATION_TESTS
+	constexpr int32 SaveDiskTestSlot = 0;
+
+	FString SaveDiskPath(const FString& Directory, int32 Slot, int32 BackupIndex)
+	{
+		return BackupIndex == 0
+			? FPaths::Combine(Directory, *FString::Printf(TEXT("QinglanProfile_%d.sav"), Slot))
+			: FPaths::Combine(Directory, *FString::Printf(TEXT("QinglanProfile_%d.bak%d"), Slot, BackupIndex));
+	}
+
+	/**
+	 * Test-owned save directory override. The destructor always clears the
+	 * override and every pending injection, then removes the directory.
+	 */
+	class FScopedQinglanSaveDirectory
+	{
+	public:
+		FScopedQinglanSaveDirectory()
+			: Directory(FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("SaveGames"),
+				FString::Printf(TEXT("_Test_%s"), *FGuid::NewGuid().ToString(EGuidFormats::Digits))))
+		{
+			ClearInjections();
+			UQinglanSaveSubsystem::SetSaveDirectoryOverrideForTesting(Directory);
+		}
+
+		~FScopedQinglanSaveDirectory()
+		{
+			UQinglanSaveSubsystem::SetSaveDirectoryOverrideForTesting(FString());
+			ClearInjections();
+			IFileManager::Get().DeleteDirectory(*Directory, false, true);
+		}
+
+		FString Path(int32 Slot, int32 BackupIndex) const
+		{
+			return SaveDiskPath(Directory, Slot, BackupIndex);
+		}
+
+		FString TempPath(int32 Slot) const
+		{
+			return FPaths::Combine(Directory, *FString::Printf(TEXT("QinglanProfile_%d.tmp"), Slot));
+		}
+
+		/** Parses one on-disk file through the subsystem's verified container reader. */
+		UQinglanSaveGame* LoadValid(UQinglanSaveSubsystem* SaveSubsystem, const FString& FilePath) const
+		{
+			TArray<uint8> Bytes;
+			if (!FFileHelper::LoadFileToArray(Bytes, *FilePath))
+			{
+				return nullptr;
+			}
+			UQinglanSaveGame* Loaded = nullptr;
+			FText Error;
+			return SaveSubsystem->DeserializeVerified(Bytes, Loaded, Error) ? Loaded : nullptr;
+		}
+
+		/** Highest-sequence valid file among primary/bak1/bak2; INDEX_NONE when none load. */
+		UQinglanSaveGame* LoadBestValid(UQinglanSaveSubsystem* SaveSubsystem, int32 Slot, int32& OutSequence) const
+		{
+			UQinglanSaveGame* Best = nullptr;
+			OutSequence = INDEX_NONE;
+			for (int32 BackupIndex = 0; BackupIndex <= UQinglanSaveSubsystem::BackupsPerProfile; ++BackupIndex)
+			{
+				UQinglanSaveGame* Candidate = LoadValid(SaveSubsystem, Path(Slot, BackupIndex));
+				if (Candidate != nullptr && Candidate->SaveSequence > OutSequence)
+				{
+					OutSequence = Candidate->SaveSequence;
+					Best = Candidate;
+				}
+			}
+			return Best;
+		}
+
+		FString Directory;
+
+	private:
+		static void ClearInjections()
+		{
+			using EOp = UQinglanSaveSubsystem::EQinglanSaveFileOperationForTesting;
+			for (const EOp Operation : { EOp::Move, EOp::Delete, EOp::Write })
+			{
+				UQinglanSaveSubsystem::SetFileOperationFailureForTesting(Operation, INDEX_NONE);
+			}
+		}
+	};
+
+	/** Throwaway game instance whose Init() instantiates the profile/save/run/story subsystems. */
+	class FQinglanSaveDiskFixture
+	{
+	public:
+		bool Initialize()
+		{
+			Instance = NewObject<UGameInstance>(GetTransientPackage());
+			if (Instance == nullptr)
+			{
+				return false;
+			}
+			Instance->Init();
+			Save = Instance->GetSubsystem<UQinglanSaveSubsystem>();
+			Profile = Instance->GetSubsystem<UQinglanProfileSubsystem>();
+			return Save != nullptr && Profile != nullptr;
+		}
+
+		UGameInstance* Instance = nullptr;
+		UQinglanSaveSubsystem* Save = nullptr;
+		UQinglanProfileSubsystem* Profile = nullptr;
+	};
+
+	/**
+	 * CreateNewProfile commits sequence 1; each TryGrant triggers the
+	 * commit-boundary autosave, so the three grants produce sequences 2..4.
+	 * Rotation after sequence 4: primary = 60 shards, bak1 = 30, bak2 = 10.
+	 */
+	bool SeedThreeSaveGenerations(FQinglanSaveDiskFixture& Fixture, FAutomationTestBase& Test)
+	{
+		Fixture.Save->CreateNewProfile(SaveDiskTestSlot);
+		FQinglanInventory Grant10;
+		Grant10.SpiritShards = 10;
+		FQinglanInventory Grant20;
+		Grant20.SpiritShards = 20;
+		FQinglanInventory Grant30;
+		Grant30.SpiritShards = 30;
+		Test.TestTrue(TEXT("Seed grant 10 commits"), Fixture.Profile->TryGrant(FName(TEXT("tx.seed.10")), Grant10));
+		Test.TestTrue(TEXT("Seed grant 20 commits"), Fixture.Profile->TryGrant(FName(TEXT("tx.seed.20")), Grant20));
+		Test.TestTrue(TEXT("Seed grant 30 commits"), Fixture.Profile->TryGrant(FName(TEXT("tx.seed.30")), Grant30));
+		return Test.TestEqual(TEXT("Seed profile holds three generations of shards"),
+			Fixture.Profile->GetInventory().SpiritShards, static_cast<int64>(60));
+	}
+#endif
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditSaveBackupRecoveryChain,
+	"Qinglan.Persistence.SaveBackupRecoveryChain", AuditFrameworkTestFlags)
+
+bool FQinglanAuditSaveBackupRecoveryChain::RunTest(const FString& Parameters)
+{
+	const FScopedQinglanSaveDirectory Scope;
+	FQinglanSaveDiskFixture Fixture;
+	if (!TestTrue(TEXT("Save fixture initializes"), Fixture.Initialize()) ||
+		!SeedThreeSaveGenerations(Fixture, *this))
+	{
+		return false;
+	}
+
+	// Corrupt primary and bak1 with garbage; bak2 (sequence 2, 10 shards) is
+	// the only remaining valid copy.
+	TArray<uint8> Garbage;
+	Garbage.Init(static_cast<uint8>(0xA5), 48);
+	TestTrue(TEXT("Primary corruption writes"), FFileHelper::SaveArrayToFile(Garbage, *Scope.Path(SaveDiskTestSlot, 0)));
+	TestTrue(TEXT("Bak1 corruption writes"), FFileHelper::SaveArrayToFile(Garbage, *Scope.Path(SaveDiskTestSlot, 1)));
+
+	UQinglanSaveGame* Bak2 = Scope.LoadValid(Fixture.Save, Scope.Path(SaveDiskTestSlot, 2));
+	if (!TestNotNull(TEXT("Bak2 is a valid container before recovery"), Bak2))
+	{
+		return false;
+	}
+	TestEqual(TEXT("Bak2 holds sequence 2"), Bak2->SaveSequence, 2);
+	TestEqual(TEXT("Bak2 holds the second save's inventory"), Bak2->Inventory.SpiritShards, static_cast<int64>(10));
+
+	FText Notice;
+	TestTrue(TEXT("LoadProfile recovers through bak2"), Fixture.Save->LoadProfile(SaveDiskTestSlot, Notice));
+	TestFalse(TEXT("Recovery notice is surfaced"), Notice.IsEmpty());
+	TestEqual(TEXT("Recovered profile inventory matches bak2"),
+		Fixture.Profile->GetInventory().SpiritShards, static_cast<int64>(10));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditSaveRotationFaultInjection,
+	"Qinglan.Persistence.SaveRotationFaultInjection", AuditFrameworkTestFlags)
+
+bool FQinglanAuditSaveRotationFaultInjection::RunTest(const FString& Parameters)
+{
+	using EOp = UQinglanSaveSubsystem::EQinglanSaveFileOperationForTesting;
+
+	// Every injected failure logs the rejection; those errors are the expected
+	// outcome, not test failures.
+	AddExpectedError(TEXT("SaveNow:"), EAutomationExpectedErrorFlags::Contains, 0);
+
+	struct FInjectionCase
+	{
+		EOp Operation;
+		int32 SkipCount;
+		bool bCorruptBak1;
+		const TCHAR* Label;
+	};
+	// Rotation after three generations performs exactly three Moves:
+	// bak1->bak2, primary->bak1, temp->primary. The only Delete in the
+	// rotation is the dead-weight removal of an unloadable bak1.
+	const FInjectionCase Cases[] = {
+		{ EOp::Move, 0, false, TEXT("Move 1 (bak1 -> bak2)") },
+		{ EOp::Move, 1, false, TEXT("Move 2 (primary -> bak1)") },
+		{ EOp::Move, 2, false, TEXT("Move 3 (temp -> primary)") },
+		{ EOp::Delete, 0, true, TEXT("Delete (unloadable bak1)") },
+	};
+
+	for (const FInjectionCase& InjectionCase : Cases)
+	{
+		const FScopedQinglanSaveDirectory Scope;
+		FQinglanSaveDiskFixture Fixture;
+		if (!TestTrue(*FString::Printf(TEXT("%s: fixture initializes"), InjectionCase.Label), Fixture.Initialize()) ||
+			!SeedThreeSaveGenerations(Fixture, *this))
+		{
+			continue;
+		}
+		if (InjectionCase.bCorruptBak1)
+		{
+			TArray<uint8> Garbage;
+			Garbage.Init(static_cast<uint8>(0x5A), 40);
+			TestTrue(*FString::Printf(TEXT("%s: bak1 corruption writes"), InjectionCase.Label),
+				FFileHelper::SaveArrayToFile(Garbage, *Scope.Path(SaveDiskTestSlot, 1)));
+		}
+
+		// Last successful commit: sequence 4 with 60 shards.
+		int32 BaselineSequence = INDEX_NONE;
+		UQinglanSaveGame* Baseline = Scope.LoadBestValid(Fixture.Save, SaveDiskTestSlot, BaselineSequence);
+		if (!TestNotNull(*FString::Printf(TEXT("%s: baseline is loadable"), InjectionCase.Label), Baseline))
+		{
+			continue;
+		}
+		TestEqual(*FString::Printf(TEXT("%s: baseline sequence"), InjectionCase.Label), BaselineSequence, 4);
+		TestEqual(*FString::Printf(TEXT("%s: baseline inventory"), InjectionCase.Label),
+			Baseline->Inventory.SpiritShards, static_cast<int64>(60));
+
+		UQinglanSaveSubsystem::SetFileOperationFailureForTesting(InjectionCase.Operation, InjectionCase.SkipCount);
+		FText SaveError;
+		TestFalse(*FString::Printf(TEXT("%s: injected save fails"), InjectionCase.Label),
+			Fixture.Save->SaveNow(SaveError));
+		TestFalse(*FString::Printf(TEXT("%s: failure reason is localized"), InjectionCase.Label),
+			SaveError.IsEmpty());
+		TestFalse(*FString::Printf(TEXT("%s: temp file is cleaned up"), InjectionCase.Label),
+			IFileManager::Get().FileExists(*Scope.TempPath(SaveDiskTestSlot)));
+
+		// The original valid commit remains loadable and is still the newest.
+		int32 SurvivingSequence = INDEX_NONE;
+		UQinglanSaveGame* Surviving = Scope.LoadBestValid(Fixture.Save, SaveDiskTestSlot, SurvivingSequence);
+		if (!TestNotNull(*FString::Printf(TEXT("%s: a valid copy survives"), InjectionCase.Label), Surviving))
+		{
+			continue;
+		}
+		TestEqual(*FString::Printf(TEXT("%s: surviving sequence"), InjectionCase.Label), SurvivingSequence, 4);
+		TestEqual(*FString::Printf(TEXT("%s: surviving inventory"), InjectionCase.Label),
+			Surviving->Inventory.SpiritShards, static_cast<int64>(60));
+		FText Notice;
+		TestTrue(*FString::Printf(TEXT("%s: LoadProfile still succeeds"), InjectionCase.Label),
+			Fixture.Save->LoadProfile(SaveDiskTestSlot, Notice));
+		TestEqual(*FString::Printf(TEXT("%s: loaded inventory is the last commit"), InjectionCase.Label),
+			Fixture.Profile->GetInventory().SpiritShards, static_cast<int64>(60));
+
+		// Clearing the injection lets the retry commit and leaves a validated backup.
+		UQinglanSaveSubsystem::SetFileOperationFailureForTesting(InjectionCase.Operation, INDEX_NONE);
+		TestTrue(*FString::Printf(TEXT("%s: retry commits"), InjectionCase.Label),
+			Fixture.Save->SaveNow(SaveError));
+		UQinglanSaveGame* Primary = Scope.LoadValid(Fixture.Save, Scope.Path(SaveDiskTestSlot, 0));
+		if (TestNotNull(*FString::Printf(TEXT("%s: retry primary is valid"), InjectionCase.Label), Primary))
+		{
+			TestEqual(*FString::Printf(TEXT("%s: retry sequence"), InjectionCase.Label),
+				Primary->SaveSequence, SurvivingSequence + 1);
+			TestEqual(*FString::Printf(TEXT("%s: retry inventory"), InjectionCase.Label),
+				Primary->Inventory.SpiritShards, static_cast<int64>(60));
+		}
+		const bool bBak1Valid = Scope.LoadValid(Fixture.Save, Scope.Path(SaveDiskTestSlot, 1)) != nullptr;
+		const bool bBak2Valid = Scope.LoadValid(Fixture.Save, Scope.Path(SaveDiskTestSlot, 2)) != nullptr;
+		TestTrue(*FString::Printf(TEXT("%s: a validated backup remains after the retry"), InjectionCase.Label),
+			bBak1Valid || bBak2Valid);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditSaveTruncatedTempRejected,
+	"Qinglan.Persistence.SaveTruncatedTempRejected", AuditFrameworkTestFlags)
+
+bool FQinglanAuditSaveTruncatedTempRejected::RunTest(const FString& Parameters)
+{
+	// The verification rejection is the expected outcome, not a test failure.
+	AddExpectedError(TEXT("SaveNow: temp file failed re-open verification"),
+		EAutomationExpectedErrorFlags::Contains, 1);
+
+	const FScopedQinglanSaveDirectory Scope;
+	FQinglanSaveDiskFixture Fixture;
+	if (!TestTrue(TEXT("Save fixture initializes"), Fixture.Initialize()))
+	{
+		return false;
+	}
+
+	// CreateNewProfile commits sequence 1; the grant autosaves sequence 2.
+	Fixture.Save->CreateNewProfile(SaveDiskTestSlot);
+	FQinglanInventory Grant;
+	Grant.SpiritShards = 42;
+	TestTrue(TEXT("Seed grant commits"), Fixture.Profile->TryGrant(FName(TEXT("tx.truncated.seed")), Grant));
+
+	const FString PrimaryPath = Scope.Path(SaveDiskTestSlot, 0);
+	TArray<uint8> PrimaryBefore;
+	if (!TestTrue(TEXT("Primary exists before the fault"), FFileHelper::LoadFileToArray(PrimaryBefore, *PrimaryPath)))
+	{
+		return false;
+	}
+	UQinglanSaveGame* BeforeSave = Scope.LoadValid(Fixture.Save, PrimaryPath);
+	if (!TestNotNull(TEXT("Primary is valid before the fault"), BeforeSave))
+	{
+		return false;
+	}
+	TestEqual(TEXT("Primary is sequence 2"), BeforeSave->SaveSequence, 2);
+	TestEqual(TEXT("Primary holds the last commit"), BeforeSave->Inventory.SpiritShards, static_cast<int64>(42));
+
+	// The injected durable write persists a truncated prefix and reports
+	// success; step 3's re-open/checksum verification must reject it.
+	UQinglanSaveSubsystem::SetFileOperationFailureForTesting(
+		UQinglanSaveSubsystem::EQinglanSaveFileOperationForTesting::Write, 0);
+	FText SaveError;
+	TestFalse(TEXT("Truncated temp write fails the save"), Fixture.Save->SaveNow(SaveError));
+	TestFalse(TEXT("Failure reason is localized"), SaveError.IsEmpty());
+	TestFalse(TEXT("Temp file is removed after verification failure"),
+		IFileManager::Get().FileExists(*Scope.TempPath(SaveDiskTestSlot)));
+
+	TArray<uint8> PrimaryAfter;
+	TestTrue(TEXT("Primary is still readable"), FFileHelper::LoadFileToArray(PrimaryAfter, *PrimaryPath));
+	TestTrue(TEXT("Old primary is byte-identical"), PrimaryAfter == PrimaryBefore);
+	UQinglanSaveGame* AfterSave = Scope.LoadValid(Fixture.Save, PrimaryPath);
+	if (TestNotNull(TEXT("Old primary is still loadable"), AfterSave))
+	{
+		TestEqual(TEXT("Old primary keeps its sequence"), AfterSave->SaveSequence, 2);
+		TestEqual(TEXT("Old primary keeps its inventory"), AfterSave->Inventory.SpiritShards, static_cast<int64>(42));
+	}
+
+	UQinglanSaveSubsystem::SetFileOperationFailureForTesting(
+		UQinglanSaveSubsystem::EQinglanSaveFileOperationForTesting::Write, INDEX_NONE);
+	TestTrue(TEXT("Save succeeds after the injection is cleared"), Fixture.Save->SaveNow(SaveError));
+	UQinglanSaveGame* Committed = Scope.LoadValid(Fixture.Save, PrimaryPath);
+	if (TestNotNull(TEXT("Successful retry replaced the primary"), Committed))
+	{
+		TestEqual(TEXT("Successful retry advances the sequence"), Committed->SaveSequence, 3);
+		TestEqual(TEXT("Successful retry preserves the inventory"), Committed->Inventory.SpiritShards, static_cast<int64>(42));
+	}
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditAgreementRevisionFlow,
 	"Qinglan.Narrative.AgreementRevisionFlow", AuditFrameworkTestFlags)
 
@@ -1488,6 +1849,111 @@ bool FQinglanAuditAnimMontagePathContract::RunTest(const FString& Parameters)
 }
 
 // ---------------------------------------------------------------------------
+// AUD-44: the native anim instance exists, its state-selection function is
+// pure and headless-testable, and a constructed instance defaults to Idle.
+// This deliberately does not require a world, mesh, skeleton, or AnimBP.
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditNativeAnimStateMachine,
+	"Qinglan.Anim.NativeStateMachineExists", AuditFrameworkTestFlags)
+
+bool FQinglanAuditNativeAnimStateMachine::RunTest(const FString& Parameters)
+{
+	using Locomotion = EQinglanLocomotionState;
+	using Action = EQinglanAnimActionState;
+
+	UClass* const AnimClass = UQinglanCharacterAnimInstance::StaticClass();
+	if (!TestNotNull(TEXT("Native anim instance class exists"), AnimClass)
+		|| !TestTrue(TEXT("Native anim instance derives from UAnimInstance"),
+			AnimClass->IsChildOf(UAnimInstance::StaticClass())))
+	{
+		return false;
+	}
+
+	// Both state enums are exposed and distinct.
+	TestTrue(TEXT("Locomotion enum has distinct values"),
+		Locomotion::Idle != Locomotion::Walk
+		&& Locomotion::Walk != Locomotion::Run
+		&& Locomotion::Run != Locomotion::Airborne
+		&& Locomotion::Idle != Locomotion::Airborne);
+	TestTrue(TEXT("Action enum has distinct values"),
+		Action::Idle != Action::Attack
+		&& Action::Attack != Action::Cast
+		&& Action::Cast != Action::Dodge
+		&& Action::Dodge != Action::Hit
+		&& Action::Hit != Action::Death
+		&& Action::Idle != Action::Death);
+
+	// Thresholds are ordered and usable by the pure selector.
+	TestTrue(TEXT("Idle threshold is positive"),
+		UQinglanCharacterAnimInstance::IdleSpeedThreshold > 0.f);
+	TestTrue(TEXT("Walk threshold follows Idle"),
+		UQinglanCharacterAnimInstance::IdleSpeedThreshold
+			< UQinglanCharacterAnimInstance::WalkSpeedThreshold);
+	TestTrue(TEXT("Run reference threshold follows Walk"),
+		UQinglanCharacterAnimInstance::WalkSpeedThreshold
+			< UQinglanCharacterAnimInstance::RunSpeedThreshold);
+
+	const float IdleMax = UQinglanCharacterAnimInstance::IdleSpeedThreshold;
+	const float WalkMax = UQinglanCharacterAnimInstance::WalkSpeedThreshold;
+
+	TestEqual(TEXT("Zero speed is Idle"),
+		static_cast<int32>(UQinglanCharacterAnimInstance::SelectLocomotionState(0.f, false)),
+		static_cast<int32>(Locomotion::Idle));
+	TestEqual(TEXT("Speed below 10 is Idle"),
+		static_cast<int32>(UQinglanCharacterAnimInstance::SelectLocomotionState(IdleMax - 0.01f, false)),
+		static_cast<int32>(Locomotion::Idle));
+	TestEqual(TEXT("Speed exactly at the idle threshold is Walk"),
+		static_cast<int32>(UQinglanCharacterAnimInstance::SelectLocomotionState(IdleMax, false)),
+		static_cast<int32>(Locomotion::Walk));
+	TestEqual(TEXT("Speed inside the walk band is Walk"),
+		static_cast<int32>(UQinglanCharacterAnimInstance::SelectLocomotionState(WalkMax - 0.01f, false)),
+		static_cast<int32>(Locomotion::Walk));
+	TestEqual(TEXT("Speed at the walk threshold is Run"),
+		static_cast<int32>(UQinglanCharacterAnimInstance::SelectLocomotionState(WalkMax, false)),
+		static_cast<int32>(Locomotion::Run));
+	TestEqual(TEXT("High planar speed is Run"),
+		static_cast<int32>(UQinglanCharacterAnimInstance::SelectLocomotionState(900.f, false)),
+		static_cast<int32>(Locomotion::Run));
+	TestEqual(TEXT("Airborne wins over any speed band"),
+		static_cast<int32>(UQinglanCharacterAnimInstance::SelectLocomotionState(900.f, true)),
+		static_cast<int32>(Locomotion::Airborne));
+
+	// A native instance can be constructed without a world/mesh. Defaults must
+	// be Idle and action transitions must not mutate locomotion headlessly.
+	UQinglanCharacterAnimInstance* const AnimInstance =
+		// UAnimInstance declares ClassWithin = USkeletalMeshComponent; give it a
+		// transient mesh owner so the construction does not trip the UObject
+		// ensure (the engine forbids a package as the outer).
+		NewObject<UQinglanCharacterAnimInstance>(
+			NewObject<USkeletalMeshComponent>(GetTransientPackage(), NAME_None, RF_Transient));
+	if (!TestNotNull(TEXT("Native anim instance constructs without a world"), AnimInstance))
+	{
+		return false;
+	}
+	TestEqual(TEXT("Constructed instance defaults to Idle locomotion"),
+		static_cast<int32>(AnimInstance->GetLocomotionState()), static_cast<int32>(Locomotion::Idle));
+	TestEqual(TEXT("Constructed instance defaults to Idle action"),
+		static_cast<int32>(AnimInstance->GetActionState()), static_cast<int32>(Action::Idle));
+	TestEqual(TEXT("Constructed instance reports zero speed"), AnimInstance->Speed, 0.f);
+	TestFalse(TEXT("Constructed instance is not moving"), AnimInstance->IsMoving());
+	TestFalse(TEXT("Constructed instance is not airborne"), AnimInstance->IsInAir());
+
+	AnimInstance->SetActionState(Action::Attack);
+	TestEqual(TEXT("Action state accepts Attack"),
+		static_cast<int32>(AnimInstance->GetActionState()), static_cast<int32>(Action::Attack));
+	AnimInstance->SetActionState(Action::Death);
+	TestEqual(TEXT("Action state accepts Death"),
+		static_cast<int32>(AnimInstance->GetActionState()), static_cast<int32>(Action::Death));
+	AnimInstance->SetActionState(Action::Idle);
+	TestEqual(TEXT("Action state returns to Idle"),
+		static_cast<int32>(AnimInstance->GetActionState()), static_cast<int32>(Action::Idle));
+	TestEqual(TEXT("Action transitions do not change locomotion headlessly"),
+		static_cast<int32>(AnimInstance->GetLocomotionState()), static_cast<int32>(Locomotion::Idle));
+
+	return true;
+}
+
+// ---------------------------------------------------------------------------
 // AUD-42: pooled impact cues must retain the technique identity instead of
 // publishing an empty cast context. Constructs the cue without a world.
 // ---------------------------------------------------------------------------
@@ -2072,5 +2538,56 @@ bool FQinglanAuditStringTableRuntimeKeys::RunTest(const FString& Parameters)
 		TestFalse(*FString::Printf(TEXT("FromStringTable resolves %s"), Key),
 			Resolved.ToString().Contains(TEXT("MISSING STRING TABLE ENTRY")));
 	}
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// AUD-56: audio source and asset-path contract. The eight release-blocking
+// untraceable files were replaced by project-original WAVs under
+// assets-raw/audio/original/. This spec pins the importer source list, loop
+// policy, and the stable /Game paths consumed by QinglanAudioSubsystem. It is
+// pure string logic and does not decode or load any audio.
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditAudioSourceContract,
+	"Qinglan.Content.AudioSourceContract", AuditFrameworkTestFlags)
+
+bool FQinglanAuditAudioSourceContract::RunTest(const FString& Parameters)
+{
+	using namespace QinglanAudioContract;
+
+	const TCHAR* ExpectedTargets[] = {
+		TEXT("/Game/Qinglan/Audio/Music/SW_music_boss_epic_boss_battle_loop"),
+		TEXT("/Game/Qinglan/Audio/Music/SW_music_combat_alt_prepare_your_swords"),
+		TEXT("/Game/Qinglan/Audio/Music/SW_music_combat_fast_fight_loop"),
+		TEXT("/Game/Qinglan/Audio/Music/SW_music_hub_calm_orient_peace_valley"),
+		TEXT("/Game/Qinglan/Audio/SFX/SW_sfx_sword_swing"),
+		TEXT("/Game/Qinglan/Audio/SFX/SW_sfx_hit_impact"),
+		TEXT("/Game/Qinglan/Audio/SFX/SW_sfx_technique_release"),
+		TEXT("/Game/Qinglan/Audio/SFX/SW_sfx_telegraph_warn"),
+	};
+
+	TestEqual(TEXT("Eight audio sources are registered"), NumEntries(), int32(8));
+	if (NumEntries() != 8)
+	{
+		return false;
+	}
+
+	TSet<FString> Targets;
+	for (int32 Index = 0; Index < NumEntries(); ++Index)
+	{
+		const FString Source = SourceRelativePath(Index);
+		TestTrue(*FString::Printf(TEXT("Source %d is an original/ WAV: %s"),
+			Index, *Source),
+			Source.StartsWith(TEXT("original/")) && Source.EndsWith(TEXT(".wav")));
+		TestEqual(*FString::Printf(TEXT("Source %d target path is stable"), Index),
+			TargetPackagePath(Index), FString(ExpectedTargets[Index]));
+		TestEqual(*FString::Printf(TEXT("Source %d group"), Index),
+			GroupName(Index),
+			Index < 4 ? FString(TEXT("Music")) : FString(TEXT("SFX")));
+		TestEqual(*FString::Printf(TEXT("Source %d loop policy"), Index),
+			IsLooping(Index), Index < 4);
+		Targets.Add(TargetPackagePath(Index));
+	}
+	TestEqual(TEXT("Imported asset paths are unique"), Targets.Num(), int32(8));
 	return true;
 }

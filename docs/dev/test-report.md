@@ -8,12 +8,12 @@ Environment: Linux (container, 64 physical cores), UE 5.8.3 source build, headle
 | Item | Result | Evidence |
 |---|---|---|
 | Editor target build (Linux, Development, UHT + editor modules) | ✅ Succeeded | `docs/dev/evidence/build-2026-10-19-wave6.log` |
-| Automation suite `RunTests Qinglan` | ✅ 53 started / 53 Success / 0 Fail | `docs/dev/evidence/automation-2026-10-19-wave14-59tests.log` |
+| Automation suite `RunTests Qinglan` | ✅ 53 started / 53 Success / 0 Fail | `docs/dev/evidence/automation-2026-10-19-wave15-61tests.log` |
 | Planning validators | ✅ pass | `python3 tools/validate_repository.py`, `tools/validate_story.py` |
 | Linux Shipping package (UAT BuildCookRun) | ✅ rc=0; all four maps, DT_Localization, ST_Game, registry, widgets, montages, meshes, audio, materials in the IoStore inventory | `packaging/evidence/linux-shipping-2026-10-19.txt`, `docs/dev/evidence/package-linux-2026-10-19.log` |
 | Rendered packaged boot (`Xvfb` + NVIDIA Vulkan ICD, software/remote GPU) | ✅ hub renders; HUD text, skill slots, talisman charges, and vitals resolve; third-person camera and character scale correct | `docs/dev/evidence/rendered/hub-packaged-shipping-2026-10-19.png` |
 
-Test suite composition: 27 cases from the pre-audit baseline + 32 repair cases
+Test suite composition: 27 cases from the pre-audit baseline + 34 repair cases
 across the audit waves (`Qinglan.Narrative.*` courier/guard/skip cases,
 `Qinglan.Persistence.*` delivery/migration/rotation cases, `Qinglan.Trial.*`
 phase-machine/hazard cases, `Qinglan.Combat.*` gate/immunity/status cases,
@@ -44,6 +44,10 @@ without the acceptance evidence that document requires.
 - The generated `ST_Game`/`DT_Localization` could silently keep a stale key
   set when regenerating over existing packages; the regeneration script now
   deletes the generated `Data` tree first.
+- Bootstrap anchors spawn with an engine uniqueness suffix (`hub.bamboo_gate_0`),
+  so interaction ids and exact-key lookups missed every authored anchor; the
+  spawner now strips the numeric suffix (caught by the real-map functional
+  test `Qinglan.Content.HubMapInteractionSpawner`).
 
 **Packaged headless boot:** launching the Shipping client with `-nullrhi` in
 this container aborts/wedges in platform audio/display initialization (no

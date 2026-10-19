@@ -22,6 +22,7 @@
 #include "Engine/EngineBaseTypes.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
+#include "Engine/TargetPoint.h"
 #include "GameFramework/Actor.h"
 #include "Narrative/QinglanStoryIdentity.h"
 #include "Narrative/QinglanEndingRules.h"
@@ -2589,5 +2590,183 @@ bool FQinglanAuditAudioSourceContract::RunTest(const FString& Parameters)
 		Targets.Add(TargetPackagePath(Index));
 	}
 	TestEqual(TEXT("Imported asset paths are unique"), Targets.Num(), int32(8));
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// AUD-21/23 functional map check: load the authored hub map and run the
+// interaction spawner against its real TargetPoint anchors. This is the first
+// spec that exercises committed map content rather than synthetic worlds.
+// ---------------------------------------------------------------------------
+#include "FileHelpers.h"
+#include "Core/QinglanInteractionSpawner.h"
+#include "Core/QinglanInteractable.h"
+#include "EngineUtils.h"
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditHubMapInteractionSpawner,
+	"Qinglan.Content.HubMapInteractionSpawner", AuditFrameworkTestFlags)
+
+bool FQinglanAuditHubMapInteractionSpawner::RunTest(const FString& Parameters)
+{
+	// Part 1: the committed hub map must carry every authored anchor tag. The
+	// map loads as an editor world (gameplay subsystems intentionally do not
+	// run there), so inspect the real TargetPoint actors directly.
+	UWorld* MapWorld = UEditorLoadingAndSavingUtils::LoadMap(TEXT("/Game/Qinglan/Maps/L_Hub"));
+	if (!TestNotNull(TEXT("L_Hub loads"), MapWorld))
+	{
+		return false;
+	}
+	TSet<FName> MapAnchors;
+	int32 AnchorCount = 0;
+	for (TActorIterator<ATargetPoint> It(MapWorld); It; ++It)
+	{
+		// Anchor keys are the actor OBJECT names with the engine's numeric
+		// uniqueness suffix stripped, matching QinglanInteractionSpawner.
+		FString Name = It->GetName();
+		int32 DigitStart = Name.Len();
+		while (DigitStart > 0 && FChar::IsDigit(Name[DigitStart - 1])) { --DigitStart; }
+		if (DigitStart < Name.Len() && DigitStart > 1 && Name[DigitStart - 1] == TEXT('_'))
+		{
+			Name = Name.Left(DigitStart - 1);
+		}
+		const FName Key(*Name);
+		if (!Key.IsNone())
+		{
+			MapAnchors.Add(Key);
+			++AnchorCount;
+		}
+	}
+	UE_LOG(LogTemp, Display, TEXT("L_Hub tagged anchors: %d"), AnchorCount);
+	const FName RequiredStations[] = {
+		FName(TEXT("hub.bamboo_gate")),
+		FName(TEXT("hub.ledger_table")),
+		FName(TEXT("hub.correspondence_table")),
+		FName(TEXT("hub.cultivation_shrine")),
+		FName(TEXT("hub.courier_board")),
+	};
+	for (const FName& Station : RequiredStations)
+	{
+		TestTrue(*FString::Printf(TEXT("Map anchor %s"), *Station.ToString()),
+			MapAnchors.Contains(Station));
+	}
+
+	// Part 2: the spawner creates an interactable for every spawnable anchor in
+	// a game world, including the synthesized hub gates/rest/scene stations.
+	UPackage* GameWorldPackage = CreatePackage(TEXT("/Temp/L_Hub_SpawnerTest"));
+	UWorld* GameWorld = UWorld::CreateWorld(EWorldType::Game, false,
+		FName(TEXT("L_Hub_SpawnerTest")), GameWorldPackage);
+	if (!TestNotNull(TEXT("Transient game world"), GameWorld))
+	{
+		return false;
+	}
+	const FName SpawnAnchors[] = {
+		FName(TEXT("hub.bamboo_gate")), FName(TEXT("hub.courier_board")),
+		FName(TEXT("hub.cultivation_shrine")), FName(TEXT("hub.workbench")),
+	};
+	for (const FName& Anchor : SpawnAnchors)
+	{
+		FActorSpawnParameters Params;
+		Params.ObjectFlags |= RF_Transient;
+		Params.Name = Anchor;
+		Params.NameMode = FActorSpawnParameters::ESpawnActorNameMode::Requested;
+		GameWorld->SpawnActor<ATargetPoint>(
+			ATargetPoint::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, Params);
+	}
+	UQinglanInteractionSpawner* Spawner = NewObject<UQinglanInteractionSpawner>(GameWorld);
+	if (!TestNotNull(TEXT("Interaction spawner instance"), Spawner))
+	{
+		GameWorld->DestroyWorld(false);
+		return false;
+	}
+	Spawner->OnWorldBeginPlay(*GameWorld);
+	TSet<FName> InteractionIds;
+	for (TActorIterator<AQinglanInteractable> It(GameWorld); It; ++It)
+	{
+		InteractionIds.Add(It->InteractionId);
+	}
+	TestTrue(TEXT("Spawner creates an interactable for an authored anchor"),
+		InteractionIds.Contains(FName(TEXT("hub.bamboo_gate"))));
+	TestTrue(TEXT("Spawner creates an interactable for the courier board"),
+		InteractionIds.Contains(FName(TEXT("hub.courier_board"))));
+	TestTrue(TEXT("Spawner synthesizes the trial gate"), InteractionIds.Contains(FName(TEXT("hub.trial_gate"))));
+	TestTrue(TEXT("Spawner synthesizes the rest station"), InteractionIds.Contains(FName(TEXT("hub.rest_station"))));
+	GameWorld->DestroyWorld(false);
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// AUD-10/11 authored routing contract: the imported registry must expose all
+// 30 main scenes with canonical anchor locations, complete prerequisite
+// references, and structurally valid proof guards. This complements the Python
+// data validator by checking what the engine actually imported.
+// ---------------------------------------------------------------------------
+#include "Narrative/QinglanStoryDataTypes.h"
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditAuthoredCampaignRouting,
+	"Qinglan.Narrative.AuthoredCampaignRouting", AuditFrameworkTestFlags)
+
+bool FQinglanAuditAuthoredCampaignRouting::RunTest(const FString& Parameters)
+{
+	UQinglanStoryRegistry* Registry =
+		LoadObject<UQinglanStoryRegistry>(nullptr, TEXT("/Game/Qinglan/Data/DA_StoryRegistry"));
+	if (!TestNotNull(TEXT("Story registry loads"), Registry))
+	{
+		return false;
+	}
+	TestEqual(TEXT("All thirty main scenes imported"), Registry->MainScenes.Num(), 30);
+
+	TSet<FName> SceneIds;
+	for (const FQinglanRegistryScene& Scene : Registry->MainScenes)
+	{
+		SceneIds.Add(Scene.SceneId);
+	}
+	const TArray<FString> LocationRoots = {
+		TEXT("hub."), TEXT("bamboo."), TEXT("ashen."), TEXT("trial."),
+		TEXT("sq."), TEXT("record."),
+	};
+	for (const FQinglanRegistryScene& Scene : Registry->MainScenes)
+	{
+		const FString Location = Scene.Location.ToString();
+		bool bCanonical = false;
+		for (const FString& Root : LocationRoots)
+		{
+			if (Location.StartsWith(Root))
+			{
+				bCanonical = true;
+				break;
+			}
+		}
+		TestTrue(*FString::Printf(TEXT("%s has a canonical anchor location (%s)"),
+			*Scene.SceneId.ToString(), *Location), bCanonical);
+
+		for (const FName& Prerequisite : Scene.Prerequisites)
+		{
+			TestFalse(*FString::Printf(TEXT("%s does not require itself"), *Scene.SceneId.ToString()),
+				Prerequisite == Scene.SceneId);
+		}
+
+		for (const FQinglanRegistryObjective& Objective : Scene.Objectives)
+		{
+			for (const FQinglanRegistryGuardTerm& Term : Objective.Guard.AllOf)
+			{
+				const FString Kind = Term.Kind.ToString();
+				const bool bKnownKind =
+					Kind == TEXT("event") || Kind == TEXT("event_count") ||
+					Kind == TEXT("ordered") || Kind == TEXT("delivery") ||
+					Kind == TEXT("time_advance") || Kind == TEXT("flag");
+				TestTrue(*FString::Printf(TEXT("%s/%s guard kind %s is known"),
+					*Scene.SceneId.ToString(), *Objective.ObjectiveId.ToString(), *Kind), bKnownKind);
+			}
+		}
+	}
+	// Every NextSceneIds reference points at an imported main scene.
+	for (const FQinglanRegistryScene& Scene : Registry->MainScenes)
+	{
+		for (const FName& Next : Scene.NextSceneIds)
+		{
+			TestTrue(*FString::Printf(TEXT("%s next-scene %s exists"),
+				*Scene.SceneId.ToString(), *Next.ToString()), SceneIds.Contains(Next));
+		}
+	}
 	return true;
 }

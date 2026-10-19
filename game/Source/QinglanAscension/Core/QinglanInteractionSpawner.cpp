@@ -40,16 +40,30 @@ namespace
 			|| Id == TEXT("ashen.boss_5");
 	}
 
-	/** Bootstrap anchor name: object name first (shipping-safe), actor label as a development fallback. */
+	/**
+	 * Bootstrap anchor name: object name first (shipping-safe), actor label as
+	 * a development fallback. The engine uniquifies actor names on spawn, so
+	 * every authored anchor lands as "<Key>_<n>" (e.g. hub.bamboo_gate_0);
+	 * the numeric suffix must be stripped or interaction ids and every
+	 * exact-key lookup (authored gates, scene anchors) miss the authored key.
+	 */
 	FName AnchorKeyOf(const ATargetPoint* Point)
 	{
 		if (Point == nullptr)
 		{
 			return NAME_None;
 		}
-		// Anchors carry their interaction key as the object name (the
-		// bootstrap's SpawnActor names); GetActorLabel is editor-only.
-		return FName(*Point->GetName());
+		FString Name = Point->GetName();
+		int32 DigitStart = Name.Len();
+		while (DigitStart > 0 && FChar::IsDigit(Name[DigitStart - 1]))
+		{
+			--DigitStart;
+		}
+		if (DigitStart < Name.Len() && DigitStart > 1 && Name[DigitStart - 1] == TEXT('_'))
+		{
+			Name = Name.Left(DigitStart - 1);
+		}
+		return FName(*Name);
 	}
 } // namespace
 

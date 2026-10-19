@@ -1322,3 +1322,103 @@ The release-ready gate additionally requires the target-device, performance,
 asset-rights, and distribution evidence in AUD-53 through AUD-60. Development
 completion and storefront publication are separate decisions. No unresolved P0/P1
 may be hidden behind a passing documentation validator.
+
+## Repair dispositions (2026-10-19)
+
+This section records the disposition of every AUD ID after the 2026-10-19
+repair waves. It does **not** declare development complete: the closure rule
+above still governs. "Fixed" below means the source defect was removed and
+automated coverage exercises the repaired path; "partially fixed" means the
+source work landed but acceptance still needs in-engine, rendered, or
+platform evidence; "open" and "blocked" are recorded as such.
+
+Environment for every automated result: Linux container, UE 5.8.3 source
+build (`tools/build/versions.lock`), headless `-nullrhi`. Evidence logs are in
+`docs/dev/evidence/`. Repair commits: `1c7e3a0` (build repairs, 27 tests),
+`ed02e88` (courier/trials/routing data, 35 tests), `16b1a7b` (proof guard
+runtime, combat/AI/VFX, bilingual runtime, content, 44 tests), `f481f03`
+(exit authority, focus, loadout, action gates, animation/VFX, 49 tests).
+Auxiliary: `ac56e83` (AUD-56 ledger), `368445d` (packaging evidence).
+
+| AUD | Disposition | Implementation and coverage | Remaining acceptance |
+| --- | --- | --- | --- |
+| AUD-01 | Partially fixed | Hub arrival no longer re-imports slot 0; save-before-travel wrappers; profile replacement clears run state. | Selected-slot frontend; hub return/restart playthrough. |
+| AUD-02 | Partially fixed | Entrance/room/banking/purchase/trial/ending/choice boundaries request durable saves; realm resumes room entrance/vitals/encounters/blessings; failures surface notices. | Real process-kill tests; frontend recovery UX. |
+| AUD-03 | Fixed (source) | Rotation only replaces validated back-ups and never deletes the last valid copy before the new primary commits. | Disk-fault injection at every move/replace step. |
+| AUD-04 | Fixed (source) | Profile load/create atomically replaces profile+run, including an explicit empty run; reentrancy rejected. | Profile-switch UI with pawn/world teardown. |
+| AUD-05 | Fixed | Real signed stream state restored; room-wave rebuild reproduces the saved wave. Tests: `RunSignedStreamResume`, `RunUnfinishedRoomResume`. | Engine stream comparison across save/reload on cooked maps. |
+| AUD-06 | Fixed | Pending offer + owning room persisted; restore without reroll; selection saves once. Tests: `RunPendingDraftRoundtrip`, `RunDraftRoomReplay`. | Audio/UI verification of the restored offer. |
+| AUD-07 | Fixed | Journal-sized transaction id search; atomic settlement; allocation/profile/overflow failures retain loot with a notice. Tests: `ExpeditionBankingAtomicity`, `TransactionIdempotency`, `ExactBankingFloor`. | Real 999-entry histories and disk failures. |
+| AUD-08 | Fixed | First/repeat material payout contract and integer retreat/death flooring in production callers. Tests: `BankingMultipliers`, `ExactBankingFloor`. | Full first/repeat/retreat/death runs on cooked content. |
+| AUD-09 | Fixed | Owner-scoped objective/choice identity with ambiguity rejection and legacy migration. Tests: `StoryIdentityResolution`, `ScopedObjectiveRuntime`, `ChoiceSaveScopeMigration`. | CH04–CH07 journey. |
+| AUD-10 | Fixed (source+data) | 16 late-story locations canonicalized; ledger/correspondence anchors authored and synthesized for old maps; trial gate plays CH05_S04 before travel; hub entry scans CH05→CH07. | Full 30-scene/24-stage playthrough from a new profile. |
+| AUD-11 | Partially fixed | Guard term import + evaluator (event/event_count/ordered/delivery/time_advance/flag), ordered reset, anchor proof gating, choice-commit gate, confinement gate, and event producers for combat/dodge/cast/room/record/blessing/shrine. Tests: `GuardBlocksDialogueOnlyProgress`, `OrderedGuardReset`, `ConfirmationGuardGate`. | Producers for remaining authored device beats; full journey verification. |
+| AUD-12 | Fixed | Successful selection clears the skip halt. Test: `SkipChoiceResume`. | In-engine skip-before/after-choice QA. |
+| AUD-13 | Fixed | Authored choice groups, required groups, clickable/disabled-aware native choices, keyboard/controller/mouse navigation beyond four. Test: `GroupedChoiceAcknowledgment`. | Rendered input QA. |
+| AUD-14 | Fixed | Ending preview/acknowledge/confirm/cancel bound to the atomic transaction; modal input blocking; warning acknowledgement required. Test: `EndingConfirmationTransaction`. | All three endings rendered. |
+| AUD-15 | Fixed | Sanctuary rest advances fiction time (18 h/12 h), premature accept shows the authored retry line, arrivals broadcast. Test: `CourierDeliveryFlow`. | Interactive verification on cooked content. |
+| AUD-16 | Fixed | Story clock + delivery state persisted (schema v2), v1 migration synthesizes a pending reply, invariants enforce consistency. Tests: `DeliverySaveRoundtrip`, `SaveV1DeliveryMigration`. | Process-kill at each courier boundary. |
+| AUD-17 | Fixed | Completed agreement stages replay as revisions; effective A stays until B's reply is confirmed; rewards idempotent. Test: `AgreementRevisionFlow`. | Interactive revision on cooked content. |
+| AUD-18 | Fixed | Foundation/Golden Core admission authorities at every entry path. Tests: `AuthoredTrialAdmission`, `TrialAdmissionPolicy`. | In-engine gate verification. |
+| AUD-19 | Fixed (source) | Cancel/stay/return/success paths; success commits proof + breakthrough + hub travel; failed saves stay retryable. | In-engine success/failure/cancel/retry QA. |
+| AUD-20 | Fixed | Two-phase trials: storm schedule with ≥0.9 s warnings and safe spacing, then a required elite/shell kill; no free win. Tests: `TrialCatalogSpecs`, `HazardPlacementDeterministic`, `TimerExpiryRequiresKill`, `GoldenCoreEventOrder`. | Rendered hazard clarity and full trial QA. |
+| AUD-21 | Fixed (source+content) | Shared room layout drives authoring/doors/resume; tagged PlayerStarts regenerated; maps regenerated. | Cooked collision/nav and enemy placement QA. |
+| AUD-22 | Fixed | Victory requires the final room with the boss room committed; defeat/retreat never write boss proof; distinct retreat. Test: `ExitRequiresBossClear`. | Full victory/retreat/defeat runs. |
+| AUD-23 | Fixed (source+content) | Arena gaps, off-floor anchors, overlapping trial targets, and boundary recovery addressed; hub anchors/start heights corrected; maps regenerated. | Cooked traversal QA. |
+| AUD-24 | Fixed (source+content) | Consistent Axis2D convention, gamepad bindings, regenerated input assets. | Development/Shipping input QA on both devices. |
+| AUD-25 | Fixed (source+content) | Pause action triggers while paused; pause/resume menu path. | In-engine pause/resume QA. |
+| AUD-26 | Fixed | Proximity + camera + line-of-sight focus with deterministic priority and a localized prompt. | Rendered prompt QA. |
+| AUD-27 | Fixed | Profile loadout resolves to technique assets and syncs on possess/BeginPlay/commit/travel. Test: `LoadoutSync`. | All eight techniques equipped/used in-engine. |
+| AUD-28 | Fixed (source) | Accepted-hit delegate drives enemy stagger/death; zero-health enemies stop. | Kills during windup/attack across delivery layers. |
+| AUD-29 | Fixed (source) | Attack shapes resolve through their own authorities; generic proximity limited. | Evasion QA per shape. |
+| AUD-30 | Fixed (source) | Projectiles sweep world blockers; spawn origin validated; piercing limited. | Wall/cover QA both sides. |
+| AUD-31 | Fixed (source) | Statuses apply only after an accepted authoritative hit. | I-frame/duplicate QA. |
+| AUD-32 | Fixed | Shared action gate, dodge buffering, forced reaction, choice input lock. Test: `ActionStateGate`. | Full input-state matrix QA. |
+| AUD-33 | Fixed | Process-wide cast identity + attacker in the dedupe key. Test: `HitKeyDedupe`. | Independent simultaneous attacks in-engine. |
+| AUD-34 | Fixed | Immunity clock re-anchors on every dodge start. Test: `ConsecutiveDodgeImmunity`. | Frame-rate matrix QA. |
+| AUD-35 | Fixed (source) | Bounded collision-aware Mist Step dash; Wet applied along the swept path with a deduplicated victim set. | In-engine dash QA. |
+| AUD-36 | Fixed | Root/slow drive movement through one authority with baseline restore; boss identity shared with Shock exclusion. Test: `StatusMoveMultiplier`. | Reapply/expiry/pool QA. |
+| AUD-37 | Fixed | Tier-2 purchase/state/persistence, 1.15 multiplier, Conduct/Burn/Wet bonuses, Herbal Knowledge in both heal paths, Grounded Steps stamina, equipment deltas. Test: `TechniqueTierBonus`. | Equip/unequip/save/load QA. |
+| AUD-38 | Fixed | Verdant Pulse timer starts at zero, total healing spread across the authored ticks. Test: `BurnThreeTickRefresh` (status cadence) covers the shared timing contract. | In-engine heal timing QA. |
+| AUD-39 | Fixed | Recall routes through the authoritative cleared-room retreat and never charges on rejection. | In-engine recall QA. |
+| AUD-40 | Fixed (source) | Wolf orbit has a finite budget and inward transition before the telegraph. | Functional AI test. |
+| AUD-41 | Fixed | Ashen embers gated to the boss at 50% with warnings and a safe-lane broadcast. | Rendered Low/Metal QA. |
+| AUD-42 | Partially fixed | Cue component instantiated on enemies, telegraph/ember/impact context carried, ground-center/ring/safe-lane placeholders, visible projectile bodies, no-Niagara fallback. | Authored Niagara, audio assets, Metal/Low capture evidence. |
+| AUD-43 | Fixed | Lights stored before registration, bounded, destroyed on decay/reset, honor preset + low-flash. Test: `CueLightBookkeeping`. | Rendered light-budget QA. |
+| AUD-44 | Partially fixed | Montage paths corrected, per-cut playback, cast montages, stationary-socket sampling with fallbacks. Test: `MontagePathContract`. | Full AnimBP state machine; socket/slot QA in the editor. |
+| AUD-45 | Fixed | Independent package per montage with explicit skeleton; post-build contract verification. Test: `MontagePathContract`; regeneration verified 8 montages. | Cooking/playback from a fresh process. |
+| AUD-46 | Fixed (source) | Bounded catalog asset cache replaces permanent rooting. | GC/count telemetry across rooms/trials. |
+| AUD-47 | Fixed (config) | `GameInstanceClass` moved to the maps-settings section. | Clean Saved/Config launch asserting the instance and Init log. |
+| AUD-48 | Fixed | Generated `DT_Localization` (890 bilingual rows), registered runtime text source for every `FText::FromStringTable` consumer, HUD prefers the service. Test: `BilingualKeyParityAndResolve`. | Offline Shipping locale switch and CJK glyph QA. |
+| AUD-49 | Fixed | First-launch state captured before profile creation; explicit culture preference persisted outside the profile. Test: `FirstLaunchOrdering`. | New-profile QA on a Chinese OS. |
+| AUD-50 | Fixed | `ST_Game` regenerated and asserted at import time (890 keys written; failure if the table truncates). | Fresh-process asset load QA. |
+| AUD-51 | Partially fixed | Native dialogue, ending, choice, save/bank notices implemented; other screens still incomplete. | Profile/settings/equipment/journal/shop/outcome screens. |
+| AUD-52 | Partially fixed | Responsive native dialogue with separate scroll/choice regions, real font sizes, source labels, Backspace dismissal. | Journal reopen, text-scale/720p/Retina/CJK visual QA. |
+| AUD-53 | Partially fixed | `DirectoriesToAlwaysCook`/localization cook configuration added. | Clean cook inventory + offline launch with the new content. |
+| AUD-54 | Fixed (source) | Correct dynamic-resolution CVar/user setting; GI/reflection/Nanite policy applied per preset; capability reasons. | Measured rendering on supported backends. |
+| AUD-55 | Open | Content remains blockout; no authored texture sets or Niagara systems are committed. | Full art pass and rendered walkthrough. |
+| AUD-56 | Partially fixed | Ledger populated with 42 records (Quaternius CC0 verified, PolyHaven CC0, caching notes). | Eight audio sources are unknown; release blocker. |
+| AUD-57 | Fixed | Portable build/regenerate scripts, engine revision lock, nonzero on missing inputs, mandatory-output validation, regeneration rc_all=0. | Second-machine reproduction. |
+| AUD-58 | Partially fixed | 49 automation cases cover the repaired persistence/narrative/trial/combat/localization paths. | Fault injection, functional maps, complete keyboard/controller playthrough. |
+| AUD-59 | Blocked | Linux Shipping package manifests and artifact hashes recorded (`packaging/evidence/`). | Windows DX12 and Apple Silicon Metal builds/devices are unavailable in this environment; owner action required. |
+| AUD-60 | Fixed | README/CONTRIBUTING/test-report/build guide rewritten around recorded evidence with historical results labeled. | — |
+
+### Remaining acceptance gates (not satisfied by this repair work)
+
+1. **Full campaign playthrough** from a new profile through CH00–CH07, both
+   realms and trials, all side stages/records, and each ending branch, with
+   save/restart, defeat/retreat/retry, keyboard/controller and both locales.
+   This requires a display-capable machine and is the development-completion
+   gate from the closure rule above.
+2. **Fault injection** for save rotation, disk failures, and process kills at
+   every promised boundary.
+3. **Rendered and cooked evidence**: collision/nav in regenerated maps, input
+   QA on both device classes, hazard clarity at Low/low-flash, CJK glyphs in
+   Shipping, and the target-platform performance captures.
+4. **Asset provenance**: resolve the eight unknown-source audio assets before
+   any release.
+5. **Target platforms**: Windows x64 DX12 and native Apple Silicon Metal
+   builds and device acceptance (AUD-59) are outside this environment.
+
+No checkboxes above are ticked: per the closure rule, ticking requires the
+in-engine/platform evidence listed in each item's acceptance section.

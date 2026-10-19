@@ -3,17 +3,20 @@
 ## 0. Current evidence (2026-10-19) — supersedes the historical section below
 
 Environment: Linux (container, 64 physical cores), UE 5.8.3 source build, headless
-(`-nullrhi`), branch `fix/audit-repairs` at `ed02e88` + working-tree repair wave.
+(`-nullrhi`), branch `fix/audit-repairs` at `f481f03`.
 
 | Item | Result | Evidence |
 |---|---|---|
-| Editor target build (Linux, Development, UHT + editor modules) | ✅ Succeeded | `docs/dev/evidence/build-2026-10-19-wave3.log` |
-| Automation suite `RunTests Qinglan` | ✅ 35 started / 35 Success / 0 Fail | `docs/dev/evidence/automation-2026-10-19-wave3-35tests.log` |
+| Editor target build (Linux, Development, UHT + editor modules) | ✅ Succeeded | `docs/dev/evidence/build-2026-10-19-wave5.log` |
+| Automation suite `RunTests Qinglan` | ✅ 49 started / 49 Success / 0 Fail | `docs/dev/evidence/automation-2026-10-19-wave5-49tests.log` |
 | Planning validators | ✅ pass | `python3 tools/validate_repository.py`, `tools/validate_story.py` |
 
-Test suite composition: 27 cases from the pre-audit baseline + 8 new cases from
-the audit wave (`Qinglan.Narrative.*` courier/guard cases, `Qinglan.Persistence.*`
-delivery/migration cases, `Qinglan.Trial.*` phase-machine cases).
+Test suite composition: 27 cases from the pre-audit baseline + 22 repair cases
+across the audit waves (`Qinglan.Narrative.*` courier/guard/skip cases,
+`Qinglan.Persistence.*` delivery/migration/rotation cases, `Qinglan.Trial.*`
+phase-machine/hazard cases, `Qinglan.Combat.*` gate/immunity/status cases,
+`Qinglan.Progression.*` exit/tier cases, `Qinglan.Anim.*`/`Qinglan.VFX.*`
+contract cases, and `Qinglan.Localization.*`).
 
 **Scope:** these results prove compilation and the scripted subsystem behavior
 exercised by the specs. They do **not** prove a playable campaign, rendered
@@ -41,7 +44,7 @@ TDereferenceWrapper sort predicates, TCheckedFormatString literals, UCommandlet
 members), duplicate-symbol and unity-collision cleanups from the parallel module
 pass, and missing module links (UMG runtime, InputCore editor).
 
-## 2. Historical automation suite — 12/12 (2026-10-13; current suite is 35 cases)
+## 2. Historical automation suite — 12/12 (2026-10-13; current suite is 49 cases)
 
 Run:
 ```bash

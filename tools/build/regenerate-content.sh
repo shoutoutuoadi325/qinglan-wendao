@@ -66,6 +66,13 @@ rc_all=0
 rm -f "$CONTENT/UI/WBP_HUD.uasset" "$CONTENT/UI/WBP_Dialogue.uasset" \
       "$CONTENT/UI/WBP_Journal.uasset" "$CONTENT/UI/WBP_Ending.uasset"
 
+# Generated data assets (ST_Game/DT_Localization/DA_StoryRegistry/techniques/
+# realms) are rebuilt from JSON. An existing package is discovered partially
+# loaded by the commandlet process, and UE 5.8 then saves it without the new
+# keys (observed as a stale string table while the importer reported the full
+# key count). Delete the generated Data tree so every run starts clean.
+rm -rf "$CONTENT/Data"
+
 # Project commandlets live in the PostEngineInit editor module, which is not
 # auto-discovered without the "Module.Class" form (-run appends "Commandlet").
 run_cmdlet QinglanAscensionEditor.QinglanDataImport -data="$REPO_ROOT/data" || rc_all=1

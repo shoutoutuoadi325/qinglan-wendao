@@ -660,7 +660,18 @@ void AQinglanCharacter::BeginPlay()
 				FSoftObjectPath(TEXT("/Game/Qinglan/Characters/Human/SK_Human")).TryLoad()))
 		{
 			MeshComp->SetSkeletalMesh(Mesh);
-			MeshComp->SetRelativeLocation(FVector(0.f, 0.f, -QinglanCapsuleHalfHeight));
+			// The Quaternius FBX rigs import at ~5.3 m tall (SK_Human bounds
+			// extent Z ~263 cm) against the 1.76 m capsule, which put the
+			// third-person camera inside the mesh when rendered. Normalize the
+			// component scale so the mesh half-height matches the capsule, and
+			// re-seat the feet at the capsule bottom (origin may not be at the
+			// feet in the export).
+			const FBoxSphereBounds MeshBounds = Mesh->GetBounds();
+			const float MeshHalfHeight = FMath::Max(1.f, static_cast<float>(MeshBounds.BoxExtent.Z));
+			const float MeshScale = QinglanCapsuleHalfHeight / MeshHalfHeight;
+			MeshComp->SetRelativeScale3D(FVector(MeshScale));
+			const float MeshMinZ = static_cast<float>(MeshBounds.Origin.Z - MeshBounds.BoxExtent.Z);
+			MeshComp->SetRelativeLocation(FVector(0.f, 0.f, -QinglanCapsuleHalfHeight - MeshMinZ * MeshScale));
 			MeshComp->SetRelativeRotation(FRotator(0.f, -90.f, 0.f)); // rig faces +Y in the export
 			if (UAnimSequence* const Idle = Cast<UAnimSequence>(
 					FSoftObjectPath(TEXT("/Game/Qinglan/Characters/Human/SK_HumanHuman_Armature_Idle")).TryLoad()))

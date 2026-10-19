@@ -33,7 +33,12 @@ DEFINE_LOG_CATEGORY(LogQinglanUI);
 namespace
 {
 	// String table asset id (code-contracts.md "Localization keys").
-	const TCHAR* GGameStringTablePath = TEXT("/Game/Qinglan/Data/ST_Game");
+	// UE registers a string table under its OBJECT path (UStringTable::
+	// PostLoad sets StringTableId = GetPathName(), e.g.
+	// "/Game/Qinglan/Data/ST_Game.ST_Game"). FText::FromStringTable resolves by
+	// that id, so the package-only path silently returns the missing marker for
+	// every key. Keep the object path here; FSoftObjectPath loads either form.
+	const TCHAR* GGameStringTablePath = TEXT("/Game/Qinglan/Data/ST_Game.ST_Game");
 
 	// Cooldown display keeps one fractional digit (authored HUD readability).
 	constexpr int32 CooldownFractionDigits = 1;
@@ -151,25 +156,67 @@ bool UQinglanHUDStatics::HasGameText(FName Key)
 	return false;
 }
 
+namespace
+{
+	/**
+	 * Named-placeholder substitution that does not depend on the pattern's
+	 * FText history. Bulletproof: the runtime translation source returns plain
+	 * strings, while the string table returns format-enabled text; UE renders
+	 * an unsubstituted named argument as "(name)", which surfaced on the HUD
+	 * barrier label in the packaged build. Substituting manually works for both
+	 * sources and falls back to the FText formatter when no braces remain.
+	 */
+	FText FormatNamedPattern(const FText& Pattern, const FFormatNamedArguments& Args)
+	{
+		FString Text = Pattern.ToString();
+		for (const TPair<FString, FFormatArgumentValue>& Pair : Args)
+		{
+			FString Replacement;
+			switch (Pair.Value.GetType())
+			{
+			case EFormatArgumentType::Text:
+				Replacement = Pair.Value.GetTextValue().ToString();
+				break;
+			case EFormatArgumentType::Int:
+				Replacement = FText::AsNumber(Pair.Value.GetIntValue()).ToString();
+				break;
+			case EFormatArgumentType::UInt:
+				Replacement = FText::AsNumber(Pair.Value.GetUIntValue()).ToString();
+				break;
+			case EFormatArgumentType::Float:
+				Replacement = FText::AsNumber(Pair.Value.GetFloatValue()).ToString();
+				break;
+			case EFormatArgumentType::Double:
+				Replacement = FText::AsNumber(Pair.Value.GetDoubleValue()).ToString();
+				break;
+			default:
+				continue;
+			}
+			Text = Text.Replace(*FString::Printf(TEXT("{%s}"), *Pair.Key), *Replacement);
+		}
+		return FText::FromString(Text);
+	}
+}
+
 FText UQinglanHUDStatics::FormatGameTextWithNumber(FName Key, FName ArgName, int32 Value)
 {
 	FFormatNamedArguments Args;
 	Args.Add(ArgName.ToString(), FText::AsNumber(Value));
-	return FText::Format(GameText(Key), Args);
+	return FormatNamedPattern(GameText(Key), Args);
 }
 
 FText UQinglanHUDStatics::FormatGameTextWithInt64(FName Key, FName ArgName, int64 Value)
 {
 	FFormatNamedArguments Args;
 	Args.Add(ArgName.ToString(), FText::AsNumber(Value));
-	return FText::Format(GameText(Key), Args);
+	return FormatNamedPattern(GameText(Key), Args);
 }
 
 FText UQinglanHUDStatics::FormatGameTextWithText(FName Key, FName ArgName, const FText& Value)
 {
 	FFormatNamedArguments Args;
 	Args.Add(ArgName.ToString(), Value);
-	return FText::Format(GameText(Key), Args);
+	return FormatNamedPattern(GameText(Key), Args);
 }
 
 FText UQinglanHUDStatics::FormatNumber(int32 Value)

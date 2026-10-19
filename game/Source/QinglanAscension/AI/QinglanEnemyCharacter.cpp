@@ -466,8 +466,15 @@ void AQinglanEnemyCharacter::InitializeFromData(UQinglanEnemyDataAsset* InData)
 			MeshComp->SetSkeletalMesh(Mesh);
 			// Pivot the rig onto the capsule: root at capsule base, facing
 			// the movement forward axis (Quaternius exports face +Y).
+			// The FBX rigs import ~3x human height, so normalize the component
+			// scale to the capsule (same contract as the player pawn).
 			const float CapsuleHalfHeight = GetCapsuleComponent() ? GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight() : 88.f;
-			MeshComp->SetRelativeLocation(FVector(0.f, 0.f, -CapsuleHalfHeight));
+			const FBoxSphereBounds MeshBounds = Mesh->GetBounds();
+			const float MeshHalfHeight = FMath::Max(1.f, static_cast<float>(MeshBounds.BoxExtent.Z));
+			const float MeshScale = CapsuleHalfHeight / MeshHalfHeight;
+			MeshComp->SetRelativeScale3D(FVector(MeshScale));
+			const float MeshMinZ = static_cast<float>(MeshBounds.Origin.Z - MeshBounds.BoxExtent.Z);
+			MeshComp->SetRelativeLocation(FVector(0.f, 0.f, -CapsuleHalfHeight - MeshMinZ * MeshScale));
 			MeshComp->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));
 			if (UAnimSequence* Idle = InData->IdleAnimation.LoadSynchronous())
 			{

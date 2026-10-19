@@ -11,8 +11,9 @@ Environment: Linux (container, 64 physical cores), UE 5.8.3 source build, headle
 | Automation suite `RunTests Qinglan` | ✅ 53 started / 53 Success / 0 Fail | `docs/dev/evidence/automation-2026-10-19-wave6-53tests.log` |
 | Planning validators | ✅ pass | `python3 tools/validate_repository.py`, `tools/validate_story.py` |
 | Linux Shipping package (UAT BuildCookRun) | ✅ rc=0; all four maps, DT_Localization, ST_Game, registry, widgets, montages, meshes, audio, materials in the IoStore inventory | `packaging/evidence/linux-shipping-2026-10-19.txt`, `docs/dev/evidence/package-linux-2026-10-19.log` |
+| Rendered packaged boot (`Xvfb` + NVIDIA Vulkan ICD, software/remote GPU) | ✅ hub renders; HUD text, skill slots, talisman charges, and vitals resolve; third-person camera and character scale correct | `docs/dev/evidence/rendered/hub-packaged-shipping-2026-10-19.png` |
 
-Test suite composition: 27 cases from the pre-audit baseline + 26 repair cases
+Test suite composition: 27 cases from the pre-audit baseline + 27 repair cases
 across the audit waves (`Qinglan.Narrative.*` courier/guard/skip cases,
 `Qinglan.Persistence.*` delivery/migration/rotation cases, `Qinglan.Trial.*`
 phase-machine/hazard cases, `Qinglan.Combat.*` gate/immunity/status cases,
@@ -25,6 +26,24 @@ output, packaging, or target-platform acceptance. Unresolved audit IDs remain
 listed in `docs/dev/completion-audit-todo.md`; no passage here closes them
 without the acceptance evidence that document requires.
 
+
+
+**Defects found and fixed only by rendering the package:**
+
+- `FText::FromStringTable` was given the package path; UE registers string
+  tables under the **object** path (`/Game/.../ST_Game.ST_Game`). Every key
+  resolved to `<MISSING STRING TABLE ENTRY>` in the package until the id was
+  corrected (`Qinglan.Localization.StringTableRuntimeKeys` now guards it).
+- The imported Quaternius rigs are ~5.26 m tall against a 1.76 m capsule,
+  putting the camera inside the mesh; the player/enemy mesh scale is now
+  normalized to the capsule with feet re-seated on the capsule base.
+- The HUD barrier label substituted named placeholders incorrectly for the
+  plain-string runtime translation source; a manual named-format helper now
+  works for both table and service sources, and skill slots have readable
+  fallbacks and wider layout slots.
+- The generated `ST_Game`/`DT_Localization` could silently keep a stale key
+  set when regenerating over existing packages; the regeneration script now
+  deletes the generated `Data` tree first.
 
 **Packaged headless boot:** launching the Shipping client with `-nullrhi` in
 this container aborts/wedges in platform audio/display initialization (no

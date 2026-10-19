@@ -1,6 +1,8 @@
 // AUD-07/08/09/18: direct helper and profile regression coverage, without a world.
 // These do not prove disk durability, save migration, or gameplay entry wiring.
 #include "Misc/AutomationTest.h"
+#include "Internationalization/StringTable.h"
+#include "Internationalization/StringTableCore.h"
 
 #include "Abilities/QinglanProjectile.h"
 #include "Abilities/QinglanTechniqueExecutors.h"
@@ -14,6 +16,7 @@
 #include "Core/QinglanTrialAdmission.h"
 #include "Progression/QinglanEconomyLibrary.h"
 #include "VFX/QinglanVFXCueComponent.h"
+#include "UI/QinglanHUDStatics.h"
 #include "Engine/EngineBaseTypes.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
@@ -2031,3 +2034,43 @@ bool FQinglanContentTextureSetContract::RunTest(const FString& Parameters)
 	return true;
 }
 #endif // WITH_DEV_AUTOMATION_TESTS
+
+// ---------------------------------------------------------------------------
+// AUD-50: the committed string table must contain every runtime key and the
+// FromStringTable lookup path used by UI code must resolve it. This spec caught
+// a stale table surviving an incremental import (the importer reported the
+// full key count while the saved asset still held the previous key set).
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditStringTableRuntimeKeys,
+	"Qinglan.Localization.StringTableRuntimeKeys", AuditFrameworkTestFlags)
+
+bool FQinglanAuditStringTableRuntimeKeys::RunTest(const FString& Parameters)
+{
+	UStringTable* Table = LoadObject<UStringTable>(nullptr, TEXT("/Game/Qinglan/Data/ST_Game"));
+	if (!TestNotNull(TEXT("ST_Game loads"), Table))
+	{
+		return false;
+	}
+	const TSharedRef<FStringTable> Root = Table->GetMutableStringTable();
+	int32 KeyCount = 0;
+	Root->EnumerateKeysAndSourceStrings([&KeyCount](const FTextKey&, const FString&) { ++KeyCount; return true; });
+	UE_LOG(LogTemp, Display, TEXT("ST_Game entry count: %d"), KeyCount);
+	TestTrue(TEXT("Table carries the full imported key set (>900)"), KeyCount > 900);
+
+	const TCHAR* Keys[] = {
+		TEXT("hud.health"), TEXT("hud.objective"), TEXT("hud.objective.none"),
+		TEXT("hud.skill_slot"), TEXT("hud.talisman"), TEXT("trial.spawn_failed"),
+		TEXT("technique.jade_sword_arc.name"), TEXT("interact.hub.rest_station"),
+	};
+	for (const TCHAR* Key : Keys)
+	{
+		const bool bPresent = Root->FindEntry(FTextKey(Key)).IsValid();
+		TestTrue(*FString::Printf(TEXT("Table entry present: %s"), Key), bPresent);
+		// The registered table id is the asset OBJECT path (see HUDStatics).
+		const FText Resolved = FText::FromStringTable(
+			UQinglanHUDStatics::GameStringTableId(), Key);
+		TestFalse(*FString::Printf(TEXT("FromStringTable resolves %s"), Key),
+			Resolved.ToString().Contains(TEXT("MISSING STRING TABLE ENTRY")));
+	}
+	return true;
+}

@@ -2200,8 +2200,26 @@ void UQinglanHUDWidget::RefreshFromPlayer()
 			}
 			FFormatNamedArguments Args;
 			Args.Add(TEXT("index"), FText::AsNumber(Index + 1));
-			Args.Add(TEXT("name"), UQinglanHUDStatics::GameText(Technique->NameTextKey));
-			SlotText->SetText(FText::Format(UQinglanHUDStatics::GameText(GSkillSlotTextKey), Args));
+			// Authored data keys the display name; fall back to the convention
+			// key when a legacy/imported asset carries NAME_None instead of
+			// rendering the missing-string marker in the skill HUD.
+			FName NameKey = Technique->NameTextKey;
+			if (NameKey.IsNone())
+			{
+				NameKey = FName(*FString::Printf(TEXT("technique.%s.name"), *Technique->TechniqueId.ToString()));
+			}
+			// Readable fallback: never render the missing-string marker into
+			// the skill bar; the id with separators turned into spaces is
+			// preferable to a red placeholder and keeps the slot identifiable.
+			FText NameText = UQinglanHUDStatics::GameText(NameKey);
+			if (NameText.ToString().Contains(TEXT("MISSING STRING TABLE ENTRY")))
+			{
+				FString Pretty = Technique->TechniqueId.ToString();
+				Pretty.ReplaceInline(TEXT("_"), TEXT(" "));
+				NameText = FText::FromString(Pretty);
+			}
+			Args.Add(TEXT("name"), NameText);
+			SlotText->SetText(QinglanUIFormat(FName(GSkillSlotTextKey), Args));
 			const bool bOnCooldown = Techniques->GetCooldownRemaining(Technique->TechniqueId) > 0.f;
 			SlotText->SetRenderOpacity(bOnCooldown ? SkillCooldownOpacity : SkillReadyOpacity);
 		}

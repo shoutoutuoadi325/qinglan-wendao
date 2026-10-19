@@ -22,7 +22,7 @@ DECLARE_LOG_CATEGORY_EXTERN(LogQinglanUI, Log, All);
  * from the string table or from culture-aware FText formatting.
  */
 UCLASS()
-class UQinglanHUDStatics : public UBlueprintFunctionLibrary
+class QINGLANASCENSION_API UQinglanHUDStatics : public UBlueprintFunctionLibrary // linkage-only export for editor automation specs
 {
 	GENERATED_BODY()
 

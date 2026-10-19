@@ -1,0 +1,18 @@
+Linux Shipping package evidence (2026-10-19 wave 40: impact cue audio)
+Engine: 5.8.3 (tools/build/versions.lock)
+Command: bash tools/build/package-game.sh (BuildCookRun -build -cook -stage -pak
+-compressed -archive, platform=Linux, clientconfig=Shipping), rc=0.
+
+SHA-256
+  08c47409af6fd55c42db2c44d6a96a0d7041d21dcfc55c1f52f295fe7150f145  Binaries/Linux/QinglanAscension-Linux-Shipping
+  d9f0448e7ec55b43cb532299fb2fcacf0b71d6a110e9b6f590852c5637db133a  Content/Paks/QinglanAscension-Linux.pak
+  c9126e3550c34f2f4d4ae785ae71170067ea1542c2386105b8226d44becc80ca  Content/Paks/QinglanAscension-Linux.ucas
+  8b355e80c2ebd819cec8e8dc6692accfc000ff205d7ba42a4460e7c3b6244cd2  Content/Paks/QinglanAscension-Linux.utoc
+
+Changes since wave 39 (content hashes unchanged; binary only):
+  - Impact/strike cues play the imported sfx_hit_impact; swing/release/
+    telegraph sounds stay owned by their sword/technique/enemy paths.
+  - VFX source status comment corrected (Niagara, audio, trial presenters are
+    no longer open items; Metal backend and performance captures remain).
+
+Automation in this wave: 67/67; main journey 30/30; side quests 24/24.

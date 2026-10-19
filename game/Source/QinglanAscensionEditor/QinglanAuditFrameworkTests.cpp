@@ -4,6 +4,8 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Animation/Skeleton.h"
 #include "Engine/SkeletalMeshSocket.h"
+#include "Engine/Texture2D.h"
+#include "Materials/MaterialInstanceConstant.h"
 #include "NiagaraSystem.h"
 #include "Internationalization/StringTable.h"
 #include "Internationalization/StringTableCore.h"
@@ -2711,6 +2713,35 @@ bool FQinglanAuditSkeletonSocketContract::RunTest(const FString& Parameters)
 		TestEqual(FString::Printf(TEXT("socket %s is on the hand bone"), Spec.Socket),
 			Socket->BoneName, FName(Spec.Bone));
 	}
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// AUD-55: the hero mesh material must actually sample the imported Quaternius
+// palette texture. The visual palette/UV art pass remains art work, but the
+// data binding (MIC parent + BaseColor texture parameter) is asserted here.
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditHeroSkinBinding,
+	"Qinglan.Content.HeroSkinBinding", AuditFrameworkTestFlags)
+
+bool FQinglanAuditHeroSkinBinding::RunTest(const FString& Parameters)
+{
+	UMaterialInstanceConstant* MIC = LoadObject<UMaterialInstanceConstant>(nullptr,
+		TEXT("/Game/Qinglan/Materials/MIC_HumanCharacter"));
+	UTexture2D* Skin = LoadObject<UTexture2D>(nullptr,
+		TEXT("/Game/Qinglan/Characters/Human/T_Human_Clothed"));
+	if (!TestNotNull(TEXT("MIC_HumanCharacter loads"), MIC)
+		|| !TestNotNull(TEXT("T_Human_Clothed loads"), Skin))
+	{
+		return false;
+	}
+	TestNotNull(TEXT("MIC has a parent material"), MIC->Parent.Get());
+
+	UTexture* BaseColor = nullptr;
+	const bool bFound = MIC->GetTextureParameterValue(
+		FHashedMaterialParameterInfo(FName(TEXT("BaseColor"))), BaseColor);
+	TestTrue(TEXT("MIC binds a BaseColor texture"), bFound);
+	TestEqual(TEXT("BaseColor is the imported clothed-skin palette"), BaseColor, static_cast<UTexture*>(Skin));
 	return true;
 }
 

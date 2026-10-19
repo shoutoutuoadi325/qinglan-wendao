@@ -3,20 +3,22 @@
 // materials; every cue degrades to silhouettes at Low and replaces strobing
 // with steady glows under low-flash mode (docs/06 sections 3-4).
 //
-// AUD-42 REMAINING PRESENTATION GAPS (open):
-//  - Authored Niagara systems per cue/stage are still absent; all ground
-//    centers, safe lanes, telegraphs, releases, and impacts are engine-shape
-//    placeholders (decals where available, otherwise static meshes).
-//  - Audio assets for telegraph/impact/release are named SFX keys only; the
-//    audio bootstrap does not ship authored sounds yet.
-//  - No Metal/Low backend screenshot or GPU-capture evidence exists in code;
-//    that verification must be produced by the packaging/QA pass.
+// AUD-42 presentation status:
+//  - Authored Niagara systems (NS_Impact/NS_Telegraph/NS_Cast) are created by
+//    QinglanContentBootstrap and preferred at runtime; engine-shape decals and
+//    meshes remain the fallback and the Low/low-flash silhouette.
+//  - Authored SFX (swing, release, telegraph warn, hit impact) are imported by
+//    QinglanAudioBootstrap; impact/strike cues play the hit SFX here.
+//  - Trial storm telegraphs are presented by the trial director's own cue
+//    component (the hazard delegate has no other guaranteed listener).
+// Remaining: Metal-backend capture and target-hardware performance evidence.
 // None of these gaps may gate gameplay: every failure here logs and returns.
 #include "VFX/QinglanVFXCueComponent.h"
 
 #include "QinglanAscension.h"
 
 #include "Components/DecalComponent.h"
+#include "Core/QinglanAudioSubsystem.h"
 #include "Components/PointLightComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/GameInstance.h"
@@ -564,6 +566,20 @@ void UQinglanVFXCueComponent::PlayCue(FName CueId, const FTransform& Source, FVe
 	// AUD-42: layer the authored Niagara system over the placeholder geometry.
 	// Missing systems (pre-bootstrap) leave the static mesh exactly as before.
 	SpawnNiagaraForCue(CueId, Source, TargetPoint, Element, Intensity, Inst.Niagara);
+
+	// AUD-42: impact cues carry the authored hit SFX. Swing/release/telegraph
+	// sounds are owned by the sword, technique and enemy paths, so only
+	// strike-shaped cues play here (no double audio on a sword swing).
+	const FString CueName = CueId.ToString();
+	if (CueName.Contains(TEXT("impact"), ESearchCase::IgnoreCase)
+		|| CueName.Contains(TEXT("strike"), ESearchCase::IgnoreCase))
+	{
+		UGameInstance* Instance = GetWorld() ? GetWorld()->GetGameInstance() : nullptr;
+		if (UQinglanAudioSubsystem* Audio = Instance ? Instance->GetSubsystem<UQinglanAudioSubsystem>() : nullptr)
+		{
+			Audio->PlaySfx(FName(TEXT("sfx_hit_impact")));
+		}
+	}
 	ActiveCues.Add(Inst);
 }
 

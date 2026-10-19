@@ -22,4 +22,6 @@ private:
 	bool ImportSkeletalFBX(const FString& SourceFile, const FString& DestPath, const FString& AssetName);
 	/** Imports one FBX as a static mesh. */
 	bool ImportStaticFBX(const FString& SourceFile, const FString& DestPath, const FString& AssetName);
+	/** Imports one PNG as a Texture2D (AUD-55 hero skin). */
+	bool ImportTexturePNG(const FString& SourceFile, const FString& DestPath, const FString& AssetName);
 };

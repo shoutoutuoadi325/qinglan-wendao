@@ -679,6 +679,13 @@ void AQinglanCharacter::BeginPlay()
 			const float MeshMinZ = static_cast<float>(MeshBounds.Origin.Z - MeshBounds.BoxExtent.Z);
 			MeshComp->SetRelativeLocation(FVector(0.f, 0.f, -QinglanCapsuleHalfHeight - MeshMinZ * MeshScale));
 			MeshComp->SetRelativeRotation(FRotator(0.f, -90.f, 0.f)); // rig faces +Y in the export
+			// AUD-55: hero skin material imported from the Quaternius pack; the
+			// engine grey default read as an untextured blockout in renders.
+			if (UMaterialInterface* Skin = Cast<UMaterialInterface>(
+					FSoftObjectPath(TEXT("/Game/Qinglan/Materials/MIC_HumanCharacter.MIC_HumanCharacter")).TryLoad()))
+			{
+				MeshComp->SetMaterial(0, Skin);
+			}
 
 			MeshComp->SetAnimInstanceClass(UQinglanCharacterAnimInstance::StaticClass());
 			if (UQinglanCharacterAnimInstance* const AnimInstance =

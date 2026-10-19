@@ -10,6 +10,8 @@
 #include "Factories/FbxImportUI.h"
 #include "Factories/FbxSkeletalMeshImportData.h"
 #include "Factories/FbxStaticMeshImportData.h"
+#include "Factories/TextureFactory.h"
+#include "Engine/Texture2D.h"
 #include "HAL/FileManager.h"
 #include "Misc/Paths.h"
 
@@ -18,7 +20,7 @@ namespace
 	const FString RawRoot = TEXT("/inspire/hdd/project/qianghuaxuexi/s26044/assets-raw/quaternius/extracted");
 	const FString ContentRoot = TEXT("/Game/Qinglan");
 
-	UAssetImportTask* MakeTask(const FString& Source, const FString& DestPath, const FString& Name, UFbxImportUI* Options)
+	UAssetImportTask* MakeTask(const FString& Source, const FString& DestPath, const FString& Name, UObject* Options)
 	{
 		UAssetImportTask* Task = NewObject<UAssetImportTask>();
 		Task->Filename = Source;
@@ -61,6 +63,21 @@ int32 UQinglanMeshImportCommandlet::Main(const FString& Params)
 		else
 		{
 			UE_LOG(LogTemp, Warning, TEXT("missing skeletal source: %s"), *Src);
+		}
+	}
+
+	// --- Hero skin texture (AUD-55): the Quaternius Human pack ships its
+	// clothed skin as a PNG next to the blend file; import it so the character
+	// material instance is not left with the engine grey default.
+	{
+		const FString SkinSource = RawRoot + TEXT("/Animated Human by @Quaternius/Blend/Textures/ClothedLightSkin.png");
+		if (IFileManager::Get().FileExists(*SkinSource))
+		{
+			bOk &= ImportTexturePNG(SkinSource, TEXT("/Game/Qinglan/Characters/Human"), TEXT("T_Human_Clothed"));
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("missing human skin texture: %s"), *SkinSource);
 		}
 	}
 
@@ -133,5 +150,16 @@ bool UQinglanMeshImportCommandlet::ImportStaticFBX(const FString& SourceFile, co
 	FAssetToolsModule::GetModule().Get().ImportAssetTasks({ Task });
 	const bool bOk = Task->GetObjects().Num() > 0; // UE 5.8: ImportedObjects replaced by GetObjects()
 	UE_LOG(LogTemp, Log, TEXT("static import %s -> %d objects"), *AssetName, Task->GetObjects().Num());
+	return bOk;
+}
+
+bool UQinglanMeshImportCommandlet::ImportTexturePNG(const FString& SourceFile, const FString& DestPath, const FString& AssetName)
+{
+	UTextureFactory* Options = NewObject<UTextureFactory>(GetTransientPackage());
+	Options->NoCompression = false;
+	UAssetImportTask* Task = MakeTask(SourceFile, DestPath, AssetName, Options);
+	FAssetToolsModule::GetModule().Get().ImportAssetTasks({ Task });
+	const bool bOk = Task->GetObjects().Num() > 0;
+	UE_LOG(LogTemp, Log, TEXT("texture import %s -> %d objects"), *AssetName, Task->GetObjects().Num());
 	return bOk;
 }

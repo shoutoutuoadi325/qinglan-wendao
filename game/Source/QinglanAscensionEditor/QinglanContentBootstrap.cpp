@@ -12,9 +12,11 @@
 #include "Components/LightComponent.h" // complete ULightComponent for SetIntensity/SetLightColor
 #include "Components/SkyLightComponent.h"
 #include "Engine/DirectionalLight.h"
+#include "Components/DirectionalLightComponent.h"
 #include "Engine/EngineTypes.h"
 #include "Engine/ExponentialHeightFog.h"
 #include "Engine/SkyLight.h"
+#include "Components/SkyAtmosphereComponent.h" // ASkyAtmosphere (AUD-55 rendered sky)
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/Texture2D.h"
@@ -864,6 +866,31 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaterials()
 			bHasBaseColor ? TEXT("") : TEXT(", solid fallback: no BaseColor"));
 	}
 
+	// AUD-55: hero character material. The Quaternius Human pack ships its
+	// clothed skin texture; MeshImport imports it before this commandlet runs.
+	// The mesh is otherwise rendered with the engine grey default, which read
+	// as an untextured blockout in the packaged screenshots.
+	if (UTexture2D* Skin = LoadObject<UTexture2D>(nullptr,
+			TEXT("/Game/Qinglan/Characters/Human/T_Human_Clothed.T_Human_Clothed")))
+	{
+		UMaterialInstanceConstant* HumanMIC = AcquireMIC(TEXT("MIC_HumanCharacter"));
+		HumanMIC->Parent = Master;
+		HumanMIC->ClearParameterValuesEditorOnly();
+		HumanMIC->SetTextureParameterValueEditorOnly(
+			FMaterialParameterInfo(FName(TEXT("BaseColor"))), Skin);
+		HumanMIC->SetScalarParameterValueEditorOnly(
+			FMaterialParameterInfo(FName(TEXT("Tiling"))), 1.f);
+		HumanMIC->SetScalarParameterValueEditorOnly(
+			FMaterialParameterInfo(FName(TEXT("Roughness"))), 0.75f);
+		HumanMIC->PostEditChange();
+		bAnyOk |= SavePackage(Cast<UPackage>(HumanMIC->GetOutermost()), HumanMIC);
+		UE_LOG(LogTemp, Log, TEXT("material MIC_HumanCharacter from Quaternius clothed skin"));
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("MIC_HumanCharacter skipped: T_Human_Clothed not imported"));
+	}
+
 	UE_LOG(LogTemp, Log, TEXT("BootstrapMaterials: %d surface sets, %d textured, %d Texture2D assets"),
 		Sets.Num(), TexturedSets, ImportedTextures);
 	return bAnyOk;
@@ -1112,6 +1139,17 @@ namespace
 			Sun->GetLightComponent()->SetIntensity(SunIntensity);
 			Sun->GetLightComponent()->SetLightColor(SunTint);
 			Sun->GetLightComponent()->SetMobility(EComponentMobility::Movable);
+			// AUD-55: drive the sky atmosphere from the sun so the horizon is
+			// lit instead of rendering as a black void in the packaged build.
+			if (UDirectionalLightComponent* SunComp = Cast<UDirectionalLightComponent>(Sun->GetLightComponent()))
+			{
+				SunComp->SetAtmosphereSunLight(true);
+			}
+		}
+		ASkyAtmosphere* Atmosphere = World->SpawnActor<ASkyAtmosphere>(ASkyAtmosphere::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, p);
+		if (Atmosphere)
+		{
+			Atmosphere->SetActorLabel(TEXT("SkyAtmosphere"));
 		}
 		ASkyLight* Sky = World->SpawnActor<ASkyLight>(ASkyLight::StaticClass(), FVector(0, 0, 500), FRotator::ZeroRotator, p);
 		if (Sky)

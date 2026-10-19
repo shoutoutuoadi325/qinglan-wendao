@@ -320,6 +320,23 @@ namespace
 			: nullptr;
 	}
 
+	/** Index of the realm's Boss room, or INDEX_NONE when the template has none. */
+	int32 FindBossRoomIndex(const UQinglanRealmDataAsset* Realm)
+	{
+		if (!Realm)
+		{
+			return INDEX_NONE;
+		}
+		for (int32 RoomIndex = 0; RoomIndex < Realm->GetRoomCount(); ++RoomIndex)
+		{
+			if (Realm->GetRoomKind(RoomIndex) == EQinglanRoomKind::Boss)
+			{
+				return RoomIndex;
+			}
+		}
+		return INDEX_NONE;
+	}
+
 	/**
 	 * Unique, journal-stable banking transaction id. Repeat expeditions of the
 	 * same realm must never collide (a replayed id would silently skip the
@@ -578,22 +595,10 @@ void UQinglanRunSubsystem::CompleteCurrentRoom(FName TransactionId)
 		}
 	}
 
-	// Boss proof is earned by this exact encounter, independent of whether
-	// the player later wins, retreats, or dies. Never infer it from realm ID.
-	if (Realm->GetRoomKind(RoomIndex) == EQinglanRoomKind::Boss)
-	{
-		if (UQinglanProfileSubsystem* Profile = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQinglanProfileSubsystem>() : nullptr)
-		{
-			if (State.RealmId == FName(UQinglanEconomyLibrary::BambooRealmIdText))
-			{
-				Profile->SetCampaignFlag(FName(QinglanProgression::BambooClearedCampaignFlag));
-			}
-			else if (State.RealmId == FName(UQinglanEconomyLibrary::AshenRealmIdText))
-			{
-				Profile->SetCampaignFlag(FName(QinglanProgression::AshenClearedCampaignFlag));
-			}
-		}
-	}
+	// AUD-22: clearing the boss room commits its reward, but boss proof and the
+	// campaign flag are settlement outcomes. EndExpedition writes them only for
+	// an authoritative victory (boss cleared AND the run reached the exit), so a
+	// later defeat/retreat can never earn progression from this encounter.
 	// Blessing draft after rooms 2 and 4 (blueprint 1.4; docs/03 section 5):
 	// the roll consumes the blessings stream exactly once per draft room.
 	if (IsBlessingDraftRoom(RoomIndex))
@@ -623,15 +628,11 @@ void UQinglanRunSubsystem::EndExpedition(bool bVictory, bool bVoluntaryRetreat)
 	UQinglanProfileSubsystem* Profile = Instance ? Instance->GetSubsystem<UQinglanProfileSubsystem>() : nullptr;
 	UQinglanSaveSubsystem* Save = Instance ? Instance->GetSubsystem<UQinglanSaveSubsystem>() : nullptr;
 	const UQinglanRealmDataAsset* Realm = ResolveRealmTemplate(this, State.RealmId);
-	bool bBossRoomCompleted = false;
-	for (const int32 RoomId : State.CommittedRoomIds)
-	{
-		if (Realm && Realm->Rooms.IsValidIndex(RoomId) && Realm->GetRoomKind(RoomId) == EQinglanRoomKind::Boss)
-		{
-			bBossRoomCompleted = true;
-		}
-	}
-	if (!Profile || !Save || !Save->IsProfileSessionActive() || (bVictory && !bBossRoomCompleted))
+	// AUD-22: an authoritative victory requires both the completed boss room
+	// and standing in the realm's final (exit) room. Defeat/retreat are still
+	// allowed from anywhere and simply never qualify for boss proof.
+	const bool bAuthoritativeVictory = bVictory && CanClaimVictory();
+	if (!Profile || !Save || !Save->IsProfileSessionActive() || (bVictory && !bAuthoritativeVictory))
 	{
 		UE_LOG(LogQinglan, Warning, TEXT("Banking rejected: missing profile or unearned victory"));
 		OnBankingFailed.Broadcast();
@@ -641,7 +642,9 @@ void UQinglanRunSubsystem::EndExpedition(bool bVictory, bool bVoluntaryRetreat)
 	FQinglanInventory Banked = UQinglanEconomyLibrary::ApplyBankingMultiplier(State.UnbankedLoot, bVictory, bVoluntaryRetreat);
 	FQinglanInventory FirstClearBonus;
 	FName FirstClearId = NAME_None;
-	if (bVictory)
+	// AUD-22: first-clear rewards ride the same authoritative victory gate as
+	// the settlement itself; defeat/retreat never compute or grant them.
+	if (bAuthoritativeVictory)
 	{
 		if (!AppendRepeatMaterialPayout(State, Realm, Banked))
 		{
@@ -671,6 +674,21 @@ void UQinglanRunSubsystem::EndExpedition(bool bVictory, bool bVoluntaryRetreat)
 		return;
 	}
 
+	// AUD-22: boss proof/campaign progression is written exactly once, here,
+	// after the authoritative victory settlement committed. Defeat and retreat
+	// pass bVictory=false and therefore never reach this write.
+	if (ShouldWriteBossProof(bVictory))
+	{
+		if (State.RealmId == FName(UQinglanEconomyLibrary::BambooRealmIdText))
+		{
+			Profile->SetCampaignFlag(FName(QinglanProgression::BambooClearedCampaignFlag));
+		}
+		else if (State.RealmId == FName(UQinglanEconomyLibrary::AshenRealmIdText))
+		{
+			Profile->SetCampaignFlag(FName(QinglanProgression::AshenClearedCampaignFlag));
+		}
+	}
+
 	// Profile commit callbacks above saw an open expedition and skipped the hub
 	// autosave. Close it now, then save profile + absence of checkpoint together.
 	State.bInExpedition = false;
@@ -691,6 +709,87 @@ void UQinglanRunSubsystem::EndExpedition(bool bVictory, bool bVoluntaryRetreat)
 	// player must still get a retry/error UI (AUD-02/51), not a success claim.
 	OnExpeditionEnded.Broadcast();
 	UE_LOG(LogQinglan, Log, TEXT("Expedition ended (victory=%d voluntary=%d)"), bVictory ? 1 : 0, bVoluntaryRetreat ? 1 : 0);
+}
+
+// ---------------------------------------------------------------------------
+// AUD-22: authoritative exit / victory / retreat gates
+// ---------------------------------------------------------------------------
+
+int32 UQinglanRunSubsystem::GetBossRoomIndex() const
+{
+	const FQinglanRunState* State = FindStateFor(this);
+	if (!State || !State->bInExpedition)
+	{
+		return INDEX_NONE;
+	}
+	return FindBossRoomIndex(ResolveRealmTemplate(this, State->RealmId));
+}
+
+bool UQinglanRunSubsystem::IsBossRoomCompleted() const
+{
+	const FQinglanRunState* State = FindStateFor(this);
+	if (!State || !State->bInExpedition)
+	{
+		return false;
+	}
+	const int32 BossRoomIndex = GetBossRoomIndex();
+	return BossRoomIndex != INDEX_NONE && State->CommittedRoomIds.Contains(BossRoomIndex);
+}
+
+bool UQinglanRunSubsystem::CanClaimVictory() const
+{
+	const FQinglanRunState* State = FindStateFor(this);
+	if (!State || !State->bInExpedition)
+	{
+		return false;
+	}
+	const UQinglanRealmDataAsset* Realm = ResolveRealmTemplate(this, State->RealmId);
+	if (!Realm || Realm->GetRoomCount() <= 0)
+	{
+		return false;
+	}
+	// The exit interaction lives in the last room; a boss clear alone is not a
+	// completed expedition (the player could still die to trailing adds).
+	const int32 ExitRoomIndex = Realm->GetRoomCount() - 1;
+	return State->CurrentRoomIndex == ExitRoomIndex && IsBossRoomCompleted();
+}
+
+bool UQinglanRunSubsystem::ShouldWriteBossProof(bool bVictory) const
+{
+	// Defeat (false/false) and retreat (false/true) always land here as
+	// bVictory=false. The boss-room completion alone deliberately does not
+	// qualify: progression must be earned on the victory settlement path.
+	return bVictory && IsBossRoomCompleted();
+}
+
+bool UQinglanRunSubsystem::RequestExit()
+{
+	const FQinglanRunState* State = FindStateFor(this);
+	if (!State || !State->bInExpedition)
+	{
+		return false;
+	}
+	if (!CanClaimVictory())
+	{
+		UE_LOG(LogQinglan, Warning,
+			TEXT("Exit refused: boss room %d incomplete or room %d is not the exit"),
+			GetBossRoomIndex(), State->CurrentRoomIndex);
+		return false;
+	}
+	EndExpedition(/*bVictory=*/true, /*bVoluntaryRetreat=*/false);
+	return true;
+}
+
+bool UQinglanRunSubsystem::RequestRetreat()
+{
+	const FQinglanRunState* State = FindStateFor(this);
+	if (!State || !State->bInExpedition)
+	{
+		return false;
+	}
+	// Distinct retreat path: 70% banking, no victory, no boss proof.
+	EndExpedition(/*bVictory=*/false, /*bVoluntaryRetreat=*/true);
+	return true;
 }
 
 // ---------------------------------------------------------------------------

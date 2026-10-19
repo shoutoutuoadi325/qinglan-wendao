@@ -26,6 +26,8 @@
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
 #include "Animation/AnimSequence.h"
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
@@ -200,7 +202,22 @@ namespace
 		}
 	}
 
-	/** Nearest interactable inside the camera-aim cone (no trace; simple distance + dot). */
+	struct FQinglanInteractCandidate
+	{
+		AQinglanInteractable* Actor = nullptr;
+		float PlayerDistance = 0.f;
+		float Dot = 0.f;
+	};
+
+	/**
+	 * AUD-26: aimed interactable. All of the following must hold:
+	 *  - player -> interactable distance <= 300 cm,
+	 *  - camera -> interactable distance <= 300 cm,
+	 *  - the interactable lies inside the camera-aim cone (dot >= 0.5),
+	 *  - the camera has ECC_Visibility line of sight (player ignored).
+	 * Overlaps are resolved deterministically: closer to the player first,
+	 * then larger aim dot, then actor name as the stable tie-break.
+	 */
 	AQinglanInteractable* QinglanFindAimedInteractable(AQinglanCharacter* Self)
 	{
 		UWorld* const World = Self ? Self->GetWorld() : nullptr;
@@ -208,27 +225,79 @@ namespace
 		{
 			return nullptr;
 		}
-		const FVector AimOrigin = Self->FollowCamera ? Self->FollowCamera->GetComponentLocation() : Self->GetActorLocation();
+		const FVector PlayerLocation = Self->GetActorLocation();
+		const FVector AimOrigin = Self->FollowCamera ? Self->FollowCamera->GetComponentLocation() : PlayerLocation;
 		const FVector AimDirection = Self->FollowCamera
 			? Self->FollowCamera->GetComponentRotation().Vector()
 			: Self->GetActorForwardVector();
-		AQinglanInteractable* Best = nullptr;
-		float BestDot = QinglanInteractAimDot;
+
+		TArray<FQinglanInteractCandidate> Candidates;
 		for (TActorIterator<AQinglanInteractable> It(World); It; ++It)
 		{
-			const FVector Delta = It->GetActorLocation() - AimOrigin;
-			if (Delta.Size() > QinglanInteractRange)
+			AQinglanInteractable* const Candidate = *It;
+			const FVector TargetLocation = Candidate->GetActorLocation();
+			const float PlayerDistance = FVector::Dist(PlayerLocation, TargetLocation);
+			if (PlayerDistance > QinglanInteractRange)
 			{
 				continue;
 			}
-			const float Dot = FVector::DotProduct(AimDirection, Delta.GetSafeNormal());
-			if (Dot > BestDot)
+			const FVector CameraDelta = TargetLocation - AimOrigin;
+			if (CameraDelta.Size() > QinglanInteractRange)
 			{
-				BestDot = Dot;
-				Best = *It;
+				continue;
 			}
+			const float Dot = FVector::DotProduct(AimDirection, CameraDelta.GetSafeNormal());
+			if (Dot < QinglanInteractAimDot)
+			{
+				continue;
+			}
+			// Visibility: the interaction anchor itself has no collision, so any
+			// blocking hit between the camera and the anchor obscures it.
+			FCollisionQueryParams Params(SCENE_QUERY_STAT(QinglanInteractAimTrace), /*bTraceComplex=*/false, Self);
+			Params.AddIgnoredActor(Self);
+			FHitResult Hit;
+			const bool bBlocked = World->LineTraceSingleByChannel(Hit, AimOrigin, TargetLocation, ECC_Visibility, Params);
+			if (bBlocked && Hit.GetActor() != Candidate)
+			{
+				continue;
+			}
+			Candidates.Add({ Candidate, PlayerDistance, Dot });
 		}
-		return Best;
+
+		Candidates.Sort([](const FQinglanInteractCandidate& A, const FQinglanInteractCandidate& B)
+		{
+			if (!FMath::IsNearlyEqual(A.PlayerDistance, B.PlayerDistance))
+			{
+				return A.PlayerDistance < B.PlayerDistance; // closer to the player wins
+			}
+			if (!FMath::IsNearlyEqual(A.Dot, B.Dot))
+			{
+				return A.Dot > B.Dot; // better aim wins
+			}
+			return A.Actor->GetName() < B.Actor->GetName(); // deterministic tie-break
+		});
+		return Candidates.IsEmpty() ? nullptr : Candidates[0].Actor;
+	}
+
+	/** AUD-26: "action.interact" + the spawner's DisplayNameKey when authored. */
+	FText QinglanMakeInteractPrompt(const AQinglanInteractable* Target)
+	{
+		const FName ActionKey(TEXT("action.interact"));
+		const FText Action = UQinglanHUDStatics::HasGameText(ActionKey)
+			? UQinglanHUDStatics::GameText(ActionKey)
+			: NSLOCTEXT("Qinglan", "Interact.Action", "Interact");
+		if (!Target || Target->DisplayNameKey.IsNone()
+			|| !UQinglanHUDStatics::HasGameText(Target->DisplayNameKey))
+		{
+			return Action;
+		}
+		const FText Name = UQinglanHUDStatics::GameText(Target->DisplayNameKey);
+		if (Name.IsEmpty())
+		{
+			return Action;
+		}
+		// Ordered-format fallback pattern (no new string-table key authored).
+		return FText::Format(NSLOCTEXT("Qinglan", "Interact.Prompt", "{0}: {1}"), Action, Name);
 	}
 
 	template <typename T>
@@ -577,6 +646,13 @@ void AQinglanCharacter::BeginPlay()
 
 	// Presentation wiring: resolve the imported player rig by convention
 	// (mesh import + anim bootstrap authors these); null-safe in test worlds.
+	//
+	// AUD-44 STATUS: OPEN. This remains a single-node looping idle with montage
+	// overlays driven by UQinglanSwordComponent (cuts) and the technique
+	// executors (release CastMontage). There is no AnimBP locomotion/aim/combat
+	// state machine yet; adding one is out of scope for this repair. Editor
+	// verification: montage slot DefaultSlot, sword sockets sword_base/sword_tip,
+	// cast socket cast_source.
 	if (USkeletalMeshComponent* const MeshComp = GetMesh())
 	{
 		if (USkeletalMesh* const Mesh = Cast<USkeletalMesh>(
@@ -604,13 +680,27 @@ void AQinglanCharacter::BeginPlay()
 	if (CombatComponent)
 	{
 		CombatComponent->OnHealthChanged.AddDynamic(this, &AQinglanCharacter::HandleHealthChanged);
+		// AUD-32: accepted hits force an invulnerable-to-input hit reaction.
+		CombatComponent->OnDamageResolved.AddUniqueDynamic(this, &AQinglanCharacter::HandleDamageResolved);
 	}
 	BindStoryDelegates();
+	// AUD-27: a freshly spawned pawn (including every map travel) re-imports
+	// the profile's equipped techniques, then keeps tracking profile commits.
+	BindProfileDelegates();
+	if (TechniqueComponent)
+	{
+		TechniqueComponent->SyncLoadoutFromProfile();
+	}
 }
 
 void AQinglanCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	UnbindStoryDelegates();
+	UnbindProfileDelegates();
+	if (CombatComponent)
+	{
+		CombatComponent->OnDamageResolved.RemoveDynamic(this, &AQinglanCharacter::HandleDamageResolved);
+	}
 	if (UWorld* const World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(DefeatTravelTimer);
@@ -625,6 +715,12 @@ void AQinglanCharacter::PossessedBy(AController* NewController)
 	// Possession can precede world BeginPlay on travel flows; binding here
 	// catches a realm entry scene that begins the moment the map loads.
 	BindStoryDelegates();
+	// AUD-27: the profile may have finished loading between spawn and possession.
+	BindProfileDelegates();
+	if (TechniqueComponent)
+	{
+		TechniqueComponent->SyncLoadoutFromProfile();
+	}
 
 	APlayerController* const PC = Cast<APlayerController>(NewController);
 	if (!PC || !PC->GetLocalPlayer())
@@ -649,6 +745,17 @@ void AQinglanCharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
+	// AUD-32: paused-game-time action clock; DeltaSeconds stops while paused.
+	ActionClock += DeltaSeconds;
+
+	// Forced hit reaction ends on its own; death keeps the gate closed.
+	if (bInHitReaction && (ActionClock >= HitReactionEndsAt || (CombatComponent && !CombatComponent->IsAlive())))
+	{
+		bInHitReaction = false;
+	}
+	// A buffered dodge fires as soon as its action window opens (0.15 s max).
+	ProcessBufferedDodge();
+
 	// HUD lands on the first player-controlled tick (possession may complete
 	// after BeginPlay on dedicated-client flows; UI/QinglanHUDStatics ids).
 	if (!bHudCreated && IsPlayerControlled())
@@ -659,6 +766,10 @@ void AQinglanCharacter::Tick(float DeltaSeconds)
 
 	UpdateLockOn(DeltaSeconds);
 	UpdateCameraObstruction(DeltaSeconds);
+	if (IsPlayerControlled())
+	{
+		UpdateInteractionFocus();
+	}
 
 	if (FollowCamera) // docs/02 §2: FOV user range 65-95
 	{
@@ -774,9 +885,11 @@ void AQinglanCharacter::InputMove(const FInputActionValue& Value)
 	{
 		return;
 	}
-	if (const UQinglanDodgeComponent* const Dodge = QinglanFindComponent<UQinglanDodgeComponent>(this); Dodge && Dodge->IsDodging())
+	// AUD-32: movement is frozen while a scene choice is pending, during the
+	// forced hit reaction, and while the dodge owns the velocity.
+	if (!CanStartAction(EQinglanActionKind::Move))
 	{
-		return; // dodge owns the velocity until HandleDodgeFinished
+		return;
 	}
 
 	const FVector2D Axis = Value.Get<FVector2D>();
@@ -811,6 +924,12 @@ void AQinglanCharacter::InputSwordAttack(const FInputActionValue& /*Value*/)
 	{
 		return;
 	}
+	// AUD-32: casts (including post-release recovery) cannot be canceled by a
+	// normal attack; scene choices/hit reaction/dodge also close this gate.
+	if (!CanStartAction(EQinglanActionKind::Sword))
+	{
+		return;
+	}
 	if (UQinglanSwordComponent* const Sword = QinglanFindComponent<UQinglanSwordComponent>(this))
 	{
 		Sword->RequestAttack(); // buffering and combo-window rules live in the sword component
@@ -825,11 +944,20 @@ void AQinglanCharacter::InputDodge(const FInputActionValue& /*Value*/)
 
 void AQinglanCharacter::InputLockTarget(const FInputActionValue& /*Value*/)
 {
+	// AUD-32: scene-choice/menu/death/reaction states own the input focus.
+	if (!CanStartAction(EQinglanActionKind::LockOn))
+	{
+		return;
+	}
 	ToggleLockOn();
 }
 
 void AQinglanCharacter::InputCycleTarget(const FInputActionValue& /*Value*/)
 {
+	if (!CanStartAction(EQinglanActionKind::LockOn))
+	{
+		return;
+	}
 	CycleLockTarget();
 }
 
@@ -844,6 +972,10 @@ void AQinglanCharacter::InputTechniqueSlot(int32 Slot)
 	if (ConsumeMenuSelection(Slot))
 	{
 		return;
+	}
+	if (!CanStartAction(EQinglanActionKind::Technique))
+	{
+		return; // AUD-32: committed actions and pending choices freeze casting
 	}
 	if (TechniqueComponent)
 	{
@@ -958,57 +1090,173 @@ void AQinglanCharacter::InputPause(const FInputActionValue& /*Value*/)
 // no wall pass-through; cancel rules docs/02 §3)
 // ---------------------------------------------------------------------------
 
+// --- AUD-32: unified action priority gate ---
+
+bool AQinglanCharacter::IsActionAllowed(EQinglanActionKind Kind, const FQinglanActionGateState& State)
+{
+	// Priority: Dead > forced HitReaction > menu/scene-choice freeze.
+	if (!State.bAlive || State.bHitReaction)
+	{
+		return false;
+	}
+	if (State.bSceneChoicePending || State.bMenuOpen)
+	{
+		return false;
+	}
+
+	switch (Kind)
+	{
+	case EQinglanActionKind::Move:
+		return !State.bDodging && !State.bRooted;
+
+	case EQinglanActionKind::Sword:
+		// Committed casts (anticipation and post-release recovery) cannot be
+		// canceled by a normal attack. The sword's own state machine handles
+		// buffering/chaining; dodge and reaction are excluded above.
+		return !State.bDodging && !State.bCasting;
+
+	case EQinglanActionKind::Dodge:
+		if (State.bRooted || State.bDodging)
+		{
+			return false; // one dodge at a time; root refuses outright
+		}
+		// Dodge cancels zero-cost anticipation and the pre-hit sword windup;
+		// post-release cast recovery and the active hit window are committed.
+		if (State.bCasting)
+		{
+			return State.bCastAnticipation;
+		}
+		return !State.bSwordSwinging || State.bSwordCanDodgeCancel;
+
+	case EQinglanActionKind::Technique:
+		// Existing docs/02 §3 rule: casting may start from idle/move/attack
+		// recovery, but never from a dodge, another cast, or sword
+		// windup/active (attack recovery stays legal).
+		return !State.bDodging && !State.bCasting && !State.bSwordWindupOrActive;
+
+	case EQinglanActionKind::LockOn:
+		return true;
+
+	default:
+		return false;
+	}
+}
+
+EQinglanDodgeRequest AQinglanCharacter::EvaluateDodgeRequest(const FQinglanActionGateState& State, bool bHasStamina)
+{
+	if (!State.bAlive || State.bHitReaction || State.bSceneChoicePending
+		|| State.bMenuOpen || State.bRooted || !bHasStamina)
+	{
+		return EQinglanDodgeRequest::Reject;
+	}
+	if (IsActionAllowed(EQinglanActionKind::Dodge, State))
+	{
+		return EQinglanDodgeRequest::Start;
+	}
+	// A committed action (sword active/early recovery, post-release cast
+	// recovery, another dodge tail) blocks now but will open inside the
+	// 0.15 s buffer window if the player pressed early.
+	return EQinglanDodgeRequest::Buffer;
+}
+
+bool AQinglanCharacter::IsDodgeBufferFresh(float BufferedAtSeconds, float NowSeconds, float WindowSeconds)
+{
+	return NowSeconds >= BufferedAtSeconds && (NowSeconds - BufferedAtSeconds) <= WindowSeconds;
+}
+
+void AQinglanCharacter::GetActionGateState(FQinglanActionGateState& OutState) const
+{
+	OutState = FQinglanActionGateState();
+	OutState.bAlive = CombatComponent && CombatComponent->IsAlive();
+	OutState.bRooted = CombatComponent && CombatComponent->HasStatus(EQinglanStatus::Root);
+	OutState.bHitReaction = bInHitReaction;
+
+	if (const UQinglanDodgeComponent* const Dodge = QinglanFindComponent<UQinglanDodgeComponent>(this))
+	{
+		OutState.bDodging = Dodge->IsDodging();
+	}
+	if (TechniqueComponent)
+	{
+		OutState.bCasting = TechniqueComponent->IsCasting();
+		OutState.bCastAnticipation = TechniqueComponent->IsInAnticipation();
+		OutState.bCastRecovery = TechniqueComponent->IsInRecovery();
+	}
+	if (const UQinglanSwordComponent* const Sword = QinglanFindComponent<UQinglanSwordComponent>(this))
+	{
+		const EQinglanSwordPhase Phase = Sword->GetPhase();
+		OutState.bSwordSwinging = Phase != EQinglanSwordPhase::Idle;
+		OutState.bSwordWindupOrActive = Phase == EQinglanSwordPhase::Windup
+			|| Phase == EQinglanSwordPhase::Active;
+		OutState.bSwordActive = Phase == EQinglanSwordPhase::Active;
+		OutState.bSwordCanDodgeCancel = Sword->CanDodgeCancelNow();
+	}
+	OutState.bSceneChoicePending = PendingSceneChoices.Num() > 0;
+	OutState.bMenuOpen = EndingWidget.IsValid() && EndingWidget->IsInViewport();
+}
+
+bool AQinglanCharacter::CanStartAction(EQinglanActionKind Kind) const
+{
+	FQinglanActionGateState State;
+	GetActionGateState(State);
+	return IsActionAllowed(Kind, State);
+}
+
 bool AQinglanCharacter::CanDodge() const
 {
-	// Priority: Dead > forced HitReaction > allowed DodgeCancel > committed action
-	// > buffered input (docs/02 §3).
-	if (!CombatComponent || !CombatComponent->IsAlive())
-	{
-		return false; // Dead
-	}
-	if (CombatComponent->HasStatus(EQinglanStatus::Root))
-	{
-		return false; // rooted (docs/02 §7 Root)
-	}
-	// FIXME-CONTRACT: forced HitReaction has no query API on the scaffold components;
-	// insert the reaction gate here when one exists.
-	const UQinglanDodgeComponent* const Dodge = QinglanFindComponent<UQinglanDodgeComponent>(this);
-	if (Dodge && Dodge->IsDodging())
-	{
-		return false; // one dodge at a time
-	}
-	const UQinglanSwordComponent* const Sword = QinglanFindComponent<UQinglanSwordComponent>(this);
-	if (Sword && !Sword->CanDodgeCancelNow())
-	{
-		return false; // active hit window is committed (docs/02 §3)
-	}
-	// Casting is dodge-interruptible only before the release notify; pre-release
-	// interruption costs nothing (docs/02 §3). Post-release casts reject the dodge
-	// via the technique component's own validation on the next attempt.
-	return true;
+	return CanStartAction(EQinglanActionKind::Dodge);
 }
 
 void AQinglanCharacter::TryDodge()
+{
+	FQinglanActionGateState State;
+	GetActionGateState(State);
+	const bool bHasStamina = CombatComponent
+		&& CombatComponent->GetAttributes().Stamina + KINDA_SMALL_NUMBER >= DodgeStaminaCost;
+
+	switch (EvaluateDodgeRequest(State, bHasStamina))
+	{
+	case EQinglanDodgeRequest::Start:
+		StartDodgeNow();
+		break;
+	case EQinglanDodgeRequest::Buffer:
+		// Early press: retained for 0.15 s and fired by ProcessBufferedDodge
+		// as soon as the committed action reaches a cancellable boundary.
+		bHasBufferedDodge = true;
+		BufferedDodgeAt = ActionClock;
+		break;
+	case EQinglanDodgeRequest::Reject:
+	default:
+		break;
+	}
+}
+
+void AQinglanCharacter::StartDodgeNow()
 {
 	UQinglanDodgeComponent* const Dodge = QinglanFindComponent<UQinglanDodgeComponent>(this);
 	if (!Dodge || !CanDodge())
 	{
 		return;
 	}
-	// Stamina gate first: 25 stamina, rejected outright when insufficient (docs/02 §2).
+	// Defensive ordering: never spend stamina for a dodge the gate must reject.
+	if (TechniqueComponent && TechniqueComponent->IsCasting() && !TechniqueComponent->IsInAnticipation())
+	{
+		return; // released/recoving casts are not cancellable
+	}
+	// Stamina commits only when the dodge actually starts (buffering is free).
 	if (!CombatComponent || !CombatComponent->TrySpendStamina(DodgeStaminaCost))
 	{
 		return;
 	}
 
-	// Cancel lower-priority committed actions (docs/02 §3).
+	// Cancel lower-priority committed actions (docs/02 §3). Post-release cast
+	// recovery is not cancellable and was already excluded above/gate.
 	if (UQinglanSwordComponent* const Sword = QinglanFindComponent<UQinglanSwordComponent>(this))
 	{
 		Sword->InterruptSwing();
 	}
 	if (TechniqueComponent && TechniqueComponent->IsCasting())
 	{
-		TechniqueComponent->InterruptCast(); // pre-release only; already released is not refunded
+		TechniqueComponent->InterruptCast(); // pre-release: zero cost, never refunded
 	}
 
 	if (UCharacterMovementComponent* const Movement = GetCharacterMovement())
@@ -1018,7 +1266,39 @@ void AQinglanCharacter::TryDodge()
 		Movement->MaxWalkSpeed = DodgeDistance / DodgeDuration;
 	}
 
+	bHasBufferedDodge = false;
 	Dodge->StartDodge(QinglanComputeDodgeDirection(this), DodgeDistance, DodgeDuration, GetDodgeIFrameStart(), GetDodgeIFrameEnd());
+}
+
+void AQinglanCharacter::ProcessBufferedDodge()
+{
+	if (!bHasBufferedDodge)
+	{
+		return;
+	}
+	if (!IsDodgeBufferFresh(BufferedDodgeAt, ActionClock, DodgeInputBufferSeconds))
+	{
+		bHasBufferedDodge = false; // the 0.15 s window elapsed unused
+		return;
+	}
+
+	FQinglanActionGateState State;
+	GetActionGateState(State);
+	const bool bHasStamina = CombatComponent
+		&& CombatComponent->GetAttributes().Stamina + KINDA_SMALL_NUMBER >= DodgeStaminaCost;
+	switch (EvaluateDodgeRequest(State, bHasStamina))
+	{
+	case EQinglanDodgeRequest::Start:
+		bHasBufferedDodge = false;
+		StartDodgeNow();
+		break;
+	case EQinglanDodgeRequest::Reject:
+		bHasBufferedDodge = false; // death/reaction/menu/root: drop the press
+		break;
+	case EQinglanDodgeRequest::Buffer:
+	default:
+		break; // still inside the window, keep waiting
+	}
 }
 
 void AQinglanCharacter::HandleDodgeFinished()
@@ -1240,8 +1520,11 @@ EQinglanCombatState AQinglanCharacter::GetCombatState() const
 	{
 		return EQinglanCombatState::Dead;
 	}
-	// FIXME-CONTRACT: no scaffold API exposes a forced hit reaction; when one lands,
-	// return EQinglanCombatState::HitReaction here.
+	// AUD-32: forced hit reaction outranks every committed action.
+	if (bInHitReaction)
+	{
+		return EQinglanCombatState::HitReaction;
+	}
 	if (const UQinglanDodgeComponent* const Dodge = QinglanFindComponent<UQinglanDodgeComponent>(this); Dodge && Dodge->IsDodging())
 	{
 		return EQinglanCombatState::Dodging;
@@ -1267,6 +1550,158 @@ EQinglanCombatState AQinglanCharacter::GetCombatState() const
 // Playable-loop glue: HUD presentation, key menus, story bindings, defeat
 // (docs/dev/level-layout.md interaction contract; docs/03 sections 4-6)
 // ---------------------------------------------------------------------------
+
+AQinglanInteractable* AQinglanCharacter::GetFocusedInteractable() const
+{
+	return FocusedInteractable.Get();
+}
+
+FText AQinglanCharacter::GetInteractPromptText() const
+{
+	const AQinglanInteractable* const Focus = FocusedInteractable.Get();
+	return Focus ? QinglanMakeInteractPrompt(Focus) : FText::GetEmpty();
+}
+
+void AQinglanCharacter::UpdateInteractionFocus()
+{
+	// AUD-26: selection is recomputed every frame so the hint disappears as soon
+	// as the player/camera moves out of range or the line of sight is blocked.
+	if (bDefeatHandled || bInHitReaction)
+	{
+		FocusedInteractable = nullptr;
+		return;
+	}
+	AQinglanInteractable* const NewFocus = QinglanFindAimedInteractable(this);
+	AQinglanInteractable* const OldFocus = FocusedInteractable.Get();
+	if (NewFocus == OldFocus)
+	{
+		return;
+	}
+	FocusedInteractable = NewFocus;
+	if (!NewFocus)
+	{
+		return;
+	}
+	// Never stomp a dialogue/menu presentation with the proximity hint.
+	if (!PendingSceneChoices.IsEmpty()
+		|| (EndingWidget.IsValid() && EndingWidget->IsInViewport()))
+	{
+		return;
+	}
+	if (UGameInstance* const Instance = GetGameInstance())
+	{
+		if (const UQinglanStorySubsystem* const Story = Instance->GetSubsystem<UQinglanStorySubsystem>();
+			Story && Story->IsScenePlaying())
+		{
+			return;
+		}
+	}
+	// Localized suggestion: existing "action.interact" key plus the spawner's
+	// DisplayNameKey when the string table resolves it. Uses the established
+	// ShowGameMessage HUD channel (dialogue widget when open, on-screen text
+	// otherwise); no new localization keys are introduced.
+	ShowGameMessage(QinglanMakeInteractPrompt(NewFocus));
+}
+
+void AQinglanCharacter::HandleProfileCommitted()
+{
+	// AUD-27: every equipment/unlock commit re-imports the profile order.
+	if (TechniqueComponent)
+	{
+		TechniqueComponent->SyncLoadoutFromProfile();
+	}
+}
+
+void AQinglanCharacter::BindProfileDelegates()
+{
+	if (bProfileDelegatesBound)
+	{
+		return;
+	}
+	UGameInstance* const Instance = GetGameInstance();
+	UQinglanProfileSubsystem* const Profile = Instance ? Instance->GetSubsystem<UQinglanProfileSubsystem>() : nullptr;
+	if (!Profile)
+	{
+		return; // possession retries once the profile session exists
+	}
+	Profile->OnProfileCommitted.AddUniqueDynamic(this, &AQinglanCharacter::HandleProfileCommitted);
+	bProfileDelegatesBound = true;
+}
+
+void AQinglanCharacter::UnbindProfileDelegates()
+{
+	if (!bProfileDelegatesBound)
+	{
+		return;
+	}
+	UGameInstance* const Instance = GetGameInstance();
+	if (UQinglanProfileSubsystem* const Profile = Instance ? Instance->GetSubsystem<UQinglanProfileSubsystem>() : nullptr)
+	{
+		Profile->OnProfileCommitted.RemoveDynamic(this, &AQinglanCharacter::HandleProfileCommitted);
+	}
+	bProfileDelegatesBound = false;
+}
+
+void AQinglanCharacter::HandleDamageResolved(const FQinglanDamageEvent& Event)
+{
+	// AUD-32: the victim's own accepted hit forces a short reaction. Death is
+	// handled by HandleHealthChanged (OnHealthChanged fires first); a lethal
+	// event therefore never enters a reaction window.
+	if (Event.Target.Get() != this || bDefeatHandled)
+	{
+		return;
+	}
+	if (!CombatComponent || !CombatComponent->IsAlive())
+	{
+		return;
+	}
+	if (Event.FinalMagnitude <= 0.f && !Event.bBlockedByBarrier)
+	{
+		return;
+	}
+
+	bInHitReaction = true;
+	HitReactionEndsAt = ActionClock + FMath::Max(0.01f, HitReactionSeconds);
+	bHasBufferedDodge = false;
+
+	// A forced reaction outranks committed actions: cancel the sword and any
+	// cast (released techniques keep their committed cost).
+	if (UQinglanSwordComponent* const Sword = QinglanFindComponent<UQinglanSwordComponent>(this))
+	{
+		Sword->InterruptSwing();
+	}
+	if (TechniqueComponent && TechniqueComponent->IsCasting())
+	{
+		TechniqueComponent->InterruptCast();
+	}
+	// While no authored reaction montage exists, the action gate alone at least
+	// guarantees an immobile, unactionable window (docs/02 §3 "forced").
+	if (UCharacterMovementComponent* const Movement = GetCharacterMovement())
+	{
+		Movement->StopMovementImmediately();
+	}
+	PlayHitReactionMontage();
+	UE_LOG(LogQinglanCombat, Verbose, TEXT("Forced hit reaction for %.2fs"), HitReactionSeconds);
+}
+
+void AQinglanCharacter::PlayHitReactionMontage()
+{
+	// Convention path authored by QinglanAnimBootstrap when available. Missing
+	// animation is non-fatal: the gate above still disables every action.
+	UAnimMontage* const Montage = Cast<UAnimMontage>(
+		FSoftObjectPath(TEXT("/Game/Qinglan/Characters/Human/Montages/AM_Hit_Reaction")).TryLoad());
+	USkeletalMeshComponent* const MeshComp = GetMesh();
+	UAnimInstance* const AnimInstance = MeshComp ? MeshComp->GetAnimInstance() : nullptr;
+	if (AnimInstance && Montage)
+	{
+		AnimInstance->Montage_Play(Montage, 1.f);
+	}
+	else
+	{
+		UE_LOG(LogQinglanCombat, Verbose,
+			TEXT("Hit-reaction montage unavailable; action gate supplies the forced reaction"));
+	}
+}
 
 void AQinglanCharacter::EnsureHudCreated()
 {

@@ -17,14 +17,42 @@
 
 #include "Animation/AnimMontage.h"
 #include "Animation/AnimSequence.h"
+#include "Animation/Skeleton.h"
 #include "Abilities/QinglanTechniqueTypes.h"
+
+/**
+ * AUD-45 path contract. Each montage is its own package and its top-level
+ * object name is exactly the package's short name, e.g.
+ *   /Game/Qinglan/Characters/Human/Montages/AM_Human_SwordCut_1
+ *   object AM_Human_SwordCut_1 inside package .../AM_Human_SwordCut_1
+ * These functions are consumed by the commandlet and by automation
+ * (Qinglan.Anim.MontagePathContract); keep them in sync with the mesh import
+ * layout and UQinglanSwordComponent's fallback soft paths.
+ */
+namespace QinglanAnimBootstrapPaths
+{
+	FString MontageDirectory(const FString& Group)
+	{
+		return FString::Printf(TEXT("/Game/Qinglan/Characters/%s/Montages"), *Group);
+	}
+
+	FString MontagePackagePath(const FString& Directory, const FString& MontageName)
+	{
+		return Directory / MontageName;
+	}
+
+	FString MontageObjectPath(const FString& PackagePath, const FString& MontageName)
+	{
+		return FString::Printf(TEXT("%s.%s"), *PackagePath, *MontageName);
+	}
+}
 
 namespace
 {
 	/** Montage output root per character group (mirrors mesh import layout). */
 	FString MontageDir(const FString& Group)
 	{
-		return FString::Printf(TEXT("/Game/Qinglan/Characters/%s/Montages"), *Group);
+		return QinglanAnimBootstrapPaths::MontageDirectory(Group);
 	}
 
 	/** Case-insensitive substring match on an asset name. */
@@ -84,6 +112,50 @@ namespace
 		FAssetRegistryModule::AssetCreated(Montage);
 		return Montage;
 	}
+
+	/**
+	 * AUD-45: after saving, prove the asset can be found by its contract path and
+	 * carries the expected identity. Fails when the package/object names diverge
+	 * (the old bug created one "Montages" package for several montages), when the
+	 * skeleton is missing, or when the skeleton does not match the source take
+	 * (Monsters has multiple rigs, so this is checked per montage).
+	 */
+	bool VerifyMontageContract(const FString& Directory, const FString& MontageName,
+		const USkeleton* ExpectedSkeleton)
+	{
+		const FString PackagePath = QinglanAnimBootstrapPaths::MontagePackagePath(Directory, MontageName);
+		const FString ObjectPath = QinglanAnimBootstrapPaths::MontageObjectPath(PackagePath, MontageName);
+		UAnimMontage* Loaded = LoadObject<UAnimMontage>(nullptr, *ObjectPath);
+		if (!Loaded)
+		{
+			UE_LOG(LogTemp, Error, TEXT("AUD-45 verify: montage not loadable at %s"), *ObjectPath);
+			return false;
+		}
+		if (Loaded->GetName() != MontageName)
+		{
+			UE_LOG(LogTemp, Error, TEXT("AUD-45 verify: object name '%s' != file name '%s'"),
+				*Loaded->GetName(), *MontageName);
+			return false;
+		}
+		if (Loaded->GetOutermost()->GetName() != PackagePath)
+		{
+			UE_LOG(LogTemp, Error, TEXT("AUD-45 verify: package '%s' != expected '%s'"),
+				*Loaded->GetOutermost()->GetName(), *PackagePath);
+			return false;
+		}
+		if (Loaded->GetSkeleton() == nullptr)
+		{
+			UE_LOG(LogTemp, Error, TEXT("AUD-45 verify: montage %s has no skeleton"), *ObjectPath);
+			return false;
+		}
+		if (ExpectedSkeleton != nullptr && Loaded->GetSkeleton() != ExpectedSkeleton)
+		{
+			UE_LOG(LogTemp, Error, TEXT("AUD-45 verify: montage %s skeleton '%s' != source skeleton '%s'"),
+				*ObjectPath, *Loaded->GetSkeleton()->GetName(), *ExpectedSkeleton->GetName());
+			return false;
+		}
+		return true;
+	}
 } // namespace
 
 UQinglanAnimBootstrapCommandlet::UQinglanAnimBootstrapCommandlet()
@@ -98,7 +170,24 @@ UAnimMontage* UQinglanAnimBootstrapCommandlet::BuildComboMontage(const FString& 
 	{
 		return nullptr;
 	}
-	UPackage* Package = CreatePackage(*OutPath);
+	if (Sequence->GetSkeleton() == nullptr)
+	{
+		UE_LOG(LogTemp, Error, TEXT("AUD-45: source sequence %s has no skeleton; montage %s not built"),
+			*Sequence->GetName(), *MontageName);
+		return nullptr;
+	}
+
+	// AUD-45: OutPath is the montage *directory*; each montage gets its own full
+	// package path and its object name matches the file name. The previous code
+	// used the directory itself as the package, so several montages collided in
+	// one package and could not be loaded by their advertised paths.
+	const FString PackagePath = QinglanAnimBootstrapPaths::MontagePackagePath(OutPath, MontageName);
+	if (!FPackageName::IsValidLongPackageName(PackagePath))
+	{
+		UE_LOG(LogTemp, Error, TEXT("AUD-45: invalid montage package path '%s'"), *PackagePath);
+		return nullptr;
+	}
+	UPackage* Package = CreatePackage(*PackagePath);
 	if (Package == nullptr)
 	{
 		return nullptr;
@@ -108,6 +197,11 @@ UAnimMontage* UQinglanAnimBootstrapCommandlet::BuildComboMontage(const FString& 
 	{
 		return nullptr;
 	}
+
+	// AUD-45: explicit skeleton from the source take. Monsters can have multiple
+	// rigs, so each montage follows its own source sequence rather than a shared
+	// group-level skeleton.
+	Montage->SetSkeleton(Sequence->GetSkeleton());
 
 	// Single slot track over the whole take; montage time == sequence time.
 	const float PlayLength = FMath::Max(Sequence->GetPlayLength(), 0.01f);
@@ -138,7 +232,7 @@ UAnimMontage* UQinglanAnimBootstrapCommandlet::BuildComboMontage(const FString& 
 	AddNotify(UQinglanAnimNotify_SwordWindowOpen::StaticClass(), TEXT("QinglanSwordWindowOpen"), WindowOpenTime);
 	AddNotify(UQinglanAnimNotify_SwordWindowClosed::StaticClass(), TEXT("QinglanSwordWindowClosed"), WindowCloseTime);
 
-	return SaveMontage(Montage, OutPath / MontageName);
+	return SaveMontage(Montage, PackagePath);
 }
 
 int32 UQinglanAnimBootstrapCommandlet::Main(const FString& Params)
@@ -221,6 +315,13 @@ int32 UQinglanAnimBootstrapCommandlet::Main(const FString& Params)
 
 	// --- Build montages per group. ---
 	int32 BuiltCount = 0;
+	struct FBuiltMontageRecord
+	{
+		FString Directory;
+		FString MontageName;
+		TWeakObjectPtr<USkeleton> SourceSkeleton;
+	};
+	TArray<FBuiltMontageRecord> BuiltMontageRecords; // AUD-45 end-of-run verification
 	TMap<FName, TObjectPtr<UAnimMontage>> CastArchetypes; // player cast montage set shared by techniques
 	for (FGroupPlan& Plan : Groups)
 	{
@@ -263,6 +364,10 @@ int32 UQinglanAnimBootstrapCommandlet::Main(const FString& Params)
 			if (Montage)
 			{
 				++BuiltCount;
+				FBuiltMontageRecord& Record = BuiltMontageRecords.AddDefaulted_GetRef();
+				Record.Directory = Dir;
+				Record.MontageName = MontageName;
+				Record.SourceSkeleton = Pair.Value ? Pair.Value->GetSkeleton() : nullptr;
 				if (Plan.bPlayer && Suffix.StartsWith(TEXT("Cast")))
 				{
 					CastArchetypes.Add(Pair.Key, Montage);
@@ -320,7 +425,25 @@ int32 UQinglanAnimBootstrapCommandlet::Main(const FString& Params)
 		}
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("QinglanAnimBootstrap finished: %d montages built, %d techniques paired, ok=%d"),
-		BuiltCount, PairedCount, bOk);
+	// --- AUD-45: enumerate and verify every montage produced this run. ---
+	int32 VerifiedCount = 0;
+	for (const FBuiltMontageRecord& Record : BuiltMontageRecords)
+	{
+		if (VerifyMontageContract(Record.Directory, Record.MontageName, Record.SourceSkeleton.Get()))
+		{
+			++VerifiedCount;
+		}
+		else
+		{
+			bOk = false;
+		}
+	}
+	if (VerifiedCount != BuiltCount)
+	{
+		bOk = false;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("QinglanAnimBootstrap finished: %d montages built, %d verified, %d techniques paired, ok=%d"),
+		BuiltCount, VerifiedCount, PairedCount, bOk);
 	return bOk ? 0 : 1;
 }

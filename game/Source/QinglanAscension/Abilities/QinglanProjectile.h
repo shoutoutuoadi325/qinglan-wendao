@@ -13,9 +13,12 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Core/QinglanCoreTypes.h"
+#include "Abilities/QinglanTechniqueExecutors.h" // AUD-42 cue context retained on pooled effects
 #include "QinglanProjectile.generated.h"
 
 class USphereComponent;
+class UStaticMeshComponent;
+class UPointLightComponent;
 class UQinglanCombatComponent;
 struct FQinglanBlessingModifiers;
 
@@ -52,7 +55,7 @@ enum class EQinglanEffectMode : uint8
  * directly and cosmetic cues never gate gameplay.
  */
 UCLASS(NotBlueprintable)
-class AQinglanProjectile : public AActor
+class QINGLANASCENSION_API AQinglanProjectile : public AActor // linkage-only export for editor automation specs
 {
 	GENERATED_BODY()
 
@@ -89,6 +92,14 @@ public:
 	 *  victim set and returns to the pool when the dodge ends. */
 	void SetupWetTrail(const FQinglanCastId& InCastId, FName InTechniqueId,
 		AActor* InOwner, float InTrailRadiusCm, float InWetDurationBonus);
+
+	/** AUD-42: retain the release context so pooled impact cues still carry the
+	 *  technique identity (and can resolve the authored impact Niagara, if any). */
+	void SetCueContext(const FQinglanTechniqueCastContext& InContext);
+
+	/** AUD-42/test seam: builds the impact cue exactly as PublishImpactCue emits
+	 *  it. Public so automation can assert technique identity survives pooling. */
+	FQinglanCueEvent BuildImpactCueEvent(const FVector& Location) const;
 
 	/** Pooling contract: clears timers, victims, owner, tags, collision,
 	 *  lifetime. Called on return to pool; also safe to call repeatedly. */
@@ -129,6 +140,11 @@ protected:
 
 	/** Cosmetic impact marker; never gates or cancels gameplay. */
 	void PublishImpactCue(const FVector& Location, AActor* Victim);
+
+	/** AUD-42: creates the engine-shape placeholder body once (BeginPlay for
+	 *  spawned actors, defensively on first launch) and colours it per element. */
+	void EnsureVisualPlaceholders();
+	void RefreshVisualPresentation();
 
 private:
 	// --- Shared identity ---
@@ -178,6 +194,17 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "Qinglan")
 	TObjectPtr<USphereComponent> CollisionSphere = nullptr;
+
+	/** AUD-42 placeholder body/glow for the otherwise invisible linear shot.
+	 *  Engine basic shapes only; no collision, never a gameplay source. */
+	UPROPERTY(VisibleAnywhere, Category = "Qinglan|VFX")
+	TObjectPtr<UStaticMeshComponent> VisualMesh = nullptr;
+	UPROPERTY(VisibleAnywhere, Category = "Qinglan|VFX")
+	TObjectPtr<UPointLightComponent> VisualLight = nullptr;
+
+	/** Complete release identity for impact cues (AUD-42). Purely cosmetic. */
+	UPROPERTY()
+	FQinglanTechniqueCastContext CueContext;
 
 	friend struct FQinglanProjectilePool;
 };

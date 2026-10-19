@@ -2,7 +2,19 @@
 // Deliberately dependency-light: engine shapes + parameterized bootstrap
 // materials; every cue degrades to silhouettes at Low and replaces strobing
 // with steady glows under low-flash mode (docs/06 sections 3-4).
+//
+// AUD-42 REMAINING PRESENTATION GAPS (open):
+//  - Authored Niagara systems per cue/stage are still absent; all ground
+//    centers, safe lanes, telegraphs, releases, and impacts are engine-shape
+//    placeholders (decals where available, otherwise static meshes).
+//  - Audio assets for telegraph/impact/release are named SFX keys only; the
+//    audio bootstrap does not ship authored sounds yet.
+//  - No Metal/Low backend screenshot or GPU-capture evidence exists in code;
+//    that verification must be produced by the packaging/QA pass.
+// None of these gaps may gate gameplay: every failure here logs and returns.
 #include "VFX/QinglanVFXCueComponent.h"
+
+#include "QinglanAscension.h"
 
 #include "Components/DecalComponent.h"
 #include "Components/PointLightComponent.h"
@@ -169,6 +181,7 @@ void UQinglanVFXCueComponent::PlayTelegraph(FVector Center, float Radius, float 
 			MID->SetScalarParameterValue("Intensity", 1.f);
 		}
 	}
+	Decal->SetAbsolute(true, true, true);
 	Decal->RegisterComponent();
 
 	FCueInstance Inst;
@@ -177,6 +190,100 @@ void UQinglanVFXCueComponent::PlayTelegraph(FVector Center, float Radius, float 
 	Inst.Total = Duration;
 	Inst.BaseRadius = Radius;
 	Inst.bRing = true;
+	ActiveCues.Add(Inst);
+
+	// AUD-42: the decal alone disappears when the bootstrap material is missing
+	// or the renderer cannot draw decals (Low/Metal paths). A flat engine-shape
+	// disc keeps the ground center readable at every quality tier and in
+	// low-flash mode (no dynamic light is spawned here). Placeholder-only.
+	UStaticMesh* DiscMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cylinder"));
+	if (!DiscMesh)
+	{
+		UE_LOG(LogQinglanCombat, Warning, TEXT("Telegraph placeholder disc unavailable; decal-only telegraph"));
+		return;
+	}
+	UStaticMeshComponent* Disc = NewObject<UStaticMeshComponent>(OwnerActor);
+	Disc->SetStaticMesh(DiscMesh);
+	Disc->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Disc->SetGenerateOverlapEvents(false);
+	Disc->SetWorldLocation(Center);
+	// Cylinder primitive: radius 50 cm, height 100 cm. Flatten it into a ground
+	// disc whose X/Y radius matches the authored telegraph radius.
+	const float DiscScale = FMath::Max(Radius, 1.f) / 50.f;
+	Disc->SetWorldScale3D(FVector(DiscScale, DiscScale, 0.02f));
+	if (UMaterialInterface* Mat = GetCueMaterial(TEXT("/Game/Qinglan/Materials/M_QinglanDecalRing")))
+	{
+		Disc->SetMaterial(0, Mat);
+		if (UMaterialInstanceDynamic* MID = Disc->CreateAndSetMaterialInstanceDynamic(0))
+		{
+			MID->SetVectorParameterValue("Color", ElementColor(Element));
+			MID->SetScalarParameterValue("Intensity", 0.7f);
+		}
+	}
+	Disc->SetAbsolute(true, true, true);
+	Disc->RegisterComponent();
+
+	FCueInstance DiscInst;
+	DiscInst.Root = Disc;
+	DiscInst.Remaining = Duration;
+	DiscInst.Total = Duration;
+	DiscInst.BaseRadius = Radius;
+	DiscInst.bRing = false; // fixed ground footprint; only fades
+	ActiveCues.Add(DiscInst);
+}
+
+void UQinglanVFXCueComponent::PlaySafeLane(FVector Center, float Radius, float SafeLaneDegrees,
+	float HalfWidthDegrees, float Duration, EQinglanElement Element)
+{
+	// AUD-42 placeholder: a wedge is approximated by a stretched box laid along
+	// the safe bearing. It deliberately carries no light and no Niagara, so it
+	// reads identically at Low quality and in low-flash mode; the authoritative
+	// safe-lane value stays in the AI math (presentation never gates gameplay).
+	UWorld* World = GetWorld();
+	AActor* OwnerActor = GetOwner();
+	if (!World || !OwnerActor)
+	{
+		return;
+	}
+	UStaticMesh* BoxMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube"));
+	if (!BoxMesh)
+	{
+		UE_LOG(LogQinglanCombat, Warning, TEXT("Safe-lane placeholder mesh unavailable; telegraph remains center-only"));
+		return;
+	}
+
+	const float YawRad = FMath::DegreesToRadians(SafeLaneDegrees);
+	const FVector Direction(FMath::Cos(YawRad), FMath::Sin(YawRad), 0.f);
+	const float HalfWidthCm = Radius * FMath::Tan(FMath::DegreesToRadians(FMath::Clamp(HalfWidthDegrees, 1.f, 80.f)));
+	const FVector LaneCenter = Center + Direction * (Radius * 0.5f) + FVector(0.f, 0.f, 4.f);
+
+	UStaticMeshComponent* Lane = NewObject<UStaticMeshComponent>(OwnerActor);
+	Lane->SetStaticMesh(BoxMesh); // 100 cm cube: X = length, Y = width, Z = thickness
+	Lane->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Lane->SetGenerateOverlapEvents(false);
+	Lane->SetAbsolute(true, true, true);
+	Lane->SetWorldLocationAndRotation(LaneCenter, FRotator(0.f, SafeLaneDegrees, 0.f));
+	Lane->SetWorldScale3D(FVector(
+		FMath::Max(Radius, 1.f) / 100.f,
+		FMath::Max(HalfWidthCm * 2.f, 1.f) / 100.f,
+		0.03f));
+	if (UMaterialInterface* Mat = GetCueMaterial(TEXT("/Game/Qinglan/Materials/M_QinglanDecalRing")))
+	{
+		Lane->SetMaterial(0, Mat);
+		if (UMaterialInstanceDynamic* MID = Lane->CreateAndSetMaterialInstanceDynamic(0))
+		{
+			MID->SetVectorParameterValue("Color", ElementColor(Element));
+			MID->SetScalarParameterValue("Intensity", 0.65f);
+		}
+	}
+	Lane->RegisterComponent();
+
+	FCueInstance Inst;
+	Inst.Root = Lane;
+	Inst.Remaining = Duration;
+	Inst.Total = Duration;
+	Inst.BaseRadius = Radius;
+	Inst.bRing = false;
 	ActiveCues.Add(Inst);
 }
 

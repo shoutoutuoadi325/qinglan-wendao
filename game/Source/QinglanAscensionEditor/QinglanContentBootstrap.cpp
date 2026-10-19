@@ -843,7 +843,9 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaps()
 			{TEXT("bamboo.room_0"), FVector(0, 0, 100)},
 			{TEXT("bamboo.rooms_1_to_5"), FVector(11000, 0, 100)},
 			{TEXT("bamboo.room_1_2_guided"), FVector(5500, 0, 100)},
-			{TEXT("bamboo.room_5_safe"), FVector(27500, 0, 100)},
+			// AUD-22: the exit station lives in the final room (index 6); the
+			// victory authority requires standing there after the boss room.
+			{TEXT("bamboo.room_5_safe"), QinglanRoomLayout::RoomCenter(6) + FVector(0.f, 0.f, 100.f)},
 			{TEXT("sq.bamboo.old_bell_safe"), FVector(11000, 1500, 100)},
 			{TEXT("sq.bamboo.picnic_shelf_safe"), FVector(16500, -1500, 100)},
 			{TEXT("sq.bamboo.spillway_safe"), FVector(11000, -1500, 100)},
@@ -898,7 +900,8 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaps()
 			{TEXT("ashen.approach_1_2"), FVector(8250, 0, 100)},
 			{TEXT("ashen.archive_3"), FVector(16500, 0, 100)},
 			{TEXT("ashen.vent_4"), FVector(22000, 0, 100)},
-			{TEXT("ashen.boss_5"), FVector(27500, 0, 100)},
+			// AUD-22: ashen's exit station shares the final-room placement.
+			{TEXT("ashen.boss_5"), QinglanRoomLayout::RoomCenter(6) + FVector(0.f, 0.f, 100.f)},
 			{TEXT("ashen.release_antechamber"), FVector(27500, 2000, 100)},
 			{TEXT("sq.ashen.archive_safe"), FVector(16500, 1600, 100)},
 			{TEXT("sq.ashen.orchard_safe"), FVector(21500, 1800, 100)},

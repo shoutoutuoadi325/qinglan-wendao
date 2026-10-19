@@ -73,6 +73,11 @@ if ! run_cmdlet QinglanAscensionEditor.QinglanMeshImport; then
     rc_all=1
   fi
 fi
+# Combat montages (AUD-44/45) are rebuilt after the mesh import so each one is
+# saved to its own package with the source skeleton assigned. Existing montage
+# packages are removed first for the same partial-load reason as the widgets.
+find "$CONTENT/Characters" \( -path '*/Montages/AM_*.uasset' -o -name 'Montages.uasset' \) -delete 2>/dev/null
+run_cmdlet QinglanAscensionEditor.QinglanAnimBootstrap || rc_all=1
 run_cmdlet QinglanAscensionEditor.QinglanUIBootstrap || rc_all=1
 
 # Mandatory outputs: the commandlets can report success without producing

@@ -1030,7 +1030,21 @@ void AQinglanInteractable::ExecuteInteraction(AQinglanCharacter* Player)
 		}
 		if (Run != nullptr && Run->IsInExpedition())
 		{
-			Run->EndExpedition(/*bVictory=*/true, /*bVoluntaryRetreat=*/true); // 100% banking, docs/03 section 6
+			// AUD-22: a victory is claimable only from the last (exit) room with
+			// the realm's boss room completed. Otherwise the run is not finished
+			// and this safe-room anchor refuses to settle it; a distinct retreat
+			// is UQinglanRunSubsystem::RequestRetreat (70%, never boss proof).
+			if (!Run->RequestExit())
+			{
+				UE_LOG(LogQinglan, Warning, TEXT("Exit %s refused: boss room not cleared"), *Id);
+				if (Player)
+				{
+					// FIXME-CONTRACT: no string-table key for the sealed-exit state.
+					Player->ShowGameMessage(NSLOCTEXT("Qinglan", "Exit.BossNotCleared",
+						"The way is sealed until the realm's guardian falls."));
+				}
+				return;
+			}
 			if (Run->IsInExpedition())
 			{
 				return; // AUD-07: banking failed; do not abandon retryable loot.

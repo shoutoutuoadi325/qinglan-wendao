@@ -34,9 +34,18 @@ public:
 	UFUNCTION(BlueprintCallable)
 	void PlayCue(FName CueId, const FTransform& Source, FVector TargetPoint, EQinglanElement Element, float Intensity = 1.f);
 
-	/** Telegraph ring: persistent ground outline, min 0.9 s, survives Low quality. */
+	/** Telegraph ring: persistent ground outline, min 0.9 s, survives Low quality.
+	 *  AUD-42: also spawns a quality-independent ground-center disc so the danger
+	 *  area is readable even when the decal material or Niagara content is absent. */
 	UFUNCTION(BlueprintCallable)
 	void PlayTelegraph(FVector Center, float Radius, float Duration, EQinglanElement Element);
+
+	/** AUD-42: readable safe-lane marker for ring/ember telegraphs (placeholder
+	 *  stretched shape; no light, so Low quality and low-flash keep it visible).
+	 *  SafeLaneDegrees is the world-space yaw the mechanic treats as safe. */
+	UFUNCTION(BlueprintCallable)
+	void PlaySafeLane(FVector Center, float Radius, float SafeLaneDegrees, float HalfWidthDegrees,
+		float Duration, EQinglanElement Element);
 
 	/** Pooled reset contract: clears timers, owners, tags, lifetimes. */
 	void ResetForPool();

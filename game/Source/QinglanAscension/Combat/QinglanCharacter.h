@@ -18,6 +18,50 @@ class USpringArmComponent;
 class UCameraComponent;
 class UUserWidget;
 class UQinglanEndingWidget;
+class AQinglanInteractable;
+
+/**
+ * Action classes covered by the unified priority gate (AUD-32). Priority:
+ * Dead > forced HitReaction > menu/scene-choice freeze > permitted dodge
+ * cancel > committed action > buffered input.
+ */
+enum class EQinglanActionKind : uint8
+{
+	Move,
+	Sword,
+	Dodge,
+	Technique,
+	LockOn
+};
+
+/** Outcome of one dodge input (AUD-32: 0.15 s buffer). */
+enum class EQinglanDodgeRequest : uint8
+{
+	Start,
+	Buffer,
+	Reject
+};
+
+/**
+ * Pure action-permission snapshot. Kept plain (not reflected) so automation
+ * can exercise the exact rules the character uses at runtime.
+ */
+struct FQinglanActionGateState
+{
+	bool bAlive = true;
+	bool bRooted = false;
+	bool bHitReaction = false;
+	bool bDodging = false;
+	bool bCasting = false;
+	bool bCastAnticipation = false;
+	bool bCastRecovery = false;
+	bool bSwordSwinging = false;
+	bool bSwordWindupOrActive = false;
+	bool bSwordActive = false;
+	bool bSwordCanDodgeCancel = true;
+	bool bSceneChoicePending = false;
+	bool bMenuOpen = false;
+};
 
 /** One purchasable sanctuary-shop entry (relic or passive manual). */
 struct FQinglanShopOfferEntry
@@ -35,7 +79,7 @@ struct FQinglanShopOfferEntry
  * per-frame sphere-sweep obstruction (in fast, out slow), optional lock-on.
  */
 UCLASS()
-class AQinglanCharacter : public ACharacter
+class QINGLANASCENSION_API AQinglanCharacter : public ACharacter // linkage-only export for editor automation specs
 {
 	GENERATED_BODY()
 
@@ -58,6 +102,26 @@ public:
 	void InputInteract(const FInputActionValue& Value);
 	void InputPause(const FInputActionValue& Value);
 
+	// --- Unified action gate (AUD-32) ---
+
+	/** Pure permission query used by every action entry point. */
+	static bool IsActionAllowed(EQinglanActionKind Kind, const FQinglanActionGateState& State);
+	/**
+	 * Dodge request classification. Start when the dodge may run now; Buffer
+	 * while a committed action will become cancellable/finish inside the
+	 * 0.15 s window; Reject on death/reaction/menu/root/no stamina.
+	 */
+	static EQinglanDodgeRequest EvaluateDodgeRequest(const FQinglanActionGateState& State, bool bHasStamina);
+	/** True while a buffered dodge press is still inside [0, WindowSeconds]. */
+	static bool IsDodgeBufferFresh(float BufferedAtSeconds, float NowSeconds, float WindowSeconds);
+	/** Snapshot the live component state into the pure gate. */
+	void GetActionGateState(FQinglanActionGateState& OutState) const;
+	bool CanStartAction(EQinglanActionKind Kind) const;
+	/** True while a buffered dodge press waits for its action window to open. */
+	UFUNCTION(BlueprintPure) bool IsDodgeInputBuffered() const { return bHasBufferedDodge; }
+	/** Forced hit reaction is the highest non-death gate (AUD-32). */
+	UFUNCTION(BlueprintPure) bool IsInHitReaction() const { return bInHitReaction; }
+
 	// --- Dodge ---
 	/** Dodge: ~450 cm over 0.45 s, 25 stamina, i-frames 0.10-0.28 s, no wall pass-through. */
 	void TryDodge();
@@ -72,6 +136,14 @@ public:
 	TWeakObjectPtr<AActor> GetLockTarget() const { return LockTarget; }
 	/** Free-aim point for techniques: camera trace, then cast socket to that point. */
 	FVector GetAimPoint() const;
+	/**
+	 * AUD-26: interactable currently inside the 300 cm player + camera range,
+	 * camera cone, and unobstructed line of sight (null when none). The HUD
+	 * hint is refreshed when this selection changes.
+	 */
+	AQinglanInteractable* GetFocusedInteractable() const;
+	/** AUD-26 HUD wiring point: localized "interact" hint for the focus (empty when none). */
+	UFUNCTION(BlueprintPure) FText GetInteractPromptText() const;
 
 	UFUNCTION(BlueprintPure) UQinglanCombatComponent* GetCombat() const { return CombatComponent; }
 	UFUNCTION(BlueprintPure) UQinglanTechniqueComponent* GetTechniques() const { return TechniqueComponent; }
@@ -130,8 +202,26 @@ protected:
 
 	void UpdateLockOn(float DeltaSeconds);
 	void UpdateCameraObstruction(float DeltaSeconds);
+	/** AUD-26: refresh the aimed interactable and show its localized hint on change. */
+	void UpdateInteractionFocus();
 	/** Restores walk speed after a dodge finishes. */
 	UFUNCTION() void HandleDodgeFinished();
+
+	// --- AUD-27/32 runtime state ---
+
+	/** Executes a dodge immediately (stamina committed here, not at buffer time). */
+	void StartDodgeNow();
+	/** Fires a buffered dodge at the first frame the action gate permits it. */
+	void ProcessBufferedDodge();
+	/** AUD-27: sync runtime slots from the active profile (possession/travel/commit). */
+	UFUNCTION() void HandleProfileCommitted();
+	/** AUD-27: binds the profile's commit broadcast; safe when no profile exists yet. */
+	void BindProfileDelegates();
+	void UnbindProfileDelegates();
+	/** AUD-32: forced reaction on accepted damage; cancels committed actions. */
+	UFUNCTION() void HandleDamageResolved(const FQinglanDamageEvent& Event);
+	/** Cosmetic hit-reaction montage; the input gate is authoritative if absent. */
+	void PlayHitReactionMontage();
 
 	// --- Playable-loop glue state ---
 
@@ -184,6 +274,23 @@ protected:
 	bool bHudCreated = false;
 	bool bStoryDelegatesBound = false;
 	bool bDefeatHandled = false;
+
+	/** AUD-26 focus cache; the prompt is shown only when the selection changes. */
+	TWeakObjectPtr<AQinglanInteractable> FocusedInteractable;
+
+	// AUD-32: paused-game-time action clock (advances in Tick only).
+	float ActionClock = 0.f;
+	/** Single-slot dodge buffer (docs/02 §3: 0.15 s). */
+	bool bHasBufferedDodge = false;
+	float BufferedDodgeAt = -1.e9f;
+	/** Forced hit reaction window; no action is legal while true. */
+	bool bInHitReaction = false;
+	float HitReactionEndsAt = -1.e9f;
+	/** AUD-27: profile commit delegate binding (retried on possession). */
+	bool bProfileDelegatesBound = false;
+
+	UPROPERTY(EditDefaultsOnly) float DodgeInputBufferSeconds = 0.15f;
+	UPROPERTY(EditDefaultsOnly) float HitReactionSeconds = 0.35f;
 
 	/** Open key menus: technique keys 1-4 select while one is active (highest priority first). */
 	TArray<FQinglanSceneChoice> PendingSceneChoices;

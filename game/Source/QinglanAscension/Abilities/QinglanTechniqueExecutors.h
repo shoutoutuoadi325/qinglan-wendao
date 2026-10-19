@@ -31,6 +31,9 @@ struct FQinglanCueEvent
 	GENERATED_BODY()
 
 	UPROPERTY(BlueprintReadOnly) FQinglanCastId CastId;
+	/** AUD-42: stable technique identity travels with every cue stage (including
+	 *  pooled impact cues that no longer hold the original cast context). */
+	UPROPERTY(BlueprintReadOnly) FName TechniqueId = NAME_None;
 	UPROPERTY(BlueprintReadOnly) FTransform SourceTransform = FTransform::Identity;
 	UPROPERTY(BlueprintReadOnly) FVector TargetPoint = FVector::ZeroVector;
 	UPROPERTY(BlueprintReadOnly) EQinglanElement Element = EQinglanElement::None;

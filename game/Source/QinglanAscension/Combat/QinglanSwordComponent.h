@@ -50,7 +50,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQinglanSwordSwingEnded, int32, Com
  * Phase timers accumulate DeltaTime so paused game time freezes the combo.
  */
 UCLASS(ClassGroup = (Qinglan), meta = (BlueprintSpawnableComponent))
-class UQinglanSwordComponent : public UActorComponent
+class QINGLANASCENSION_API UQinglanSwordComponent : public UActorComponent // linkage-only export for editor automation specs
 {
 	GENERATED_BODY()
 
@@ -126,7 +126,14 @@ public:
 	/** Raw = TechniquePower * SwordBaseCoefficient * Cut.PowerMultiplier + SwordFlatDamage (docs/02 §5 form; §4 authors only the multiplier, coefficient defaults to 1). */
 	UPROPERTY(EditDefaultsOnly, Category = "Qinglan|Sword") float SwordBaseCoefficient = 1.f;
 	UPROPERTY(EditDefaultsOnly, Category = "Qinglan|Sword") float SwordFlatDamage = 0.f;
-	/** Blade sockets swept between previous and current positions (docs/02 §4). Names not authored; match the weapon rig. */
+	/**
+	 * Blade sockets sampled every active tick (docs/02 §4). AUD-44 editor
+	 * verification: the sword mesh must expose "sword_base" and "sword_tip";
+	 * when a socket is missing the component falls back to the first owned
+	 * weapon/sword-named scene component, then the owner mesh origin. The
+	 * scaffold has no dedicated weapon component or socket authoring, so this
+	 * fallback is deliberate and logged.
+	 */
 	UPROPERTY(EditDefaultsOnly, Category = "Qinglan|Sword") FName BladeStartSocketName = TEXT("sword_base");
 	UPROPERTY(EditDefaultsOnly, Category = "Qinglan|Sword") FName BladeTipSocketName = TEXT("sword_tip");
 	/** Sweep sphere radius around each blade socket (cm); not authored, keep conservative. */
@@ -137,8 +144,16 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Qinglan|Sword") TArray<TObjectPtr<UAnimMontage>> SwingMontages;
 	/**
 	 * Fallback montage paths used when SwingMontages is empty (pure-C++ pawn,
-	 * no Blueprint defaults). QinglanAnimBootstrap authors these packages;
-	 * missing assets degrade to no montage. Order mirrors Cuts (cut 1..3).
+	 * no Blueprint defaults). QinglanAnimBootstrap authors these packages with
+	 * object name == package name (AM_Human_SwordCut_1..3); missing assets
+	 * degrade to no montage with a log. Order mirrors Cuts (cut 1..3).
+	 * AUD-44 editor verification: montage slot must be DefaultSlot and the
+	 * release cast pose uses the technique CastMontage on the same rig; the
+	 * cast socket is "cast_source" (see AQinglanCharacter aim resolution).
+	 *
+	 * AUD-44 remains open: the rig is a shared AnimationSingleNode idle loop
+	 * with montage overlays, not a full AnimBP locomotion/aim/combat state
+	 * machine. No half-built state machine is left behind here.
 	 */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Qinglan|Sword")
 	TArray<FSoftObjectPath> SwingMontageSoftPaths;
@@ -157,7 +172,12 @@ private:
 	/** Consumes a buffered attack at a state boundary (combo window open / swing finished). */
 	void ConsumeBufferedInput();
 	void TickSweep();
+	/** Sweeps the segment and samples the endpoint; zero-length segments still
+	 *  sample (AUD-44: a stationary blade must not skip the hit window). */
 	void SweepSocketSegment(const FVector& From, const FVector& To);
+	/** One deduplicated sphere sample at a blade socket (used when the socket
+	 *  does not move between ticks). */
+	void SampleSocketAt(const FVector& Location);
 	void ApplyHit(AActor* Victim);
 	/** Blessings + permanent equipment sword-damage percent, resolved once per swing (docs/02 §4; docs/03 sections 4-5). */
 	float ResolveSwingSwordDamagePercent();
@@ -188,4 +208,6 @@ private:
 	int32 SwingSerialCounter = 0;
 	/** Sword-damage percent for the committed swing (blessings + relic + passives, docs/03 sections 4-5). */
 	float SwingSwordDamagePercent = 0.f;
+	/** Missing montage package paths already logged (one warning per path). */
+	TSet<FString> MissingSwingMontagePathsLogged;
 };

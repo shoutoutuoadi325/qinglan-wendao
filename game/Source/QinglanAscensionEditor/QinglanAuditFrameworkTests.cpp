@@ -2,8 +2,14 @@
 // These do not prove disk durability, save migration, or gameplay entry wiring.
 #include "Misc/AutomationTest.h"
 
+#include "Abilities/QinglanProjectile.h"
+#include "Abilities/QinglanTechniqueExecutors.h"
+#include "Abilities/QinglanTechniqueTypes.h"
+#include "Combat/QinglanCharacter.h"
 #include "Combat/QinglanCombatComponent.h"
 #include "Combat/QinglanStatusComponent.h"
+#include "Combat/QinglanSwordComponent.h"
+#include "Combat/QinglanTechniqueComponent.h"
 #include "Core/QinglanLocalizationService.h"
 #include "Core/QinglanTrialAdmission.h"
 #include "Progression/QinglanEconomyLibrary.h"
@@ -16,10 +22,21 @@
 #include "Narrative/QinglanEndingRules.h"
 #include "Narrative/QinglanStoryRuntime.h"
 #include "Persistence/QinglanProfileSnapshot.h"
+#include "Persistence/QinglanSaveGame.h"
 #include "Persistence/QinglanSaveMigration.h"
 #include "Progression/QinglanProfileSubsystem.h"
+#include "Progression/QinglanRunSubsystem.h"
 #include "Progression/QinglanProgressionTables.h"
 #include "UObject/UObjectGlobals.h"
+
+// AUD-45 path-contract helpers live in QinglanAnimBootstrap.cpp (same module).
+// Declared here because the commandlet header is intentionally frozen.
+namespace QinglanAnimBootstrapPaths
+{
+	FString MontageDirectory(const FString& Group);
+	FString MontagePackagePath(const FString& Directory, const FString& MontageName);
+	FString MontageObjectPath(const FString& PackagePath, const FString& MontageName);
+}
 
 namespace
 {
@@ -1368,6 +1385,371 @@ bool FQinglanAuditFirstLaunchLocaleOrdering::RunTest(const FString& Parameters)
 	Culture = FQinglanLocalizationService::ResolveStartupCulture(
 		/*bFirstLaunch*/ false, TEXT("fr-FR"), TEXT("en-US"), bShouldPersistDetected);
 	TestEqual(TEXT("An unsupported stored value falls back to en-US"), Culture, FString(TEXT("en-US")));
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// AUD-45: every bootstrap montage owns an independent package whose object
+// name matches the file name, and the runtime sword fallback paths use the
+// same contract. Pure path assertions, so the test does not require bootstrap
+// to run (and does not depend on the currently stale on-disk assets). The
+// skeleton half of the contract is enforced at bootstrap run time by
+// VerifyMontageContract (loadable + non-null skeleton + skeleton == source).
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditAnimMontagePathContract,
+	"Qinglan.Anim.MontagePathContract", AuditFrameworkTestFlags)
+
+bool FQinglanAuditAnimMontagePathContract::RunTest(const FString& Parameters)
+{
+	using namespace QinglanAnimBootstrapPaths;
+
+	const FString HumanDir = MontageDirectory(TEXT("Human"));
+	TestEqual(TEXT("Human montage directory follows the mesh layout"),
+		HumanDir, FString(TEXT("/Game/Qinglan/Characters/Human/Montages")));
+	const FString MonstersDir = MontageDirectory(TEXT("Monsters"));
+	TestEqual(TEXT("Monster montage directory follows the mesh layout"),
+		MonstersDir, FString(TEXT("/Game/Qinglan/Characters/Monsters/Montages")));
+
+	const FString SwordCut1(TEXT("AM_Human_SwordCut_1"));
+	const FString CutPackage = MontagePackagePath(HumanDir, SwordCut1);
+	TestEqual(TEXT("Montage package path is directory/name"),
+		CutPackage, HumanDir / SwordCut1);
+	TestTrue(TEXT("Package path is not the shared directory (AUD-45 regression)"),
+		CutPackage != HumanDir);
+	TestEqual(TEXT("Package short name matches the montage name"),
+		CutPackage.RightChop(CutPackage.Find(TEXT("/"), ESearchCase::CaseSensitive, ESearchDir::FromEnd) + 1),
+		SwordCut1);
+
+	const FString CutObject = MontageObjectPath(CutPackage, SwordCut1);
+	TestEqual(TEXT("Object path is package.object"),
+		CutObject, FString::Printf(TEXT("%s.%s"), *CutPackage, *SwordCut1));
+	TestEqual(TEXT("Object name suffix equals the montage name"),
+		CutObject.RightChop(CutObject.Find(TEXT("."), ESearchCase::CaseSensitive, ESearchDir::FromEnd) + 1),
+		SwordCut1);
+
+	// Each cut must be its own loadable package, never one shared package.
+	TSet<FString> DistinctPackages;
+	for (int32 CutIndex = 1; CutIndex <= 3; ++CutIndex)
+	{
+		const FString Name = FString::Printf(TEXT("AM_Human_SwordCut_%d"), CutIndex);
+		DistinctPackages.Add(MontagePackagePath(HumanDir, Name));
+	}
+	TestEqual(TEXT("Three cuts produce three distinct packages"), DistinctPackages.Num(), 3);
+
+	// Monster groups can carry different rigs; the contract is per-montage, so
+	// same-suffix montages across groups never share a package or object name.
+	const FString MonsterAttack = MontageObjectPath(MontagePackagePath(MonstersDir, TEXT("AM_Monsters_Attack")), TEXT("AM_Monsters_Attack"));
+	const FString HumanCut = MontageObjectPath(CutPackage, SwordCut1);
+	TestTrue(TEXT("Human and Monster montage objects are distinct"), MonsterAttack != HumanCut);
+	TestTrue(TEXT("Monster package lives in its own group directory"),
+		MontagePackagePath(MonstersDir, TEXT("AM_Monsters_Attack")).StartsWith(MonstersDir + TEXT("/")));
+	TestEqual(TEXT("Monster montage name keeps the group prefix"),
+		MontagePackagePath(MonstersDir, TEXT("AM_Monsters_Attack")),
+		FString(TEXT("/Game/Qinglan/Characters/Monsters/Montages/AM_Monsters_Attack")));
+
+	// Runtime contract: the sword component's fallback soft paths must point at
+	// exactly the object paths the bootstrap authors.
+	UQinglanSwordComponent* Sword = NewObject<UQinglanSwordComponent>(GetTransientPackage());
+	if (!TestNotNull(TEXT("Sword component"), Sword))
+	{
+		return false;
+	}
+	TestEqual(TEXT("Sword has one fallback montage per cut"), Sword->SwingMontageSoftPaths.Num(), 3);
+	for (int32 CutIndex = 0; CutIndex < Sword->SwingMontageSoftPaths.Num(); ++CutIndex)
+	{
+		const FString Name = FString::Printf(TEXT("AM_Human_SwordCut_%d"), CutIndex + 1);
+		TestEqual(*FString::Printf(TEXT("Cut %d fallback path matches the bootstrap contract"), CutIndex + 1),
+			Sword->SwingMontageSoftPaths[CutIndex].ToString(),
+			MontageObjectPath(MontagePackagePath(HumanDir, Name), Name));
+	}
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// AUD-42: pooled impact cues must retain the technique identity instead of
+// publishing an empty cast context. Constructs the cue without a world.
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditImpactContextCarriesTechnique,
+	"Qinglan.VFX.ImpactContextCarriesTechnique", AuditFrameworkTestFlags)
+
+bool FQinglanAuditImpactContextCarriesTechnique::RunTest(const FString& Parameters)
+{
+	AQinglanProjectile* Projectile = NewObject<AQinglanProjectile>(GetTransientPackage());
+	if (!TestNotNull(TEXT("Pooled projectile"), Projectile))
+	{
+		return false;
+	}
+
+	const FQinglanCastId CastId{ 42, 7 };
+	const FName TechniqueId(TEXT("ember_lance"));
+	Projectile->SetupLinear(CastId, TechniqueId, EQinglanElement::Fire,
+		/*InOwner*/ nullptr, FVector::ForwardVector, 100.f, 100.f, 10.f,
+		/*bInAppliesBurn*/ true, /*bInPiercing*/ false, 1.f, 3.f);
+
+	UQinglanTechniqueDataAsset* Technique = NewObject<UQinglanTechniqueDataAsset>(GetTransientPackage());
+	Technique->TechniqueId = TechniqueId;
+	Technique->Element = EQinglanElement::Fire;
+	FQinglanTechniqueCastContext Context;
+	Context.CastId = CastId;
+	Context.Technique = Technique;
+	Projectile->SetCueContext(Context);
+
+	const FVector ImpactPoint(120.f, -30.f, 40.f);
+	const FQinglanCueEvent Cue = Projectile->BuildImpactCueEvent(ImpactPoint);
+
+	TestEqual(TEXT("Impact cue carries the technique id"), Cue.TechniqueId, TechniqueId);
+	TestEqual(TEXT("Impact cue carries the cast serial"), Cue.CastId.Serial, 42);
+	TestEqual(TEXT("Impact cue carries the cast frame"), Cue.CastId.FrameNumber, 7);
+	TestEqual(TEXT("Impact cue carries the element"), static_cast<int32>(Cue.Element), static_cast<int32>(EQinglanElement::Fire));
+	TestEqual(TEXT("Impact cue is the docs/04 impact stage"), Cue.StageId, FName(TEXT("impact")));
+	TestEqual(TEXT("Impact cue source is the impact point"), Cue.SourceTransform.GetLocation(), ImpactPoint);
+	TestEqual(TEXT("Impact cue feature id targets the spell impact gate"),
+		Cue.FeatureId, FName(TEXT("vfx.spell.impact")));
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// AUD-22: exit/victory requires the realm boss room AND the exit room; boss
+// proof is a victory-only settlement outcome (defeat/retreat never write it).
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditExitRequiresBossClear,
+	"Qinglan.Progression.ExitRequiresBossClear", AuditFrameworkTestFlags)
+
+bool FQinglanAuditExitRequiresBossClear::RunTest(const FString& Parameters)
+{
+	UGameInstance* Owner = NewObject<UGameInstance>(GetTransientPackage());
+	UQinglanRunSubsystem* Run = NewObject<UQinglanRunSubsystem>(Owner);
+	if (!TestNotNull(TEXT("Run subsystem"), Run))
+	{
+		return false;
+	}
+
+	FQinglanCheckpoint Checkpoint;
+	Checkpoint.RealmId = FName(UQinglanEconomyLibrary::BambooRealmIdText);
+	Checkpoint.RealmSeed = 1;
+	Checkpoint.RoomIndex = 6; // exit room
+	Checkpoint.CommittedRoomIds = { 0, 1, 2, 3, 4 }; // boss (5) not cleared
+	Run->ImportCheckpoint(Checkpoint);
+
+	TestTrue(TEXT("Checkpoint resumes the expedition"), Run->IsInExpedition());
+	TestEqual(TEXT("Realm boss room index is 5"), Run->GetBossRoomIndex(), 5);
+	TestFalse(TEXT("Boss room is not completed"), Run->IsBossRoomCompleted());
+	TestFalse(TEXT("Victory is not claimable without the boss clear"), Run->CanClaimVictory());
+	TestFalse(TEXT("Exit request is rejected before the boss clear"), Run->RequestExit());
+	TestTrue(TEXT("A rejected exit leaves the run open"), Run->IsInExpedition());
+
+	// Standing in the boss room (even with its reward committed) is not an exit.
+	Checkpoint.CommittedRoomIds.Add(5);
+	Checkpoint.RoomIndex = 5;
+	Run->ImportCheckpoint(Checkpoint);
+	TestTrue(TEXT("Boss room completion is recorded"), Run->IsBossRoomCompleted());
+	TestFalse(TEXT("Boss room is not the exit room"), Run->CanClaimVictory());
+
+	// Reaching the exit after the boss clear is the authoritative victory.
+	Checkpoint.RoomIndex = 6;
+	Run->ImportCheckpoint(Checkpoint);
+	TestTrue(TEXT("Exit plus boss clear claims victory"), Run->CanClaimVictory());
+	TestFalse(TEXT("Defeat settlement never writes boss proof"), Run->ShouldWriteBossProof(false));
+	TestFalse(TEXT("Retreat settlement never writes boss proof"), Run->ShouldWriteBossProof(false));
+	TestTrue(TEXT("Victory settlement writes boss proof"), Run->ShouldWriteBossProof(true));
+	TestTrue(TEXT("Exit request is accepted after the boss clear"), Run->RequestExit());
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// AUD-32: one action-priority gate for sword/dodge/cast/lock/move.
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditActionStateGate,
+	"Qinglan.Combat.ActionStateGate", AuditFrameworkTestFlags)
+
+bool FQinglanAuditActionStateGate::RunTest(const FString& Parameters)
+{
+	// Priority: dead/reaction > menu/scene freeze > committed action > buffer.
+	FQinglanActionGateState State;
+	TestTrue(TEXT("Idle sword is allowed"), AQinglanCharacter::IsActionAllowed(EQinglanActionKind::Sword, State));
+	TestTrue(TEXT("Idle technique is allowed"), AQinglanCharacter::IsActionAllowed(EQinglanActionKind::Technique, State));
+	TestTrue(TEXT("Idle dodge starts immediately"),
+		AQinglanCharacter::EvaluateDodgeRequest(State, true) == EQinglanDodgeRequest::Start);
+
+	// Cast release/recovery: no normal attack and no second cast; dodge is
+	// blocked now but may be buffered for the recovery tail.
+	State.bCasting = true;
+	State.bCastRecovery = true;
+	TestFalse(TEXT("Sword cannot cancel cast recovery"), AQinglanCharacter::IsActionAllowed(EQinglanActionKind::Sword, State));
+	TestFalse(TEXT("Technique cannot overlap cast recovery"), AQinglanCharacter::IsActionAllowed(EQinglanActionKind::Technique, State));
+	TestTrue(TEXT("Movement remains legal during cast recovery"), AQinglanCharacter::IsActionAllowed(EQinglanActionKind::Move, State));
+	TestTrue(TEXT("Dodge during recovery is buffered"),
+		AQinglanCharacter::EvaluateDodgeRequest(State, true) == EQinglanDodgeRequest::Buffer);
+
+	// Anticipation is cancellable by a dodge and still blocks a normal attack.
+	State = FQinglanActionGateState();
+	State.bCasting = true;
+	State.bCastAnticipation = true;
+	TestFalse(TEXT("Sword cannot cancel cast anticipation"),
+		AQinglanCharacter::IsActionAllowed(EQinglanActionKind::Sword, State));
+	TestFalse(TEXT("A second cast cannot overlap anticipation"),
+		AQinglanCharacter::IsActionAllowed(EQinglanActionKind::Technique, State));
+	TestTrue(TEXT("Dodge cancels the zero-cost anticipation window"),
+		AQinglanCharacter::EvaluateDodgeRequest(State, true) == EQinglanDodgeRequest::Start);
+
+	// Scene choices freeze movement, sword, dodge, techniques, and lock-on.
+	State = FQinglanActionGateState();
+	State.bSceneChoicePending = true;
+	TestFalse(TEXT("Choice pending blocks movement"),
+		AQinglanCharacter::IsActionAllowed(EQinglanActionKind::Move, State));
+	TestFalse(TEXT("Choice pending blocks sword"),
+		AQinglanCharacter::IsActionAllowed(EQinglanActionKind::Sword, State));
+	TestFalse(TEXT("Choice pending blocks dodge"),
+		AQinglanCharacter::IsActionAllowed(EQinglanActionKind::Dodge, State));
+	TestFalse(TEXT("Choice pending blocks techniques"),
+		AQinglanCharacter::IsActionAllowed(EQinglanActionKind::Technique, State));
+	TestFalse(TEXT("Choice pending blocks lock-on"),
+		AQinglanCharacter::IsActionAllowed(EQinglanActionKind::LockOn, State));
+	TestTrue(TEXT("Choice pending rejects (never buffers) dodge"),
+		AQinglanCharacter::EvaluateDodgeRequest(State, true) == EQinglanDodgeRequest::Reject);
+
+	// Menus use the same freeze.
+	State = FQinglanActionGateState();
+	State.bMenuOpen = true;
+	TestFalse(TEXT("Open menu blocks sword"),
+		AQinglanCharacter::IsActionAllowed(EQinglanActionKind::Sword, State));
+	TestTrue(TEXT("Open menu rejects dodge"),
+		AQinglanCharacter::EvaluateDodgeRequest(State, true) == EQinglanDodgeRequest::Reject);
+
+	// Forced hit reaction outranks every action and never buffers.
+	State = FQinglanActionGateState();
+	State.bHitReaction = true;
+	for (const EQinglanActionKind Kind : { EQinglanActionKind::Move, EQinglanActionKind::Sword,
+		EQinglanActionKind::Dodge, EQinglanActionKind::Technique, EQinglanActionKind::LockOn })
+	{
+		TestFalse(*FString::Printf(TEXT("Hit reaction blocks action kind %d"), int32(Kind)),
+			AQinglanCharacter::IsActionAllowed(Kind, State));
+	}
+	TestTrue(TEXT("Hit reaction rejects dodge"),
+		AQinglanCharacter::EvaluateDodgeRequest(State, true) == EQinglanDodgeRequest::Reject);
+
+	// A committed sword active window blocks dodge/technique but the sword keeps
+	// owning its own 0.15 s attack buffer.
+	State = FQinglanActionGateState();
+	State.bSwordSwinging = true;
+	State.bSwordWindupOrActive = true;
+	State.bSwordActive = true;
+	State.bSwordCanDodgeCancel = false;
+	TestTrue(TEXT("Sword input remains legal while a swing is committed"),
+		AQinglanCharacter::IsActionAllowed(EQinglanActionKind::Sword, State));
+	TestTrue(TEXT("Active hit window buffers an early dodge"),
+		AQinglanCharacter::EvaluateDodgeRequest(State, true) == EQinglanDodgeRequest::Buffer);
+	TestFalse(TEXT("Technique cannot start inside sword active"),
+		AQinglanCharacter::IsActionAllowed(EQinglanActionKind::Technique, State));
+
+	// Windup and recovery after the cancel point may be dodge-canceled.
+	State.bSwordCanDodgeCancel = true;
+	TestTrue(TEXT("Windup/cancelable recovery starts a dodge"),
+		AQinglanCharacter::EvaluateDodgeRequest(State, true) == EQinglanDodgeRequest::Start);
+
+	// Attack recovery permits a cast (docs/02 section 3 priority).
+	State = FQinglanActionGateState();
+	State.bSwordSwinging = true;
+	State.bSwordCanDodgeCancel = true;
+	TestTrue(TEXT("Cast may start from attack recovery"),
+		AQinglanCharacter::IsActionAllowed(EQinglanActionKind::Technique, State));
+
+	// Root and missing stamina reject outright.
+	State = FQinglanActionGateState();
+	State.bRooted = true;
+	TestFalse(TEXT("Root blocks movement"), AQinglanCharacter::IsActionAllowed(EQinglanActionKind::Move, State));
+	TestTrue(TEXT("Root rejects dodge"),
+		AQinglanCharacter::EvaluateDodgeRequest(State, true) == EQinglanDodgeRequest::Reject);
+	TestTrue(TEXT("Missing stamina rejects dodge"),
+		AQinglanCharacter::EvaluateDodgeRequest(FQinglanActionGateState(), false) == EQinglanDodgeRequest::Reject);
+
+	// 0.15 s buffer window: inclusive at the boundary, expired after it.
+	TestTrue(TEXT("Buffer is fresh at the 0.15 s boundary"),
+		AQinglanCharacter::IsDodgeBufferFresh(10.f, 10.15f, 0.15f));
+	TestFalse(TEXT("Buffer expires past 0.15 s"),
+		AQinglanCharacter::IsDodgeBufferFresh(10.f, 10.151f, 0.15f));
+	TestFalse(TEXT("A press stamped in the future is not fresh"),
+		AQinglanCharacter::IsDodgeBufferFresh(10.f, 9.99f, 0.15f));
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// AUD-27: profile EquippedTechniques are imported into runtime slots 0-3.
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditLoadoutSync,
+	"Qinglan.Combat.LoadoutSync", AuditFrameworkTestFlags)
+
+bool FQinglanAuditLoadoutSync::RunTest(const FString& Parameters)
+{
+	UGameInstance* Owner = NewObject<UGameInstance>(GetTransientPackage());
+	UQinglanProfileSubsystem* Profile = NewObject<UQinglanProfileSubsystem>(Owner);
+	if (!TestNotNull(TEXT("Profile subsystem"), Profile))
+	{
+		return false;
+	}
+
+	const FName JadeId(TEXT("jade_sword_arc"));
+	const FName EmberId(TEXT("ember_lance"));
+	const FName MissingId(TEXT("missing_technique"));
+	FQinglanProfileSnapshot Snapshot;
+	Snapshot.UnlockedTechniques = { JadeId, EmberId, MissingId };
+	Snapshot.EquippedTechniques = { JadeId, EmberId };
+	Profile->ImportStateFromSave(Snapshot);
+
+	UQinglanTechniqueDataAsset* Jade = NewObject<UQinglanTechniqueDataAsset>(GetTransientPackage());
+	Jade->TechniqueId = JadeId;
+	UQinglanTechniqueDataAsset* Ember = NewObject<UQinglanTechniqueDataAsset>(GetTransientPackage());
+	Ember->TechniqueId = EmberId;
+	TArray<UQinglanTechniqueDataAsset*> Catalog;
+	Catalog.Add(Jade);
+	Catalog.Add(Ember);
+	UQinglanTechniqueComponent::SetTechniqueCatalogForTesting(Catalog);
+
+	AActor* Pawn = NewObject<AActor>(GetTransientPackage());
+	UQinglanTechniqueComponent* Techniques = NewObject<UQinglanTechniqueComponent>(Pawn);
+	if (!TestNotNull(TEXT("Technique component"), Techniques))
+	{
+		UQinglanTechniqueComponent::SetTechniqueCatalogForTesting(TArray<UQinglanTechniqueDataAsset*>());
+		return false;
+	}
+
+	TestTrue(TEXT("Profile loadout sync succeeds"), Techniques->SyncLoadoutFromProfile(Profile));
+	TArray<UQinglanTechniqueDataAsset*> Loadout = Techniques->GetLoadout();
+	TestEqual(TEXT("Two equipped techniques occupy two slots"), Loadout.Num(), 2);
+	if (Loadout.Num() == 2)
+	{
+		TestEqual(TEXT("Slot 0 follows the profile order"), Loadout[0] ? Loadout[0]->TechniqueId : NAME_None, JadeId);
+		TestEqual(TEXT("Slot 1 follows the profile order"), Loadout[1] ? Loadout[1]->TechniqueId : NAME_None, EmberId);
+	}
+
+	// An id without a DA_Tech asset logs and keeps an explicit empty slot, so
+	// later equipped techniques never shift position.
+	Snapshot.EquippedTechniques = { JadeId, MissingId, EmberId };
+	Profile->ImportStateFromSave(Snapshot);
+	TestTrue(TEXT("Sync preserves unresolved slots"), Techniques->SyncLoadoutFromProfile(Profile));
+	Loadout = Techniques->GetLoadout();
+	TestEqual(TEXT("Three equipped ids occupy three slots"), Loadout.Num(), 3);
+	if (Loadout.Num() == 3)
+	{
+		TestNotNull(TEXT("Resolved slot 0"), Loadout[0]);
+		TestNull(TEXT("Missing asset leaves slot 1 empty"), Loadout[1]);
+		TestEqual(TEXT("Later techniques keep their slot"), Loadout[2] ? Loadout[2]->TechniqueId : NAME_None, EmberId);
+	}
+
+	// Locked techniques are also refused at sync time and leave the slot empty.
+	Snapshot.UnlockedTechniques = { JadeId };
+	Snapshot.EquippedTechniques = { JadeId, EmberId };
+	Profile->ImportStateFromSave(Snapshot);
+	TestTrue(TEXT("Sync still commits resolved slots"), Techniques->SyncLoadoutFromProfile(Profile));
+	Loadout = Techniques->GetLoadout();
+	TestEqual(TEXT("Locked technique keeps the slot count"), Loadout.Num(), 2);
+	if (Loadout.Num() == 2)
+	{
+		TestNotNull(TEXT("Unlocked technique resolves"), Loadout[0]);
+		TestNull(TEXT("Locked technique leaves an empty slot"), Loadout[1]);
+	}
+
+	UQinglanTechniqueComponent::SetTechniqueCatalogForTesting(TArray<UQinglanTechniqueDataAsset*>());
 	return true;
 }
 #endif // WITH_DEV_AUTOMATION_TESTS

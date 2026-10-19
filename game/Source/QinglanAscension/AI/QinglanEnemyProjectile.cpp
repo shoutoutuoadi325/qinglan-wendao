@@ -8,9 +8,12 @@
 #include "Combat/QinglanCharacter.h"
 #include "Combat/QinglanCombatComponent.h"
 #include "Components/SphereComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
+#include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "GameFramework/ProjectileMovementComponent.h"
+#include "Materials/MaterialInterface.h"
 
 namespace
 {
@@ -40,8 +43,47 @@ AQinglanEnemyProjectile::AQinglanEnemyProjectile()
 	Movement->bInitialVelocityInLocalSpace = false;
 	Movement->bShouldBounce = false;
 
+	// AUD-42: previously the shot was only a collision sphere with no visible
+	// body. This engine-shape placeholder travels with the projectile; it has no
+	// collision and never participates in the overlap damage path.
+	Visual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Visual"));
+	Visual->SetupAttachment(CollisionSphere);
+	Visual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Visual->SetGenerateOverlapEvents(false);
+	Visual->SetRelativeScale3D(FVector(0.3f, 0.3f, 0.6f));
+	// Engine cone points along local +Z; bRotationFollowsVelocity aligns the
+	// actor's +X with the velocity, so pitch it to point the tip forward.
+	Visual->SetRelativeRotation(FRotator(-90.f, 0.f, 0.f));
+
 	SetActorHiddenInGame(true);
 	SetActorEnableCollision(false);
+}
+
+void AQinglanEnemyProjectile::BeginPlay()
+{
+	Super::BeginPlay();
+	// Assets are resolved here rather than in the constructor so CDO creation
+	// never loads content. Missing meshes only log; flight/damage are unchanged.
+	if (Visual && Visual->GetStaticMesh() == nullptr)
+	{
+		UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cone"));
+		if (!Mesh)
+		{
+			Mesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Sphere"));
+		}
+		Visual->SetStaticMesh(Mesh);
+		if (!Mesh)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Enemy projectile placeholder mesh missing; flying without a visible body"));
+		}
+	}
+	if (Visual)
+	{
+		if (UMaterialInterface* Material = LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/EngineMaterials/DefaultMaterial")))
+		{
+			Visual->SetMaterial(0, Material);
+		}
+	}
 }
 
 void AQinglanEnemyProjectile::LaunchFrom(AQinglanEnemyCharacter* InOwner, const FVector& Direction,
@@ -59,6 +101,10 @@ void AQinglanEnemyProjectile::LaunchFrom(AQinglanEnemyCharacter* InOwner, const 
 
 	SetActorHiddenInGame(false);
 	SetActorEnableCollision(true);
+	if (Visual)
+	{
+		Visual->SetVisibility(true, true);
+	}
 	CollisionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	if (InOwner)
 	{

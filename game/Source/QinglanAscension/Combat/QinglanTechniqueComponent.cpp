@@ -20,6 +20,8 @@
 #include "Progression/QinglanProfileSubsystem.h"
 #include "Progression/QinglanRunSubsystem.h"
 #include "QinglanAscension.h"
+#include "UObject/SoftObjectPath.h"
+#include "UObject/StrongObjectPtr.h"
 #include "UnrealClient.h" // GFrameNumber
 
 namespace
@@ -60,6 +62,15 @@ namespace
 	{
 		return FMath::Max(0.f, Technique->CooldownSeconds * (1.f + Blessings.TechniqueCooldownPercent / 100.f));
 	}
+
+#if WITH_DEV_AUTOMATION_TESTS
+	/** Transient catalog injected by automation tests (AUD-27). */
+	TArray<TStrongObjectPtr<UQinglanTechniqueDataAsset>>& TechniqueCatalogForTesting()
+	{
+		static TArray<TStrongObjectPtr<UQinglanTechniqueDataAsset>> Catalog;
+		return Catalog;
+	}
+#endif
 
 	/** Character-state gating: casting may start from idle/move/attack
 	 *  recovery, never from a committed attack, dodge, forced reaction, or
@@ -171,7 +182,11 @@ bool UQinglanTechniqueComponent::TryCast(int32 Slot)
 	}
 	if (const AQinglanCharacter* Character = Cast<AQinglanCharacter>(Owner))
 	{
-		if (IsCastBlockedByState(Character->GetCombatState()))
+		// AUD-32: the unified action gate owns mutual exclusion (cast recovery,
+		// committed sword phases, dodge, hit reaction, open scene choices). The
+		// state check stays as a second, explicit defense for other owners.
+		if (!Character->CanStartAction(EQinglanActionKind::Technique)
+			|| IsCastBlockedByState(Character->GetCombatState()))
 		{
 			FailValidation();
 			return false;
@@ -333,6 +348,142 @@ bool UQinglanTechniqueComponent::SetLoadout(const TArray<UQinglanTechniqueDataAs
 		Loadout.Add(Technique);
 	}
 	return true;
+}
+
+// --- AUD-27: profile -> runtime loadout -----------------------------------
+
+#if WITH_DEV_AUTOMATION_TESTS
+void UQinglanTechniqueComponent::SetTechniqueCatalogForTesting(const TArray<UQinglanTechniqueDataAsset*>& Assets)
+{
+	TArray<TStrongObjectPtr<UQinglanTechniqueDataAsset>>& Catalog = TechniqueCatalogForTesting();
+	Catalog.Reset();
+	for (UQinglanTechniqueDataAsset* Asset : Assets)
+	{
+		if (Asset)
+		{
+			Catalog.Emplace(Asset);
+		}
+	}
+}
+#endif
+
+UQinglanTechniqueDataAsset* UQinglanTechniqueComponent::ResolveTechniqueById(FName TechniqueId) const
+{
+	if (TechniqueId.IsNone())
+	{
+		return nullptr;
+	}
+#if WITH_DEV_AUTOMATION_TESTS
+	for (const TStrongObjectPtr<UQinglanTechniqueDataAsset>& Entry : TechniqueCatalogForTesting())
+	{
+		if (Entry.IsValid() && Entry->TechniqueId == TechniqueId)
+		{
+			return Entry.Get();
+		}
+	}
+#endif
+	// Authored convention (QinglanDataImportCommandlet):
+	// /Game/Qinglan/Data/Techniques/DA_Tech_<id>.
+	const FString AssetPath = FString::Printf(TEXT("/Game/Qinglan/Data/Techniques/DA_Tech_%s"),
+		*TechniqueId.ToString());
+	UObject* Loaded = FSoftObjectPath(*AssetPath).TryLoad();
+	return Cast<UQinglanTechniqueDataAsset>(Loaded);
+}
+
+bool UQinglanTechniqueComponent::ApplyEquippedTechniqueIds(const TArray<FName>& TechniqueIds,
+	const UQinglanProfileSubsystem* Profile)
+{
+	// A cast owns the component until its recovery ends; a loadout swap cannot
+	// interrupt it (docs/03 section 3).
+	if (CurrentCastId.IsValid())
+	{
+		UE_LOG(LogQinglanCombat, Warning, TEXT("Loadout sync rejected: a cast is in flight"));
+		return false;
+	}
+
+	// Slots 0-3 mirror the profile's equipped order. Unresolvable entries stay
+	// as explicit empty slots so later techniques never shift position.
+	TArray<UQinglanTechniqueDataAsset*> Resolved;
+	Resolved.Reserve(FMath::Min(TechniqueIds.Num(), KLoadoutSlotCount));
+	TSet<FName> SeenIds;
+	for (int32 Slot = 0; Slot < TechniqueIds.Num() && Slot < KLoadoutSlotCount; ++Slot)
+	{
+		const FName TechniqueId = TechniqueIds[Slot];
+		UQinglanTechniqueDataAsset* Technique = ResolveTechniqueById(TechniqueId);
+		if (!Technique)
+		{
+			UE_LOG(LogQinglanCombat, Warning,
+				TEXT("Loadout sync: technique '%s' has no data asset; slot %d stays empty"),
+				*TechniqueId.ToString(), Slot);
+			Resolved.Add(nullptr);
+			continue;
+		}
+		if (SeenIds.Contains(Technique->TechniqueId))
+		{
+			UE_LOG(LogQinglanCombat, Warning,
+				TEXT("Loadout sync: duplicate technique '%s'; slot %d stays empty"),
+				*Technique->TechniqueId.ToString(), Slot);
+			Resolved.Add(nullptr);
+			continue;
+		}
+		if (Profile && !Profile->IsTechniqueUnlocked(Technique->TechniqueId))
+		{
+			UE_LOG(LogQinglanCombat, Warning,
+				TEXT("Loadout sync: locked technique '%s'; slot %d stays empty"),
+				*Technique->TechniqueId.ToString(), Slot);
+			Resolved.Add(nullptr);
+			continue;
+		}
+		SeenIds.Add(Technique->TechniqueId);
+		Resolved.Add(Technique);
+	}
+
+	// Cooldowns survive equipment changes, but a slot whose technique would be
+	// replaced or removed while that technique is still cooling cannot be
+	// overwritten (shorter arrays included, so removals are checked too).
+	const int32 CheckedSlots = FMath::Max(Loadout.Num(), Resolved.Num());
+	for (int32 Slot = 0; Slot < CheckedSlots; ++Slot)
+	{
+		UQinglanTechniqueDataAsset* Previous = Loadout.IsValidIndex(Slot) ? Loadout[Slot].Get() : nullptr;
+		UQinglanTechniqueDataAsset* Next = Resolved.IsValidIndex(Slot) ? Resolved[Slot] : nullptr;
+		if (Previous != Next && Previous
+			&& GetCooldownRemaining(Previous->TechniqueId) > 0.f)
+		{
+			UE_LOG(LogQinglanCombat, Warning,
+				TEXT("Loadout sync rejected: slot %d technique '%s' is cooling down"),
+				Slot, *Previous->TechniqueId.ToString());
+			return false;
+		}
+	}
+
+	Loadout.Reset(Resolved.Num());
+	for (UQinglanTechniqueDataAsset* Technique : Resolved)
+	{
+		Loadout.Add(Technique);
+	}
+	// CooldownEndsAt is intentionally untouched (docs/03 section 3).
+	return true;
+}
+
+bool UQinglanTechniqueComponent::SyncLoadoutFromProfile(UQinglanProfileSubsystem* ProfileOverride)
+{
+	UQinglanProfileSubsystem* Profile = ProfileOverride;
+	if (!Profile)
+	{
+		if (UWorld* World = GetWorld())
+		{
+			if (UGameInstance* GameInstance = World->GetGameInstance())
+			{
+				Profile = GameInstance->GetSubsystem<UQinglanProfileSubsystem>();
+			}
+		}
+	}
+	if (!Profile)
+	{
+		UE_LOG(LogQinglanCombat, Verbose, TEXT("Loadout sync skipped: no active profile"));
+		return false;
+	}
+	return ApplyEquippedTechniqueIds(Profile->GetEquippedTechniques(), Profile);
 }
 
 void UQinglanTechniqueComponent::TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)

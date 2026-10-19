@@ -40,8 +40,43 @@ public:
 	UFUNCTION(BlueprintCallable) bool EnterRoom(int32 RoomIndex);
 	/** Called by the encounter director when all room enemies are dead. */
 	UFUNCTION(BlueprintCallable) void CompleteCurrentRoom(FName TransactionId);
-	/** Exit-shrine banking; multiplier from outcome type (1.0 / 0.7 / 0.5). */
+	/**
+	 * Exit-shrine banking; multiplier from outcome type (1.0 / 0.7 / 0.5).
+	 * A victory is authoritative only when CanClaimVictory() passes (the run is
+	 * standing in the realm's last room and the boss room was completed); any
+	 * other victory request is rejected with OnBankingFailed.
+	 */
 	UFUNCTION(BlueprintCallable) void EndExpedition(bool bVictory, bool bVoluntaryRetreat);
+
+	/** Index of the realm's Boss room; INDEX_NONE when no realm is loaded (AUD-22). */
+	UFUNCTION(BlueprintPure) int32 GetBossRoomIndex() const;
+	/** True when this expedition committed its realm's boss room (AUD-22). */
+	UFUNCTION(BlueprintPure) bool IsBossRoomCompleted() const;
+	/**
+	 * The authoritative victory gate (AUD-22): current room is the last room
+	 * (the safe exit) AND the boss room is committed. Victory banking, first-
+	 * clear rewards, and boss proof are all keyed off this.
+	 */
+	UFUNCTION(BlueprintPure) bool CanClaimVictory() const;
+	/**
+	 * Settlement policy query: boss proof/campaign flags are written only for
+	 * a victory whose boss room was actually completed. Defeat and retreat are
+	 * always false, even if the boss was cleared before the run ended.
+	 */
+	UFUNCTION(BlueprintPure) bool ShouldWriteBossProof(bool bVictory) const;
+	/**
+	 * Safe-room exit request. Validates the victory gate, then banks at 100%.
+	 * Returns false (and leaves the expedition open) when the gate fails.
+	 * True means the settlement was accepted; a banking failure still leaves
+	 * IsInExpedition() true and loot retryable (AUD-07).
+	 */
+	UFUNCTION(BlueprintCallable) bool RequestExit();
+	/**
+	 * Distinct voluntary retreat: banks the current run loot at the 70%
+	 * retreat ratio and never writes boss proof/campaign flags (AUD-22).
+	 * Returns true when the retreat settlement was accepted.
+	 */
+	UFUNCTION(BlueprintCallable) bool RequestRetreat();
 	UFUNCTION(BlueprintPure) bool IsInExpedition() const;
 	UFUNCTION(BlueprintPure) int32 GetCurrentRoomIndex() const;
 	UFUNCTION(BlueprintPure) EQinglanRoomKind GetCurrentRoomKind() const;

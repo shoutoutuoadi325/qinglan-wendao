@@ -8,6 +8,7 @@
 #include "QinglanEnemyCharacter.generated.h"
 
 class UQinglanStatusComponent;
+class UQinglanVFXCueComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQinglanEnemyDied, AQinglanEnemyCharacter*, Enemy, FName, EnemyId);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQinglanEnemyTelegraph, AQinglanEnemyCharacter*, Enemy, float, Duration);
@@ -28,6 +29,7 @@ class AQinglanEnemyCharacter : public ACharacter
 public:
 	AQinglanEnemyCharacter();
 
+	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual float TakeDamage(float Damage, const struct FDamageEvent& DamageEvent, AController* EventInstigator, AActor* DamageCauser) override;
 
@@ -47,6 +49,11 @@ public:
 
 	UPROPERTY() UQinglanCombatComponent* EnemyCombat = nullptr;
 	UPROPERTY() UQinglanStatusComponent* EnemyStatus = nullptr;
+	/** AUD-42: presentation subscriber for this enemy's own telegraph broadcasts.
+	 *  Components are placeholder geometry (see QinglanVFXCueComponent); the
+	 *  gameplay warning/timing never depends on them. */
+	UPROPERTY(VisibleAnywhere, Category = "Qinglan|VFX")
+	TObjectPtr<UQinglanVFXCueComponent> VFXCues = nullptr;
 
 	UPROPERTY(BlueprintAssignable) FQinglanEnemyDied OnDied;
 	UPROPERTY(BlueprintAssignable) FQinglanEnemyTelegraph OnTelegraph;
@@ -67,6 +74,15 @@ protected:
 	void UpdateAttack(float DeltaSeconds);
 	/** Ashen Guardian phase-two ember volley producer (AUD-41). */
 	void UpdatePhaseTwoEmbers(float DeltaSeconds);
+
+	// AUD-42: telegraph presentation subscribers. Every telegraph broadcast now
+	// has at least one listener (the enemy's own cue component), which draws a
+	// ground-center marker and, for ember volleys, the safe-lane wedge. These
+	// handlers only log/spawn cosmetics and never alter attack state.
+	UFUNCTION()
+	void HandleTelegraphPresented(AQinglanEnemyCharacter* Enemy, float Duration);
+	UFUNCTION()
+	void HandleEmberVolleyTelegraphPresented(AQinglanEnemyCharacter* Enemy, float SafeLaneDegrees, float WarningSeconds);
 
 	/**
 	 * AUD-28: every accepted hit resolved by the combat authority arrives here

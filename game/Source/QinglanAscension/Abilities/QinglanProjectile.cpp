@@ -5,9 +5,13 @@
 #include "QinglanAscension.h" // LogQinglanCombat
 #include "Combat/QinglanCombatComponent.h"
 #include "Combat/QinglanDodgeComponent.h"
+#include "Components/PointLightComponent.h"
 #include "Components/SphereComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Engine/OverlapResult.h" // FOverlapResult full type (UE 5.8 split from EngineTypes)
+#include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "Materials/MaterialInterface.h"
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
 
@@ -106,14 +110,75 @@ AQinglanProjectile::AQinglanProjectile()
 	CollisionSphere->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	CollisionSphere->SetGenerateOverlapEvents(false);
 	RootComponent = CollisionSphere;
+
+	// AUD-42 placeholder body: the shot previously had no visible representation
+	// at all. Components are created here (assets are loaded in BeginPlay, never
+	// in the constructor/CDO), and collision stays disabled so presentation can
+	// never alter the CPU-authoritative sweep.
+	VisualMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VisualMesh"));
+	VisualMesh->SetupAttachment(CollisionSphere);
+	VisualMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	VisualMesh->SetGenerateOverlapEvents(false);
+	VisualMesh->SetRelativeScale3D(FVector(0.35f));
+
+	VisualLight = CreateDefaultSubobject<UPointLightComponent>(TEXT("VisualLight"));
+	VisualLight->SetupAttachment(CollisionSphere);
+	VisualLight->SetIntensity(1200.f);
+	VisualLight->SetAttenuationRadius(300.f);
+	VisualLight->SetCastShadows(false);
 }
 
 void AQinglanProjectile::BeginPlay()
 {
 	Super::BeginPlay();
+	EnsureVisualPlaceholders();
 	SetActorHiddenInGame(true);
 	SetActorEnableCollision(false);
 	SetActorTickEnabled(false);
+}
+
+void AQinglanProjectile::EnsureVisualPlaceholders()
+{
+	// Engine basic shapes are always cooked; a missing asset only logs and the
+	// cue remains logical (no gameplay dependency, docs/05 section 4).
+	if (VisualMesh && VisualMesh->GetStaticMesh() == nullptr)
+	{
+		UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Sphere"));
+		VisualMesh->SetStaticMesh(Mesh);
+		if (!Mesh)
+		{
+			UE_LOG(LogQinglanCombat, Warning, TEXT("Projectile placeholder mesh missing; continuing without a body"));
+		}
+	}
+	if (VisualMesh)
+	{
+		if (UMaterialInterface* Material = LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/EngineMaterials/DefaultMaterial")))
+		{
+			VisualMesh->SetMaterial(0, Material);
+		}
+		VisualMesh->SetVisibility(true, true);
+	}
+	if (VisualLight)
+	{
+		VisualLight->SetVisibility(true, true);
+	}
+}
+
+void AQinglanProjectile::RefreshVisualPresentation()
+{
+	// Element colour is cosmetic; UPointLightComponent accepts a linear colour.
+	const FLinearColor Color =
+		Element == EQinglanElement::Fire ? FLinearColor(1.f, 0.35f, 0.1f) :
+		Element == EQinglanElement::Water ? FLinearColor(0.3f, 0.6f, 1.f) :
+		Element == EQinglanElement::Wood ? FLinearColor(0.4f, 0.9f, 0.5f) :
+		Element == EQinglanElement::Lightning ? FLinearColor(0.8f, 0.7f, 1.f) :
+		Element == EQinglanElement::Earth ? FLinearColor(0.9f, 0.75f, 0.4f) :
+		Element == EQinglanElement::Metal ? FLinearColor(0.75f, 0.95f, 1.f) :
+		FLinearColor::White;
+	if (VisualLight)
+	{
+		VisualLight->SetLightColor(Color);
+	}
 }
 
 void AQinglanProjectile::Tick(float DeltaSeconds)
@@ -182,6 +247,8 @@ void AQinglanProjectile::SetupLinear(const FQinglanCastId& InCastId, FName InTec
 	BurnDurationSeconds = FMath::Max(0.f, InBurnDurationSeconds);
 
 	bActive = true;
+	EnsureVisualPlaceholders();
+	RefreshVisualPresentation();
 	SetActorHiddenInGame(false);
 	SetActorTickEnabled(true);
 	if (InOwner)
@@ -284,6 +351,30 @@ void AQinglanProjectile::SetupWetTrail(const FQinglanCastId& InCastId, FName InT
 	}
 }
 
+void AQinglanProjectile::SetCueContext(const FQinglanTechniqueCastContext& InContext)
+{
+	// AUD-42: the old impact path published an empty cast context, losing the
+	// technique id and the authored impact system. Keep the complete release
+	// identity; it is cosmetic-only state and is cleared by ResetForPool.
+	CueContext = InContext;
+}
+
+FQinglanCueEvent AQinglanProjectile::BuildImpactCueEvent(const FVector& Location) const
+{
+	// Pure construction (no world access) so automation can assert that the
+	// technique identity survives the pooled delivery path (AUD-42).
+	FQinglanCueEvent Cue;
+	Cue.CastId = CastId;
+	Cue.TechniqueId = TechniqueId;
+	Cue.SourceTransform.SetLocation(Location);
+	Cue.TargetPoint = Location;
+	Cue.Element = Element;
+	Cue.Intensity = 1.f;
+	Cue.StageId = FName("impact"); // docs/04 five-stage contract
+	Cue.FeatureId = FName("vfx.spell.impact");
+	return Cue;
+}
+
 // --- Pooling contract ---
 
 void AQinglanProjectile::ResetForPool()
@@ -326,6 +417,7 @@ void AQinglanProjectile::ResetForPool()
 	CastId = FQinglanCastId();
 	TechniqueId = NAME_None;
 	Element = EQinglanElement::None;
+	CueContext = FQinglanTechniqueCastContext(); // AUD-42: no stale technique identity on reuse
 
 	DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
 	SetActorHiddenInGame(true);
@@ -659,14 +751,10 @@ bool AQinglanProjectile::ApplyHitToVictim(AActor* Victim, float EffectiveRawMagn
 void AQinglanProjectile::PublishImpactCue(const FVector& Location, AActor* Victim)
 {
 	// Cosmetic only; cues never gate gameplay (blueprint §1.7 "missing GPU
-	// emitter never suppresses damage/warnings"). The full cue event is
-	// published by the executors with the technique's cue set; this marker
-	// exists so audio/VFX can key off the impact point deterministically.
-	FQinglanCueEvent Cue;
-	Cue.CastId = CastId;
-	Cue.SourceTransform.SetLocation(Location);
-	Cue.Element = Element;
-	Cue.StageId = FName("impact"); // docs/04 five-stage contract
-	Cue.FeatureId = FName("vfx.spell.impact");
-	UQinglanTechniqueExecutors::PublishCue(FQinglanTechniqueCastContext(), Cue, this);
+	// emitter never suppresses damage/warnings"). AUD-42: the cue is built from
+	// the retained release context, so it carries the technique id/cast id and
+	// can resolve the technique's authored impact stage. A null Context.Technique
+	// still publishes with Cue.TechniqueId; only the fallback marker exists.
+	const FQinglanCueEvent Cue = BuildImpactCueEvent(Location);
+	UQinglanTechniqueExecutors::PublishCue(CueContext, Cue, this);
 }

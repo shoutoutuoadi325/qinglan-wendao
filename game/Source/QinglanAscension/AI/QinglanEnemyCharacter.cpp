@@ -40,6 +40,8 @@
 #include "NiagaraSystem.h"
 #include "Animation/AnimSequence.h"
 #include "Engine/SkeletalMesh.h"
+#include "QinglanAscension.h" // LogQinglanCombat / LogQinglan
+#include "VFX/QinglanVFXCueComponent.h"
 
 namespace
 {
@@ -173,6 +175,8 @@ AQinglanEnemyCharacter::AQinglanEnemyCharacter()
 #if QINGLAN_HAS_STATUS_COMPONENT
 	EnemyStatus = CreateDefaultSubobject<UQinglanStatusComponent>(TEXT("EnemyStatus"));
 #endif
+	// AUD-42: every enemy owns the cue subscriber for its own telegraphs.
+	VFXCues = CreateDefaultSubobject<UQinglanVFXCueComponent>(TEXT("VFXCues"));
 
 	// One shared humanoid rig (docs/02 section 8): archetypes differ by data,
 	// so all enemies use the same base class + the explicit-FSM controller.
@@ -186,6 +190,79 @@ AQinglanEnemyCharacter::AQinglanEnemyCharacter()
 		GetCharacterMovement()->bUseControllerDesiredRotation = true;
 		GetCharacterMovement()->RotationRate = FRotator(0.f, 270.f, 0.f); // authored turn speed
 	}
+}
+
+void AQinglanEnemyCharacter::BeginPlay()
+{
+	Super::BeginPlay();
+	// AUD-42: bind the presenter exactly once. AddUniqueDynamic keeps pooled
+	// re-initialization idempotent; gameplay never checks whether this bound.
+	OnTelegraph.AddUniqueDynamic(this, &AQinglanEnemyCharacter::HandleTelegraphPresented);
+	OnEmberVolleyTelegraph.AddUniqueDynamic(this, &AQinglanEnemyCharacter::HandleEmberVolleyTelegraphPresented);
+}
+
+void AQinglanEnemyCharacter::HandleTelegraphPresented(AQinglanEnemyCharacter* Enemy, float Duration)
+{
+	if (Enemy != this || bDead)
+	{
+		return;
+	}
+	if (!VFXCues)
+	{
+		// Presentation failure is logged and never interrupts the attack.
+		UE_LOG(LogQinglanCombat, Warning, TEXT("Enemy %s telegraph: no VFX cue component; warning still broadcast"),
+			*GetEnemyId().ToString());
+		return;
+	}
+
+	EQinglanElement Element = EQinglanElement::None;
+	float Radius = 180.f;
+	if (const FQinglanArchetypeSpec* Spec = QinglanEnemyCatalog::FindSpec(GetEnemyId()))
+	{
+		Element = Spec->Element;
+		Radius = Spec->GroundRingRadius > 0.f
+			? Spec->GroundRingRadius
+			: FMath::Max(Spec->AttackRange, 180.f);
+	}
+	// Component minimum warning is 0.9 s (docs/06); a shorter authored windup
+	// keeps its marker slightly longer than the mechanic, which is harmless.
+	const float MarkerSeconds = FMath::Max(Duration, 0.9f);
+	VFXCues->PlayTelegraph(GetActorLocation(), Radius, MarkerSeconds, Element);
+	FTransform Source;
+	Source.SetLocation(GetActorLocation());
+	VFXCues->PlayCue(QinglanVFXCues::TelegraphRing, Source, GetActorLocation(), Element, 1.f);
+	// Placeholder note (AUD-42 open): center disc/ring is engine-shape geometry,
+	// not authored Niagara; audio for the warning is a named SFX key only.
+}
+
+void AQinglanEnemyCharacter::HandleEmberVolleyTelegraphPresented(AQinglanEnemyCharacter* Enemy,
+	float SafeLaneDegrees, float WarningSeconds)
+{
+	if (Enemy != this || bDead)
+	{
+		return;
+	}
+	if (!VFXCues)
+	{
+		UE_LOG(LogQinglanCombat, Warning, TEXT("Enemy %s ember telegraph: no VFX cue component; warning still broadcast"),
+			*GetEnemyId().ToString());
+		return;
+	}
+
+	EQinglanElement Element = EQinglanElement::None;
+	if (const FQinglanArchetypeSpec* Spec = QinglanEnemyCatalog::FindSpec(GetEnemyId()))
+	{
+		Element = Spec->Element;
+	}
+	// AUD-42: visible ground center + safe arc. The safe-lane value is the same
+	// one the mechanic uses; drawing it never changes the mechanic.
+	const float MarkerSeconds = FMath::Max(WarningSeconds, 0.9f);
+	VFXCues->PlayTelegraph(GetActorLocation(), EmberVolleyRangeCm, MarkerSeconds, Element);
+	VFXCues->PlaySafeLane(GetActorLocation(), EmberVolleyRangeCm, SafeLaneDegrees,
+		EmberSafeLaneHalfWidthDeg, MarkerSeconds, Element);
+	FTransform Source;
+	Source.SetLocation(GetActorLocation());
+	VFXCues->PlayCue(QinglanVFXCues::BossGroundMarker, Source, GetActorLocation(), Element, 1.f);
 }
 
 void AQinglanEnemyCharacter::Tick(float DeltaSeconds)
@@ -365,6 +442,11 @@ void AQinglanEnemyCharacter::InitializeFromData(UQinglanEnemyDataAsset* InData)
 	// every accepted hit (direct, projectile, area, Burn tick) drives
 	// stagger/death from here. AddUniqueDynamic keeps pool reuse idempotent.
 	EnemyCombat->OnDamageResultResolved.AddUniqueDynamic(this, &AQinglanEnemyCharacter::HandleDamageResolved);
+
+	// AUD-42: defensive re-bind for placed/pooled actors whose BeginPlay binding
+	// may have run before this data init; AddUniqueDynamic is idempotent.
+	OnTelegraph.AddUniqueDynamic(this, &AQinglanEnemyCharacter::HandleTelegraphPresented);
+	OnEmberVolleyTelegraph.AddUniqueDynamic(this, &AQinglanEnemyCharacter::HandleEmberVolleyTelegraphPresented);
 
 	// AUD-36: authoritative boss identity. The catalog marks bosses via
 	// UQinglanBossDataAsset (Spec.bBoss); the gameplay tag carries that identity

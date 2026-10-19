@@ -10,18 +10,20 @@
 #include "QinglanEnemyProjectile.generated.h"
 
 class USphereComponent;
+class UStaticMeshComponent;
 class UProjectileMovementComponent;
 class AQinglanEnemyCharacter;
 class UNiagaraSystem;
 
 UCLASS(NotBlueprintable)
-class AQinglanEnemyProjectile : public AActor
+class QINGLANASCENSION_API AQinglanEnemyProjectile : public AActor // linkage-only export for editor automation specs
 {
 	GENERATED_BODY()
 
 public:
 	AQinglanEnemyProjectile();
 
+	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 
 	/** Fires one pooled shot. Deterministic: no randomness inside. InCastId is
@@ -48,6 +50,8 @@ private:
 
 	UPROPERTY(VisibleAnywhere) USphereComponent* CollisionSphere = nullptr;
 	UPROPERTY(VisibleAnywhere) UProjectileMovementComponent* Movement = nullptr;
+	/** AUD-42 placeholder body; no collision and never a gameplay source. */
+	UPROPERTY(VisibleAnywhere) UStaticMeshComponent* Visual = nullptr;
 
 	/** Complete release identity used for the hit-key Cast id (dedupe contract). */
 	FQinglanCastId CastId;

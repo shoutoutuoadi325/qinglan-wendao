@@ -359,6 +359,130 @@ namespace
 		const FVector Normalized = Direction.GetSafeNormal2D();
 		return Normalized.IsNearlyZero() ? FVector::ForwardVector : Normalized;
 	}
+
+	// --- Gameplay-proof event producers (AUD-11) ---
+
+	/**
+	 * Character -> proof relay. The character header is frozen, so the relay is
+	 * GC-rooted here (TStrongObjectPtr) and removed on EndPlay. Dynamic
+	 * delegates bind UFUNCTIONs only; the relay forwards stable proof event
+	 * names to QinglanStoryRuntime::NotifyGameplayEvent.
+	 */
+	TMap<TWeakObjectPtr<AQinglanCharacter>, TStrongObjectPtr<UQinglanGameplayProofRelay>> GQinglanGameplayProofRelays;
+
+	void QinglanBindGameplayProofEvents(AQinglanCharacter* Character, UQinglanStorySubsystem* Story)
+	{
+		if (Character == nullptr || Story == nullptr)
+		{
+			return;
+		}
+		// Prune stale characters so automation instances cannot leak relays.
+		for (auto It = GQinglanGameplayProofRelays.CreateIterator(); It; ++It)
+		{
+			if (!It.Key().IsValid())
+			{
+				It.RemoveCurrent();
+			}
+		}
+		const TWeakObjectPtr<AQinglanCharacter> Key(Character);
+		TStrongObjectPtr<UQinglanGameplayProofRelay>& RelaySlot = GQinglanGameplayProofRelays.FindOrAdd(Key);
+		if (!RelaySlot.IsValid())
+		{
+			RelaySlot = TStrongObjectPtr<UQinglanGameplayProofRelay>(NewObject<UQinglanGameplayProofRelay>(Character));
+		}
+		UQinglanGameplayProofRelay* Relay = RelaySlot.Get();
+		Relay->StorySubsystem = Story;
+		Relay->OwnerActor = Character;
+		if (UQinglanCombatComponent* Combat = Character->GetCombat())
+		{
+			Combat->OnDamageResultResolved.AddUniqueDynamic(Relay, &UQinglanGameplayProofRelay::HandleDamageResultResolved);
+		}
+		if (UQinglanDodgeComponent* Dodge = QinglanFindComponent<UQinglanDodgeComponent>(Character))
+		{
+			Dodge->OnDodgeStarted.AddUniqueDynamic(Relay, &UQinglanGameplayProofRelay::HandleDodgeStarted);
+		}
+		if (UQinglanTechniqueComponent* Techniques = Character->GetTechniques())
+		{
+			Techniques->OnCastReleased.AddUniqueDynamic(Relay, &UQinglanGameplayProofRelay::HandleCastReleased);
+		}
+	}
+
+	void QinglanUnbindGameplayProofEvents(AQinglanCharacter* Character)
+	{
+		if (Character == nullptr)
+		{
+			return;
+		}
+		TStrongObjectPtr<UQinglanGameplayProofRelay> RelaySlot;
+		if (!GQinglanGameplayProofRelays.RemoveAndCopyValue(TWeakObjectPtr<AQinglanCharacter>(Character), RelaySlot))
+		{
+			return;
+		}
+		UQinglanGameplayProofRelay* Relay = RelaySlot.Get();
+		if (Relay == nullptr)
+		{
+			return;
+		}
+		if (UQinglanCombatComponent* Combat = Character->GetCombat())
+		{
+			Combat->OnDamageResultResolved.RemoveDynamic(Relay, &UQinglanGameplayProofRelay::HandleDamageResultResolved);
+		}
+		if (UQinglanDodgeComponent* Dodge = QinglanFindComponent<UQinglanDodgeComponent>(Character))
+		{
+			Dodge->OnDodgeStarted.RemoveDynamic(Relay, &UQinglanGameplayProofRelay::HandleDodgeStarted);
+		}
+		if (UQinglanTechniqueComponent* Techniques = Character->GetTechniques())
+		{
+			Techniques->OnCastReleased.RemoveDynamic(Relay, &UQinglanGameplayProofRelay::HandleCastReleased);
+		}
+	}
+
+	/** Authored room-clear realm token ("tutorial_guided" -> "tutorial"). */
+	FString QinglanRoomClearRealmToken(FName RealmId)
+	{
+		const FString Id = RealmId.ToString();
+		if (Id.StartsWith(TEXT("tutorial"))) { return TEXT("tutorial"); }
+		if (Id.StartsWith(TEXT("bamboo"))) { return TEXT("bamboo"); }
+		if (Id.StartsWith(TEXT("ashen"))) { return TEXT("ashen"); }
+		return Id;
+	}
+}
+
+// ---------------------------------------------------------------------------
+// UQinglanGameplayProofRelay
+// ---------------------------------------------------------------------------
+
+void UQinglanGameplayProofRelay::HandleDamageResultResolved(const FQinglanResolvedDamage& Result)
+{
+	UQinglanStorySubsystem* Story = StorySubsystem.Get();
+	AActor* Owner = OwnerActor.Get();
+	if (Story == nullptr || Owner == nullptr || Result.Attacker.Get() != Owner)
+	{
+		return;
+	}
+	// The resolved result carries only the cast id; technique proofs are
+	// emitted by HandleCastReleased, whose delegate carries TechniqueId.
+	QinglanStoryRuntime::NotifyGameplayEvent(Story, FName(TEXT("combat.sword_hit")), {});
+}
+
+void UQinglanGameplayProofRelay::HandleDodgeStarted(float /*Duration*/)
+{
+	UQinglanStorySubsystem* Story = StorySubsystem.Get();
+	if (Story != nullptr)
+	{
+		QinglanStoryRuntime::NotifyGameplayEvent(Story, FName(TEXT("combat.dodge")), {});
+	}
+}
+
+void UQinglanGameplayProofRelay::HandleCastReleased(FName TechniqueId, FQinglanCastId /*CastId*/)
+{
+	UQinglanStorySubsystem* Story = StorySubsystem.Get();
+	if (Story == nullptr || TechniqueId.IsNone())
+	{
+		return;
+	}
+	QinglanStoryRuntime::NotifyGameplayEvent(Story,
+		FName(*FString::Printf(TEXT("cast.%s"), *TechniqueId.ToString())), {});
 }
 
 // ---------------------------------------------------------------------------
@@ -1426,8 +1550,17 @@ void AQinglanCharacter::HandleRoomCompleted(int32 RoomIndex, int64 ShardsAwarded
 		return;
 	}
 	const UQinglanRealmDataAsset* Realm = Run->GetCurrentRealm();
-	if (Realm == nullptr || Realm->GetRoomKind(RoomIndex) != EQinglanRoomKind::Boss)
+	if (Realm == nullptr)
 	{
+		return;
+	}
+	// AUD-11: every non-boss clear proves the authored room event
+	// encounter.room_cleared.<realm>.<room> (main-early CH01, main-late CH04).
+	if (Realm->GetRoomKind(RoomIndex) != EQinglanRoomKind::Boss)
+	{
+		QinglanStoryRuntime::NotifyGameplayEvent(Story,
+			FName(*FString::Printf(TEXT("encounter.room_cleared.%s.%d"),
+				*QinglanRoomClearRealmToken(Realm->RealmId), RoomIndex)), {});
 		return;
 	}
 	// Dispatch the exact defeated encounter; never scan for the first eligible
@@ -1444,6 +1577,19 @@ void AQinglanCharacter::HandleRoomCompleted(int32 RoomIndex, int64 ShardsAwarded
 
 void AQinglanCharacter::HandleRecordOpened(FName RecordId, const FText& Title, const FText& Body)
 {
+	// AUD-11 producer: the read itself is the proof event; authored proofs use
+	// the stable record id (record.opened.<id>).
+	if (RecordId != NAME_None)
+	{
+		if (UGameInstance* const Instance = GetGameInstance())
+		{
+			if (UQinglanStorySubsystem* const Story = Instance->GetSubsystem<UQinglanStorySubsystem>())
+			{
+				QinglanStoryRuntime::NotifyGameplayEvent(Story,
+					FName(*FString::Printf(TEXT("record.opened.%s"), *RecordId.ToString())), {});
+			}
+		}
+	}
 	if (UUserWidget* Widget = EnsureDialogueWidget())
 	{
 		if (!Widget->IsInViewport())
@@ -1642,6 +1788,9 @@ void AQinglanCharacter::BindStoryDelegates()
 	{
 		Save->OnSaveFailed.AddDynamic(this, &AQinglanCharacter::HandleSaveFailed);
 	}
+	// AUD-11: bind the dynamic combat/dodge/technique delegates through the
+	// proof relay (the character header is frozen and cannot declare handlers).
+	QinglanBindGameplayProofEvents(this, Story);
 	bStoryDelegatesBound = true;
 }
 
@@ -1651,6 +1800,7 @@ void AQinglanCharacter::UnbindStoryDelegates()
 	{
 		return;
 	}
+	QinglanUnbindGameplayProofEvents(this);
 	if (UGameInstance* const Instance = GetGameInstance())
 	{
 		if (UQinglanStorySubsystem* const Story = Instance->GetSubsystem<UQinglanStorySubsystem>())
@@ -1773,7 +1923,15 @@ bool AQinglanCharacter::ConsumeMenuSelection(int32 Slot)
 		{
 			if (UQinglanRunSubsystem* const Run = Instance->GetSubsystem<UQinglanRunSubsystem>())
 			{
-				Run->AcceptBlessing(Blessing.BlessingId); // exactly 1 of 3 (docs/03 section 5)
+				// exactly 1 of 3 (docs/03 section 5)
+				if (Run->AcceptBlessing(Blessing.BlessingId))
+				{
+					// AUD-11 producer: accepted draft proof (CH01_S02).
+					if (UQinglanStorySubsystem* const Story = Instance->GetSubsystem<UQinglanStorySubsystem>())
+					{
+						QinglanStoryRuntime::NotifyGameplayEvent(Story, FName(TEXT("blessing.taken")), {});
+					}
+				}
 			}
 		}
 		ShowGameMessage(Blessing.DisplayName.IsEmpty()

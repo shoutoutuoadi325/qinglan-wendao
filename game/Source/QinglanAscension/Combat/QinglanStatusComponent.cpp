@@ -2,6 +2,8 @@
 #include "Combat/QinglanStatusComponent.h"
 #include "Combat/QinglanCombatComponent.h"
 #include "Combat/QinglanDamageMath.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 
 namespace
 {
@@ -124,6 +126,10 @@ void UQinglanStatusComponent::ApplyRootMovement(float Duration, bool bBossOwner)
 		ActiveSlowFraction = 1.f;
 	}
 	BroadcastApplied(EQinglanStatus::Root, ClampedDuration);
+
+	// Apply immediately rather than waiting for the next tick: a root landing
+	// this frame must stop movement this frame (AUD-36).
+	ApplyToCharacterMovement(Cast<ACharacter>(GetOwner()));
 }
 
 void UQinglanStatusComponent::ClearRootMovement()
@@ -134,6 +140,52 @@ void UQinglanStatusComponent::ClearRootMovement()
 		SlowRemaining = 0.f;
 		ActiveSlowFraction = 1.f;
 		BroadcastRemoved(EQinglanStatus::Root);
+	}
+	// Explicit removal (Cleansing Talisman, pool reset) always restores speed.
+	ApplyToCharacterMovement(Cast<ACharacter>(GetOwner()));
+}
+
+void UQinglanStatusComponent::ApplyToCharacterMovement(ACharacter* Character)
+{
+	UCharacterMovementComponent* Movement = Character ? Character->GetCharacterMovement() : nullptr;
+	if (!Movement)
+	{
+		bMovementModifierActive = false;
+		MovementBaseSpeed = -1.f;
+		MovementAppliedSpeed = -1.f;
+		return;
+	}
+
+	const float Multiplier = GetMoveSpeedMultiplier();
+	if (Multiplier < 1.f)
+	{
+		if (!bMovementModifierActive
+			|| !FMath::IsNearlyEqual(Movement->MaxWalkSpeed, MovementAppliedSpeed))
+		{
+			// Entering root/slow, or another system (dodge dash, AI controller)
+			// rewrote the speed while the status was active. Treat the current
+			// value as the unmodified baseline and scale that; this prevents the
+			// restore path from resurrecting a temporary dash speed (AUD-36).
+			MovementBaseSpeed = Movement->MaxWalkSpeed;
+			bMovementModifierActive = true;
+		}
+		MovementAppliedSpeed = FMath::Max(0.f, MovementBaseSpeed * Multiplier);
+		if (!FMath::IsNearlyEqual(Movement->MaxWalkSpeed, MovementAppliedSpeed))
+		{
+			Movement->MaxWalkSpeed = MovementAppliedSpeed;
+		}
+	}
+	else if (bMovementModifierActive)
+	{
+		// Expiry/removal: restore only when the value is still ours. If the
+		// character restored its own walk speed already, leave that value.
+		if (FMath::IsNearlyEqual(Movement->MaxWalkSpeed, MovementAppliedSpeed))
+		{
+			Movement->MaxWalkSpeed = MovementBaseSpeed;
+		}
+		bMovementModifierActive = false;
+		MovementBaseSpeed = -1.f;
+		MovementAppliedSpeed = -1.f;
 	}
 }
 
@@ -331,6 +383,11 @@ void UQinglanStatusComponent::TickComponent(float DeltaTime, enum ELevelTick Tic
 
 	// Paused-game-time semantics: TickComponent does not run while the game is
 	// paused, and DeltaTime accumulation keeps countdowns frame-rate stable.
+	AdvanceTime(DeltaTime);
+}
+
+void UQinglanStatusComponent::AdvanceTime(float DeltaTime)
+{
 	if (!bCombatDelegatesBound)
 	{
 		BindCombatDelegates();
@@ -372,4 +429,8 @@ void UQinglanStatusComponent::TickComponent(float DeltaTime, enum ELevelTick Tic
 			BurnRemainingMirror = 0.f;
 		}
 	}
+
+	// AUD-36: keep the character's locomotion in sync with root/slow, and
+	// restore the saved speed on the tick the status expires.
+	ApplyToCharacterMovement(Cast<ACharacter>(GetOwner()));
 }

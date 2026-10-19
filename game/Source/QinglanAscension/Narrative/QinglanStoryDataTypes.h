@@ -38,6 +38,39 @@ struct FQinglanRegistryChoice
 	UPROPERTY() FName ShowAfterTextKey = NAME_None;
 };
 
+/**
+ * One machine-evaluated gameplay-proof term (AUD-11). The authored `proof`
+ * payload lists these under `all_of`; kinds are event, event_count, ordered,
+ * delivery, time_advance, and flag. `Kind` keeps the authored discriminator so
+ * the runtime evaluator stays data-driven (unknown kinds are dropped by the
+ * importer with a Warning).
+ */
+USTRUCT()
+struct FQinglanRegistryGuardTerm
+{
+	GENERATED_BODY()
+	UPROPERTY() FName Kind = NAME_None;
+	UPROPERTY() FName Event = NAME_None;
+	/** event_count threshold; authored `count` (clamped to >=1 at import). */
+	UPROPERTY() int32 Count = 1;
+	/** time_advance threshold in in-fiction hours. */
+	UPROPERTY() double GameHours = 0.0;
+	/** ordered: event names that must be fired in exactly this order. */
+	UPROPERTY() TArray<FName> OrderedSteps;
+	/** delivery: quest whose courier reply must no longer be pending. */
+	UPROPERTY() FName Quest = NAME_None;
+	/** flag: narrative flag that must be set. */
+	UPROPERTY() FName Flag = NAME_None;
+};
+
+/** Conjunction of gameplay-proof terms (authored `proof` / structured `confirmation_guard`). */
+USTRUCT()
+struct FQinglanRegistryGuard
+{
+	GENERATED_BODY()
+	UPROPERTY() TArray<FQinglanRegistryGuardTerm> AllOf;
+};
+
 USTRUCT()
 struct FQinglanRegistryObjective
 {
@@ -46,6 +79,8 @@ struct FQinglanRegistryObjective
 	UPROPERTY() FName TextKey = NAME_None;
 	/** English-only completion contract note for QA; not player-facing. */
 	UPROPERTY() FString Completion;
+	/** Optional gameplay proof; empty means the legacy dialogue/proof path. */
+	UPROPERTY() FQinglanRegistryGuard Guard;
 };
 
 USTRUCT()
@@ -66,6 +101,11 @@ struct FQinglanRegistryScene
 	UPROPERTY() FName JournalKey = NAME_None;
 	UPROPERTY() FName RetryKey = NAME_None;
 	UPROPERTY() FName ConfirmationGuard = NAME_None;
+	/** Structured confirmation_checks_ready guard (AUD-10/AUD-11); evaluated
+	 *  before confirmation dialogue begins and before the scene commits. */
+	UPROPERTY() FQinglanRegistryGuard ConfirmationGuardTerms;
+	/** Authored scene-level trigger (e.g. confirmation_checks_ready). */
+	UPROPERTY() FName ScriptTrigger = NAME_None;
 	UPROPERTY() FName AdvanceDeliveryKey = NAME_None;
 	UPROPERTY() FName DeliveryTimeKey = NAME_None;
 	UPROPERTY() FName DeliveryTransition = NAME_None;

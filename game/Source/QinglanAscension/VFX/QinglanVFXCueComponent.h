@@ -23,7 +23,7 @@ class UNiagaraSystem;
  * travel trail -> impact ring -> decay. Gameplay timings drive lifetimes.
  */
 UCLASS(ClassGroup = (Qinglan), meta = (BlueprintSpawnableComponent))
-class UQinglanVFXCueComponent : public UActorComponent
+class QINGLANASCENSION_API UQinglanVFXCueComponent : public UActorComponent // linkage-only export for editor automation specs
 {
 	GENERATED_BODY()
 
@@ -41,6 +41,11 @@ public:
 	/** Pooled reset contract: clears timers, owners, tags, lifetimes. */
 	void ResetForPool();
 
+	/** AUD-43 automation/telemetry: live cue instance and light counts.
+	 *  Both return to zero after decay or ResetForPool. */
+	int32 GetActiveCueCount() const { return ActiveCues.Num(); }
+	int32 GetActiveLightCount() const;
+
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 private:
@@ -53,6 +58,8 @@ private:
 		float Remaining = 0.f;
 		float Total = 0.f;
 		float BaseRadius = 0.f;
+		/** Authored light intensity; decay scales from this, never compounds. */
+		float LightBaseIntensity = 0.f;
 		bool bRing = false;
 	};
 	void DecayCues(float DeltaTime);

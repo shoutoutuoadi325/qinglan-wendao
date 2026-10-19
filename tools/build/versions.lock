@@ -1,0 +1,27 @@
+# Build/toolchain version lock for QinglanAscension (docs/dev/completion-audit-todo.md AUD-57).
+#
+# The engine is a separately obtained UE 5.8 source checkout (Epic license);
+# it is never committed here. Point QINGLAN_ENGINE_ROOT at a checkout of the
+# revision below. Record every tested build in docs/dev/evidence/ with the
+# engine commit, project commit, and artifact hashes.
+#
+# engine_family       = Unreal Engine 5.8
+# engine_version      = 5.8.3
+# engine_changelist   = 0 (source build; CompatibleChangelist 55116800)
+# engine_commit       = 396c9f059903aed5fec78ecd3d437a40c6415368
+# engine_commit_date  = recorded 2026-10-19 from the engine checkout used for
+#                       the 35/35 automation run
+# project_association = 5.8 (game/QinglanAscension.uproject)
+# build_tool          = Engine/Build/BatchFiles/Linux/Build.sh (Linux)
+# project_target      = QinglanAscensionEditor
+# tested_configs      = Development/Linux (editor), headless commandlets (-nullrhi)
+#
+# Platform toolchains:
+#   Windows x64 / DX12  : NOT configured or tested in this environment
+#   macOS arm64 / Metal : NOT configured or tested in this environment
+#
+# Raw asset roots (parameterized; defaults stay beside the repository):
+#   QINGLAN_ASSETS_RAW  -> quaternius/ and polyhaven/ source packs
+#
+# This file is intentionally dependency-free text so a second machine can
+# reproduce the build without private scripts.

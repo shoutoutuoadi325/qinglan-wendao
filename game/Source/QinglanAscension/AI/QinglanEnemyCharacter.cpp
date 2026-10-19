@@ -220,6 +220,14 @@ bool AQinglanEnemyCharacter::IsAlive() const
 	return !bDead && EnemyCombat && EnemyCombat->IsAlive() && AIState != EQinglanAIState::Dead;
 }
 
+bool AQinglanEnemyCharacter::IsBoss() const
+{
+	// The data asset is the source of truth; the tag is the gameplay-visible
+	// mirror InitializeFromData installs for status/Root/Shock consumers.
+	return Cast<UQinglanBossDataAsset>(EnemyData.Get()) != nullptr
+		|| ActorHasTag(FName(QinglanCombatTunables::QinglanBossTag));
+}
+
 void AQinglanEnemyCharacter::HandleDamageResolved(const FQinglanResolvedDamage& Result)
 {
 	// AUD-28: the combat authority's accepted-hit notification drives every
@@ -838,7 +846,9 @@ void AQinglanEnemyCharacter::UpdatePhaseTwoEmbers(float DeltaSeconds)
 		return;
 	}
 	AQinglanAIController* AI = GetQinglanAI(this);
-	if (!AI || EnemyData == nullptr || EnemyData->EnemyId != FName(TEXT("ashen_guardian")))
+	if (!AI || EnemyData == nullptr
+		|| Cast<UQinglanBossDataAsset>(EnemyData.Get()) == nullptr // only a boss archetype owns this mechanic (AUD-41)
+		|| EnemyData->EnemyId != FName(TEXT("ashen_guardian")))
 	{
 		return;
 	}
@@ -902,5 +912,9 @@ void AQinglanEnemyCharacter::UpdatePhaseTwoEmbers(float DeltaSeconds)
 			}
 		}
 		OnTelegraph.Broadcast(this, EmberVolleyWarningSeconds);
+		// AUD-41: carry the safe-lane bearing so the presenter can draw the
+		// visible gap. This broadcast is independent of graphics quality; Low
+		// and Metal still receive it (the minimum 0.9 s warning is unchanged).
+		OnEmberVolleyTelegraph.Broadcast(this, EmberSafeLaneDeg, EmberVolleyWarningSeconds);
 	}
 }

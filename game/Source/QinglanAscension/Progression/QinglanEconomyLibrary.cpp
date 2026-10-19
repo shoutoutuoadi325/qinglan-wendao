@@ -431,6 +431,10 @@ void UQinglanEconomyLibrary::AppendPermanentRegen(UObject* WorldContext, float& 
 		}
 		EnergyRegen += Entry.EnergyRegenPerSecond;
 		StaminaRegenPercent += Entry.StaminaRegenPercent;
+		// AUD-37: Herbal Knowledge's +10% healing was accumulated but never
+		// folded; every heal path resolves this bundle inside the combat
+		// component's authoritative Heal entry point.
+		HealingPercent += Entry.HealingPercent;
 	}
 	StaminaRegen *= (1.f + StaminaRegenPercent / 100.f);
 
@@ -440,5 +444,39 @@ void UQinglanEconomyLibrary::AppendPermanentRegen(UObject* WorldContext, float& 
 	if (FindRelic(Profile->GetEquippedRelic(), Relic))
 	{
 		HealingPercent += Relic.BonusHealingPercent;
+	}
+}
+
+void UQinglanEconomyLibrary::GetPermanentAttributeBonuses(UObject* WorldContext,
+	float& OutMaxHealthBonus, float& OutMaxStaminaBonus)
+{
+	OutMaxHealthBonus = 0.f;
+	OutMaxStaminaBonus = 0.f;
+
+	UWorld* World = WorldContext ? GEngine->GetWorldFromContextObject(WorldContext, EGetWorldErrorMode::LogAndReturnNull) : nullptr;
+	UGameInstance* GameInstance = World ? World->GetGameInstance() : nullptr;
+	const UQinglanProfileSubsystem* Profile = GameInstance ? GameInstance->GetSubsystem<UQinglanProfileSubsystem>() : nullptr;
+	if (Profile == nullptr)
+	{
+		return;
+	}
+
+	// Equipped relic (Mountain Token is the authored health relic).
+	FQinglanRelicDef Relic;
+	if (FindRelic(Profile->GetEquippedRelic(), Relic))
+	{
+		OutMaxHealthBonus += Relic.BonusMaxHealth;
+	}
+
+	// Equipped passives: flat maxima only (percents belong to other surfaces).
+	for (const FName PassiveId : Profile->GetEquippedPassives())
+	{
+		FQinglanPassiveCatalogEntry Entry;
+		if (!FindPassive(PassiveId, Entry))
+		{
+			continue;
+		}
+		OutMaxHealthBonus += Entry.MaxHealthBonus;
+		OutMaxStaminaBonus += Entry.MaxStaminaBonus;
 	}
 }

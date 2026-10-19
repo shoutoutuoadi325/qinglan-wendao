@@ -1,14 +1,39 @@
 # Test Report — Qinglan: Path of Ascension
 
-Date: 2026-10-13 · Engine: UE 5.8.3 (source build) · Platform: Linux (Ubuntu 22.04, Xeon Gold 6530, RTX 4090 x2, driver 570.195)
+## 0. Current evidence (2026-10-19) — supersedes the historical section below
 
-## 1. Build
+Environment: Linux (container, 64 physical cores), UE 5.8.3 source build, headless
+(`-nullrhi`), branch `fix/audit-repairs` at `ed02e88` + working-tree repair wave.
+
+| Item | Result | Evidence |
+|---|---|---|
+| Editor target build (Linux, Development, UHT + editor modules) | ✅ Succeeded | `docs/dev/evidence/build-2026-10-19-wave3.log` |
+| Automation suite `RunTests Qinglan` | ✅ 35 started / 35 Success / 0 Fail | `docs/dev/evidence/automation-2026-10-19-wave3-35tests.log` |
+| Planning validators | ✅ pass | `python3 tools/validate_repository.py`, `tools/validate_story.py` |
+
+Test suite composition: 27 cases from the pre-audit baseline + 8 new cases from
+the audit wave (`Qinglan.Narrative.*` courier/guard cases, `Qinglan.Persistence.*`
+delivery/migration cases, `Qinglan.Trial.*` phase-machine cases).
+
+**Scope:** these results prove compilation and the scripted subsystem behavior
+exercised by the specs. They do **not** prove a playable campaign, rendered
+output, packaging, or target-platform acceptance. Unresolved audit IDs remain
+listed in `docs/dev/completion-audit-todo.md`; no passage here closes them
+without the acceptance evidence that document requires.
+
+Build entry: `bash tools/build/build-game.sh` (portable; `QINGLAN_ENGINE_ROOT`
+parameterizes the engine checkout). Content regeneration:
+`bash tools/build/regenerate-content.sh`.
+
+## 1. Historical results (2026-10-13) — retained for provenance, not current
+
+Date: 2026-10-13 · Engine: UE 5.8.3 (source build) · Platform: Linux (Ubuntu 22.04, Xeon Gold 6530, RTX 4090 x2, driver 570.195)
 
 | Target | Config | Result |
 |---|---|---|
 | QinglanAscensionEditor (Linux) | Development | ✅ compiles + links (runtime + editor modules, zero errors) |
 
-Build entry: `bash /inspire/hdd/project/qianghuaxuexi/s26044/build-game.sh` (log: `game-build.log`).
+Build entry at that time: `bash /inspire/hdd/project/qianghuaxuexi/s26044/build-game.sh` (an uncommitted private script; superseded by `tools/build/build-game.sh`).
 
 Notable fixes required to reach green (recorded for posterity): ~40 UE 5.8 API
 compatibility corrections (removed/renamed engine APIs, TObjectPtr map access,
@@ -16,7 +41,7 @@ TDereferenceWrapper sort predicates, TCheckedFormatString literals, UCommandlet
 members), duplicate-symbol and unity-collision cleanups from the parallel module
 pass, and missing module links (UMG runtime, InputCore editor).
 
-## 2. Automation suite — 12/12 ✅
+## 2. Historical automation suite — 12/12 (2026-10-13; current suite is 35 cases)
 
 Run:
 ```bash

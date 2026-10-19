@@ -242,4 +242,13 @@ public:
 	 */
 	UFUNCTION(BlueprintPure, Category = "Qinglan|Economy")
 	static void AppendPermanentRegen(UObject* WorldContext, float& EnergyRegen, float& StaminaRegen, float& HealingPercent);
+
+	/**
+	 * AUD-37: permanent-equipment contributions to the derived maxima, for the
+	 * combat component's attribute recomputation. Grounded Steps adds flat
+	 * MaxStamina; Steady Foundation and Mountain Token add flat MaxHealth.
+	 * No profile subsystem (headless tests/enemies): outputs stay 0.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Qinglan|Economy")
+	static void GetPermanentAttributeBonuses(UObject* WorldContext, float& OutMaxHealthBonus, float& OutMaxStaminaBonus);
 };

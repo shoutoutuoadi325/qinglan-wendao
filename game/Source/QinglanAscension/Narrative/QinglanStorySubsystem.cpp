@@ -240,6 +240,42 @@ namespace
 		Session.CurrentSceneQuestId = NAME_None;
 	}
 
+	/**
+	 * AUD-10 scene commit gate: rejects a commit only when the scene authors a
+	 * structured confirmation_guard and that guard is unmet. Legacy scenes
+	 * (no authored guard) keep their exact previous commit behavior. The
+	 * playback stop keeps the scene re-enterable at the next safe interaction.
+	 */
+	bool QinglanRejectGuardedCommit(UQinglanStorySubsystem* Story, FQinglanStorySession& Session, const FQinglanRegistryScene& Scene)
+	{
+		if (!QinglanStoryRuntime::SceneHasCommitGuard(Story, Scene.SceneId))
+		{
+			return false;
+		}
+		const QinglanStoryRuntime::FQinglanGuardReport Report =
+			QinglanStoryRuntime::EvaluateSceneCommitGuard(Story, Scene.SceneId);
+		if (Report.Status == QinglanStoryRuntime::EQinglanGuardStatus::Satisfied)
+		{
+			return false;
+		}
+		TArray<FString> Missing;
+		for (const FName Entry : Report.Missing)
+		{
+			Missing.Add(Entry.ToString());
+		}
+		UE_LOG(LogQinglanNarrative, Warning,
+			TEXT("Scene %s commit guard unmet (status %d, missing: %s); playback stops before commit"),
+			*Scene.SceneId.ToString(), static_cast<int32>(Report.Status), *FString::Join(Missing, TEXT(", ")));
+		// Only the scene being rejected may be stopped; this helper is called
+		// at its safe boundary, but keeping the condition explicit prevents a
+		// future caller from stopping an unrelated live playback.
+		if (Session.bScenePlaying && Session.CurrentSceneId == Scene.SceneId)
+		{
+			StopPlayback(Session);
+		}
+		return true;
+	}
+
 	/** Set semantics make every flag application idempotent: replaying a scene
 	 *  can never re-apply or roll back a committed flag (spec section 3). */
 	void ApplyFlags(FQinglanStorySession& Session, const TArray<FName>& FlagsToSet)
@@ -579,6 +615,10 @@ namespace
 				// story state preserved (spec section 4 "Return exits to the
 				// pre-trial safe hub ... not a forced repeat fight").
 				StopPlayback(Session);
+				return;
+			}
+			if (QinglanRejectGuardedCommit(Story, Session, Scene))
+			{
 				return;
 			}
 			CompleteSceneById(Story, Session, Scene.SceneId, false);
@@ -964,6 +1004,28 @@ bool UQinglanStorySubsystem::BeginScene(FName SceneId)
 	// (docs/story/narrative-implementation.md section 3.3).
 	const bool bRevisit = Session.CompletedMainScenes.Contains(SceneId) || Session.CompletedSideStages.Contains(SceneId);
 
+	// AUD-10: confirmation_checks_ready scenes must not start before their
+	// structured guard is satisfied (the confirmation dialogue would otherwise
+	// let the player skip the gameplay checks). Revisits and legacy scenes are
+	// not gated: only a structured, authored guard can block playback.
+	if (!bRevisit && Scene->ScriptTrigger == FName(TEXT("confirmation_checks_ready")))
+	{
+		const QinglanStoryRuntime::FQinglanGuardReport GuardReport =
+			QinglanStoryRuntime::EvaluateSceneCommitGuard(this, SceneId);
+		if (GuardReport.Status != QinglanStoryRuntime::EQinglanGuardStatus::Satisfied)
+		{
+			TArray<FString> Missing;
+			for (const FName Entry : GuardReport.Missing)
+			{
+				Missing.Add(Entry.ToString());
+			}
+			UE_LOG(LogQinglanNarrative, Warning,
+				TEXT("BeginScene: confirmation checks for %s are not ready (status %d, missing: %s)"),
+				*SceneId.ToString(), static_cast<int32>(GuardReport.Status), *FString::Join(Missing, TEXT(", ")));
+			return false;
+		}
+	}
+
 	if (IsAnyEncounterActive(GetGameInstance()))
 	{
 		// Defer playback until no encounter director reports active
@@ -1140,7 +1202,10 @@ void UQinglanStorySubsystem::SkipScene()
 		// dispatched. Non-committing selections leave the scene replayable.
 		if (ActionCommitsScene(Session.LastSelectedAction))
 		{
-			CompleteSceneById(this, Session, Scene->SceneId, false);
+			if (!QinglanRejectGuardedCommit(this, Session, *Scene))
+			{
+				CompleteSceneById(this, Session, Scene->SceneId, false);
+			}
 		}
 		else
 		{
@@ -1152,7 +1217,10 @@ void UQinglanStorySubsystem::SkipScene()
 		// No-choice gameplay scene whose objectives were already earned:
 		// skipping applies the journal/objective updates and commits the
 		// already-earned flags without re-awarding anything.
-		CompleteSceneById(this, Session, Scene->SceneId, false);
+		if (!QinglanRejectGuardedCommit(this, Session, *Scene))
+		{
+			CompleteSceneById(this, Session, Scene->SceneId, false);
+		}
 	}
 	else
 	{
@@ -1719,16 +1787,80 @@ namespace QinglanStoryRuntime
 
 	void NotifyGameplayEvent(UQinglanStorySubsystem* Story, FName Event, const TArray<FName>& SetsFlags)
 	{
+		if (Story == nullptr)
+		{
+			return;
+		}
 		FQinglanStorySession& Session = StorySession(Story);
 		if (Event != NAME_None)
 		{
-			// Unlocks trigger-gated script lines (e.g. CH06_S02 storm beats).
+			// Set form unlocks trigger-gated script lines (e.g. CH06_S02 storm
+			// beats); the ordered log additionally preserves repetition for
+			// event_count proofs and the ordered prefix.
 			Session.FiredEvents.Add(Event);
+			Session.FiredEventLog.Add(Event);
+			if (Session.FiredEventLog.Num() > MaxFiredEventLogEntries)
+			{
+				Session.FiredEventLog.RemoveAt(0, Session.FiredEventLog.Num() - MaxFiredEventLogEntries, EAllowShrinking::No);
+			}
 		}
 		// Dispatcher binding: gameplay events may set mq_* proof flags
 		// (blueprint section 1.9); main-quest flags are never settable from
 		// side-quest registries because only this validated path sets them.
 		ApplyFlags(Session, SetsFlags);
+
+		// AUD-11 consumer: complete guarded objectives the event just proved.
+		// The scan is idempotent (CompleteObjective and CompleteSceneById both
+		// early-exit) so duplicate producer events cannot re-award anything.
+		//
+		// Line delivery is intentionally left to DeliverNextLine: a trigger
+		// line is filtered into the active scene's ordered transcript by
+		// LineConditionsMet, and broadcasting registry lines outside playback
+		// would duplicate authored lines (no per-line delivery record exists).
+		if (Event == NAME_None)
+		{
+			return;
+		}
+		const UQinglanStoryRegistry* Registry = LoadStoryRegistryOnce();
+		if (Registry == nullptr)
+		{
+			return;
+		}
+		auto CompleteSatisfiedObjectives = [Story, &Session](const FQinglanRegistryScene& Scene, bool bSide)
+		{
+			const TSet<FName>& CompletedScenes = bSide ? Session.CompletedSideStages : Session.CompletedMainScenes;
+			if (CompletedScenes.Contains(Scene.SceneId))
+			{
+				return;
+			}
+			for (const FQinglanRegistryObjective& Objective : Scene.Objectives)
+			{
+				if (Objective.Guard.AllOf.Num() == 0)
+				{
+					continue;
+				}
+				const FName Key = QinglanStoryIdentity::ObjectiveKey(Scene.SceneId, Objective.ObjectiveId);
+				if (Session.CompletedObjectives.Contains(Key))
+				{
+					continue;
+				}
+				if (EvaluateGuard(Story, Objective.Guard).Status == EQinglanGuardStatus::Satisfied)
+				{
+					Story->NotifySceneObjectiveCompleted(Scene.SceneId, Objective.ObjectiveId);
+				}
+			}
+		};
+		for (const FQinglanRegistryScene& Scene : Registry->MainScenes)
+		{
+			CompleteSatisfiedObjectives(Scene, /*bSide=*/false);
+		}
+		for (const FQinglanRegistrySideQuest& Quest : Registry->SideQuests)
+		{
+			for (const FQinglanRegistryScene& Stage : Quest.Stages)
+			{
+				CompleteSatisfiedObjectives(Stage, /*bSide=*/true);
+			}
+		}
 	}
 
 	bool AdvanceHubTime(UQinglanStorySubsystem* Story, double GameHours)
@@ -1943,6 +2075,9 @@ namespace QinglanStoryRuntime
 			}
 		}
 		Out.ConfirmedEnding = Session->ConfirmedEnding;
+		// Ordered proof history (AUD-11): already bounded on write, so the
+		// exported array always satisfies the save validator's ceiling.
+		Out.FiredEventLog = Session->FiredEventLog;
 	}
 
 	void ImportNarrativeState(UQinglanStorySubsystem* Story, const FQinglanNarrativeState& In)
@@ -1966,6 +2101,26 @@ namespace QinglanStoryRuntime
 		for (const FName Flag : In.Flags)
 		{
 			Session.Flags.Add(Flag);
+		}
+		// Ordered proof history (AUD-11): rebuild the set form from the restored
+		// log. Entries are bounded and None-filtered so a hand-edited save
+		// cannot smuggle unbounded state into the session.
+		Session.FiredEventLog.Reset();
+		for (const FName Event : In.FiredEventLog)
+		{
+			if (Event != NAME_None)
+			{
+				Session.FiredEventLog.Add(Event);
+			}
+		}
+		if (Session.FiredEventLog.Num() > MaxFiredEventLogEntries)
+		{
+			Session.FiredEventLog.RemoveAt(0, Session.FiredEventLog.Num() - MaxFiredEventLogEntries, EAllowShrinking::No);
+		}
+		Session.FiredEvents.Reset();
+		for (const FName Event : Session.FiredEventLog)
+		{
+			Session.FiredEvents.Add(Event);
 		}
 		Session.ChoiceDecisions = NormalizeSavedChoices(LoadStoryRegistryOnce(), In.ChoiceDecisions);
 		Session.PendingAgreements = In.PendingAgreements;
@@ -2024,6 +2179,267 @@ namespace QinglanStoryRuntime
 			}
 		}
 		Session.PreviewedEndings.Reset();
+	}
+
+	/** Occurrences of one event in the ordered proof history (event_count). */
+	static int32 QinglanCountFiredEvent(const FQinglanStorySession* Session, FName Event)
+	{
+		if (Session == nullptr || Event == NAME_None)
+		{
+			return 0;
+		}
+		int32 Count = 0;
+		for (const FName Fired : Session->FiredEventLog)
+		{
+			if (Fired == Event)
+			{
+				++Count;
+			}
+		}
+		return Count;
+	}
+
+	FQinglanGuardReport EvaluateGuard(const UQinglanStorySubsystem* Story, const FQinglanRegistryGuard& Guard)
+	{
+		FQinglanGuardReport Report;
+		Report.Total = Guard.AllOf.Num();
+		if (Report.Total == 0)
+		{
+			return Report; // vacuously satisfied (unauthored proof)
+		}
+		const FQinglanStorySession* Session = FindStorySession(Story);
+		bool bMissing = false;
+		bool bOrderReset = false;
+		bool bDeliveryPending = false;
+		bool bTimeShort = false;
+
+		for (const FQinglanRegistryGuardTerm& Term : Guard.AllOf)
+		{
+			if (Term.Kind == FName(TEXT("event")))
+			{
+				if (Session == nullptr || !Session->FiredEvents.Contains(Term.Event))
+				{
+					Report.Missing.Add(Term.Event);
+					bMissing = true;
+				}
+				else
+				{
+					++Report.Progress;
+				}
+			}
+			else if (Term.Kind == FName(TEXT("event_count")))
+			{
+				const int32 Required = FMath::Max(1, Term.Count);
+				if (QinglanCountFiredEvent(Session, Term.Event) < Required)
+				{
+					Report.Missing.Add(Term.Event);
+					bMissing = true;
+				}
+				else
+				{
+					++Report.Progress;
+				}
+			}
+			else if (Term.Kind == FName(TEXT("ordered")))
+			{
+				const int32 StepCount = Term.OrderedSteps.Num();
+				int32 Matched = 0;
+				bool bOrderViolation = false;
+				if (Session != nullptr)
+				{
+					for (const FName Fired : Session->FiredEventLog)
+					{
+						if (Matched >= StepCount)
+						{
+							break;
+						}
+						if (Fired == Term.OrderedSteps[Matched])
+						{
+							++Matched;
+							continue;
+						}
+						// A later step arrived before the expected one: the
+						// prefix is broken and must be reset by the caller.
+						for (int32 Later = Matched + 1; Later < StepCount; ++Later)
+						{
+							if (Fired == Term.OrderedSteps[Later])
+							{
+								bOrderViolation = true;
+								break;
+							}
+						}
+					}
+				}
+				for (int32 Step = Matched; Step < StepCount; ++Step)
+				{
+					Report.Missing.Add(Term.OrderedSteps[Step]);
+				}
+				if (bOrderViolation)
+				{
+					bOrderReset = true;
+				}
+				else if (Matched < StepCount)
+				{
+					bMissing = true;
+				}
+				else
+				{
+					++Report.Progress;
+				}
+			}
+			else if (Term.Kind == FName(TEXT("delivery")))
+			{
+				const FQinglanDeliveryStatus Pending = QueryPendingDeliveries(Story);
+				if (Pending.Quests.Contains(Term.Quest))
+				{
+					Report.Missing.Add(Term.Quest);
+					bDeliveryPending = true;
+				}
+				else
+				{
+					++Report.Progress;
+				}
+			}
+			else if (Term.Kind == FName(TEXT("time_advance")))
+			{
+				const double RequiredSeconds = Term.GameHours * SecondsPerGameHour;
+				const double Clock = Session != nullptr ? Session->StoryClockSeconds : 0.0;
+				if (Clock + DeliveryArrivalToleranceSeconds < RequiredSeconds)
+				{
+					bTimeShort = true;
+				}
+				else
+				{
+					++Report.Progress;
+				}
+			}
+			else if (Term.Kind == FName(TEXT("flag")))
+			{
+				if (Session == nullptr || !Session->Flags.Contains(Term.Flag))
+				{
+					Report.Missing.Add(Term.Flag);
+					bMissing = true;
+				}
+				else
+				{
+					++Report.Progress;
+				}
+			}
+			else
+			{
+				// The importer drops unknown kinds; a hand-built registry term
+				// still fails closed instead of counting as satisfied.
+				Report.Missing.Add(Term.Kind.IsNone() ? FName(TEXT("guard.unknown")) : Term.Kind);
+				bMissing = true;
+			}
+		}
+
+		Report.Status = bOrderReset ? EQinglanGuardStatus::OrderReset
+			: bDeliveryPending ? EQinglanGuardStatus::DeliveryPending
+			: bTimeShort ? EQinglanGuardStatus::TimeShort
+			: bMissing ? EQinglanGuardStatus::Missing
+			: EQinglanGuardStatus::Satisfied;
+		return Report;
+	}
+
+	FQinglanGuardReport EvaluateObjectiveGuard(const UQinglanStorySubsystem* Story, FName SceneId, FName ObjectiveId)
+	{
+		FQinglanGuardReport MissingReport;
+		MissingReport.Status = EQinglanGuardStatus::Missing;
+		MissingReport.Total = 1;
+		MissingReport.Missing.Add(ObjectiveId);
+		if (SceneId.IsNone() || ObjectiveId.IsNone())
+		{
+			return MissingReport;
+		}
+		const UQinglanStoryRegistry* Registry = LoadStoryRegistryOnce();
+		FName QuestId = NAME_None;
+		const FQinglanRegistryScene* Scene = FindSceneAny(Registry, SceneId, QuestId);
+		if (Scene == nullptr)
+		{
+			return MissingReport;
+		}
+		for (const FQinglanRegistryObjective& Objective : Scene->Objectives)
+		{
+			if (Objective.ObjectiveId == ObjectiveId)
+			{
+				return EvaluateGuard(Story, Objective.Guard);
+			}
+		}
+		return MissingReport;
+	}
+
+	FQinglanGuardReport EvaluateSceneCommitGuard(const UQinglanStorySubsystem* Story, FName SceneId)
+	{
+		const UQinglanStoryRegistry* Registry = LoadStoryRegistryOnce();
+		FName QuestId = NAME_None;
+		const FQinglanRegistryScene* Scene = FindSceneAny(Registry, SceneId, QuestId);
+		if (Scene == nullptr)
+		{
+			return FQinglanGuardReport();
+		}
+		return EvaluateGuard(Story, Scene->ConfirmationGuardTerms);
+	}
+
+	bool SceneHasCommitGuard(const UQinglanStorySubsystem* Story, FName SceneId)
+	{
+		const UQinglanStoryRegistry* Registry = LoadStoryRegistryOnce();
+		FName QuestId = NAME_None;
+		const FQinglanRegistryScene* Scene = FindSceneAny(Registry, SceneId, QuestId);
+		return Scene != nullptr && Scene->ConfirmationGuardTerms.AllOf.Num() > 0;
+	}
+
+	void ResetOrderedProgress(UQinglanStorySubsystem* Story, FName SceneId)
+	{
+		if (Story == nullptr)
+		{
+			return;
+		}
+		const UQinglanStoryRegistry* Registry = LoadStoryRegistryOnce();
+		FName QuestId = NAME_None;
+		const FQinglanRegistryScene* Scene = FindSceneAny(Registry, SceneId, QuestId);
+		if (Scene == nullptr)
+		{
+			return;
+		}
+		TSet<FName> Steps;
+		auto CollectOrderedSteps = [&Steps](const FQinglanRegistryGuard& Guard)
+		{
+			for (const FQinglanRegistryGuardTerm& Term : Guard.AllOf)
+			{
+				if (Term.Kind == FName(TEXT("ordered")))
+				{
+					for (const FName Step : Term.OrderedSteps)
+					{
+						if (Step != NAME_None)
+						{
+							Steps.Add(Step);
+						}
+					}
+				}
+			}
+		};
+		CollectOrderedSteps(Scene->ConfirmationGuardTerms);
+		for (const FQinglanRegistryObjective& Objective : Scene->Objectives)
+		{
+			CollectOrderedSteps(Objective.Guard);
+		}
+		if (Steps.Num() == 0)
+		{
+			return;
+		}
+		FQinglanStorySession* Session = FindStorySession(Story);
+		if (Session == nullptr)
+		{
+			return;
+		}
+		// Ordered progress is derived from this log; removing only the step
+		// entries restarts the sequence without un-firing unrelated world
+		// events (the FiredEvents set form is intentionally untouched).
+		Session->FiredEventLog.RemoveAll([&Steps](const FName Event)
+		{
+			return Steps.Contains(Event);
+		});
 	}
 
 	bool IsObjectiveCompleted(const UQinglanStorySubsystem* Story, FName ObjectiveId)

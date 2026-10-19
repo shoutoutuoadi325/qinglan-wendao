@@ -83,6 +83,7 @@ void UQinglanProfileSubsystem::ResetToFreshProfile()
 	CampaignFlags.Reset();
 	UnlockedTechniques.Reset();
 	EquippedTechniques.Reset();
+	TechniqueTiers.Reset();
 	OwnedRelics.Reset();
 	EquippedRelic = NAME_None;
 	OwnedPassives.Reset();
@@ -131,6 +132,17 @@ bool UQinglanProfileSubsystem::IsTechniqueUnlocked(FName TechniqueId) const
 TArray<FName> UQinglanProfileSubsystem::GetEquippedTechniques() const
 {
 	return EquippedTechniques;
+}
+
+int32 UQinglanProfileSubsystem::GetTechniqueTier(FName TechniqueId) const
+{
+	const int32* Tier = TechniqueTiers.Find(TechniqueId);
+	return Tier ? FMath::Clamp(*Tier, 1, UQinglanEconomyLibrary::MaxTechniqueTier) : 1;
+}
+
+float UQinglanProfileSubsystem::GetTechniqueTierMultiplier(FName TechniqueId) const
+{
+	return UQinglanEconomyLibrary::GetTechniqueTierMultiplier(GetTechniqueTier(TechniqueId));
 }
 
 TArray<FName> UQinglanProfileSubsystem::GetOwnedRelics() const
@@ -661,6 +673,57 @@ bool UQinglanProfileSubsystem::TryPurchasePassive(FName TransactionId, FName Pas
 	return true;
 }
 
+bool UQinglanProfileSubsystem::TryPurchaseTechniqueTier(FName TransactionId, FName TechniqueId)
+{
+	// AUD-37: tier-2 upgrades are optional purchases from Foundation
+	// Establishment onward (docs/03 sections 1 and 3). Costs come from the
+	// single economy table so UI previews and the charge agree.
+	if (TransactionId == NAME_None)
+	{
+		UE_LOG(LogQinglan, Warning, TEXT("TryPurchaseTechniqueTier rejected: empty transaction id"));
+		return false;
+	}
+	if (WasTransactionCommitted(TransactionId))
+	{
+		return true; // idempotent replay of this purchase
+	}
+	if (!QinglanProgression::IsKnownTechniqueId(TechniqueId)
+		|| !UnlockedTechniques.Contains(TechniqueId))
+	{
+		UE_LOG(LogQinglan, Warning, TEXT("TryPurchaseTechniqueTier rejected: unknown or locked technique"));
+		return false;
+	}
+	if (!UQinglanEconomyLibrary::IsTier2Available(Stage))
+	{
+		return false; // Qi Refining has no tier-2 upgrades
+	}
+
+	if (GetTechniqueTier(TechniqueId) >= UQinglanEconomyLibrary::MaxTechniqueTier)
+	{
+		// Already upgraded (e.g. by an earlier transaction): commit the id so
+		// replays stay no-ops, but never charge twice.
+		CommittedTransactionIds.Add(TransactionId);
+		OnProfileCommitted.Broadcast();
+		return true;
+	}
+
+	FQinglanInventory Cost;
+	UQinglanEconomyLibrary::GetTier2UpgradeCost(Cost);
+	if (!IsAffordable(Inventory, Cost))
+	{
+		return false; // atomic rejection, no partial state
+	}
+
+	Inventory.SpiritShards -= Cost.SpiritShards;
+	Inventory.SpiritHerb -= Cost.SpiritHerb;
+	Inventory.VeinCrystal -= Cost.VeinCrystal;
+	TechniqueTiers.Add(TechniqueId, UQinglanEconomyLibrary::MaxTechniqueTier);
+	CommittedTransactionIds.Add(TransactionId);
+	OnInventoryChanged.Broadcast(Inventory);
+	OnProfileCommitted.Broadcast();
+	return true;
+}
+
 // ---------------------------------------------------------------------------
 // Talisman charges (docs/03 section 5)
 // ---------------------------------------------------------------------------
@@ -863,6 +926,9 @@ void UQinglanProfileSubsystem::ExportStateForSave(FQinglanProfileSnapshot& OutSn
 	OutSnapshot.UnlockedTechniques = UnlockedTechniques.Array();
 	OutSnapshot.UnlockedTechniques.Sort([](const FName& A, const FName& B) { return A.LexicalLess(B); });
 	OutSnapshot.EquippedTechniques = EquippedTechniques;
+	// AUD-37: permanent upgrade tiers. The save-side fingerprint folds maps in
+	// key order, so iteration order does not affect the checksum.
+	OutSnapshot.TechniqueTiers = TechniqueTiers;
 	OutSnapshot.OwnedRelics = OwnedRelics.Array();
 	OutSnapshot.OwnedRelics.Sort([](const FName& A, const FName& B) { return A.LexicalLess(B); });
 	OutSnapshot.EquippedRelic = EquippedRelic;
@@ -890,6 +956,16 @@ void UQinglanProfileSubsystem::ImportStateFromSave(const FQinglanProfileSnapshot
 	Inventory = Snapshot.Inventory;
 	UnlockedTechniques = ToNameSet(Snapshot.UnlockedTechniques);
 	EquippedTechniques = Snapshot.EquippedTechniques;
+	// AUD-37: restore permanent upgrade tiers; clamp to the authored range so a
+	// malformed save cannot exceed tier 2.
+	TechniqueTiers.Reset();
+	for (const TPair<FName, int32>& Pair : Snapshot.TechniqueTiers)
+	{
+		if (!Pair.Key.IsNone() && Pair.Value >= 1)
+		{
+			TechniqueTiers.Add(Pair.Key, FMath::Clamp(Pair.Value, 1, UQinglanEconomyLibrary::MaxTechniqueTier));
+		}
+	}
 	OwnedRelics = ToNameSet(Snapshot.OwnedRelics);
 	EquippedRelic = Snapshot.EquippedRelic;
 	OwnedPassives = ToNameSet(Snapshot.OwnedPassives);

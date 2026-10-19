@@ -11,7 +11,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Combat/QinglanCombatComponent.h" // FQinglanResolvedDamage for the gameplay-proof relay
 #include "Core/QinglanCoreTypes.h"
+#include "Narrative/QinglanStoryDataTypes.h"
 #include "Narrative/QinglanStorySubsystem.h"
 #include "Persistence/QinglanSaveGame.h"
 #include "UObject/StrongObjectPtr.h"
@@ -136,7 +138,11 @@ struct FQinglanStorySession
 	TMap<FName, int32> BarkPlaysThisVisit;
 	/** Deterministic rotation cursor; no gameplay randomness (code-contracts). */
 	int32 BarkRotationCursor = 0;
+	/** Set form: trigger-gated script lines test membership. */
 	TSet<FName> FiredEvents;
+	/** Ordered history for proof evaluation (event_count repetition and the
+	 *  ordered prefix). Every dispatch appends; bounded on write and in save. */
+	TArray<FName> FiredEventLog;
 
 	// --- GC-safe bindings + delegates ---
 	TStrongObjectPtr<class UQinglanStorySignalRelay> Relay;
@@ -161,6 +167,33 @@ public:
 	TWeakObjectPtr<UQinglanStorySubsystem> StorySubsystem;
 };
 
+/**
+ * Gameplay-proof event relay (AUD-11 event producers). The player character's
+ * combat/dodge/technique delegates are dynamic, so they can only bind
+ * UFUNCTIONs; the character header is frozen, so these handlers live here and
+ * forward stable proof event names to QinglanStoryRuntime::NotifyGameplayEvent.
+ * Owned (and GC-rooted) by the character's binding helpers.
+ */
+UCLASS()
+class UQinglanGameplayProofRelay : public UObject
+{
+	GENERATED_BODY()
+
+public:
+	/** Accepted damage resolved; emits combat.sword_hit when the owner attacked. */
+	UFUNCTION()
+	void HandleDamageResultResolved(const FQinglanResolvedDamage& Result);
+	UFUNCTION()
+	void HandleDodgeStarted(float Duration);
+	UFUNCTION()
+	void HandleCastReleased(FName TechniqueId, FQinglanCastId CastId);
+
+	UPROPERTY()
+	TWeakObjectPtr<UQinglanStorySubsystem> StorySubsystem;
+	UPROPERTY()
+	TWeakObjectPtr<AActor> OwnerActor;
+};
+
 /** Narrative-module tunables; every value cites its authored source. */
 namespace QinglanStoryRuntime
 {
@@ -177,6 +210,9 @@ namespace QinglanStoryRuntime
 	inline constexpr double SQ03DeliveryGameHours = 12.0;
 	/** Seconds per in-fiction hour for the hub story clock. */
 	inline constexpr double SecondsPerGameHour = 3600.0;
+	/** Bounded ordered event history; matches the save validator's
+	 *  MaxNarrativeEntries ceiling so an exported log always validates. */
+	inline constexpr int32 MaxFiredEventLogEntries = 1024;
 	/** Hour fractions accumulate rounding error (17.9 h + 0.1 h can land a
 	 *  hair under an exact 18 h ready time); arrivals compare with this
 	 *  tolerance so authored whole-hour boundaries stay exact on both sides. */
@@ -219,7 +255,45 @@ namespace QinglanStoryRuntime
 	bool TryInspectRecord(UQinglanStorySubsystem* Story, FName RecordId);
 
 	// --- Dispatcher bridge: gameplay events -> trigger-gated lines + mq_* flags ---
-	void NotifyGameplayEvent(UQinglanStorySubsystem* Story, FName Event, const TArray<FName>& SetsFlags);
+	QINGLANASCENSION_API void NotifyGameplayEvent(UQinglanStorySubsystem* Story, FName Event, const TArray<FName>& SetsFlags);
+
+	// --- Gameplay-proof guards (AUD-10/AUD-11) ---
+	/** Guard evaluation outcome. OrderReset and DeliveryPending/TimeShort are
+	 *  more actionable than a generic Missing, so they win when terms fail. */
+	enum class EQinglanGuardStatus : uint8
+	{
+		Satisfied,
+		Missing,
+		OrderReset,
+		DeliveryPending,
+		TimeShort
+	};
+
+	struct FQinglanGuardReport
+	{
+		EQinglanGuardStatus Status = EQinglanGuardStatus::Satisfied;
+		/** Unmet event/flag/quest names; ordered terms list their remaining
+		 *  steps in authored order so a UI can describe the next action. */
+		TArray<FName> Missing;
+		/** Fully satisfied terms. */
+		int32 Progress = 0;
+		/** Total authored terms (0 = unauthored guard, vacuously satisfied). */
+		int32 Total = 0;
+	};
+
+	/** Evaluates one conjunction against the session's fired-event log/flags,
+	 *  courier deliveries, and story clock. Never mutates state. */
+	QINGLANASCENSION_API FQinglanGuardReport EvaluateGuard(const UQinglanStorySubsystem* Story, const FQinglanRegistryGuard& Guard);
+	/** Evaluates the named objective's authored proof. */
+	QINGLANASCENSION_API FQinglanGuardReport EvaluateObjectiveGuard(const UQinglanStorySubsystem* Story, FName SceneId, FName ObjectiveId);
+	/** Evaluates a scene's structured confirmation_guard. Unauthored guards
+	 *  report Satisfied so legacy scenes keep their existing commit path. */
+	QINGLANASCENSION_API FQinglanGuardReport EvaluateSceneCommitGuard(const UQinglanStorySubsystem* Story, FName SceneId);
+	/** True when the scene authors at least one confirmation_guard term. */
+	QINGLANASCENSION_API bool SceneHasCommitGuard(const UQinglanStorySubsystem* Story, FName SceneId);
+	/** Clears the ordered-prefix history for every ordered term of the scene
+	 *  (objective and confirmation guards) so the player may retry the sequence. */
+	QINGLANASCENSION_API void ResetOrderedProgress(UQinglanStorySubsystem* Story, FName SceneId);
 
 	// --- Safe hub time advance (courier deliveries) ---
 	/** Advances the in-fiction hub clock; marks matching deliveries arrived.

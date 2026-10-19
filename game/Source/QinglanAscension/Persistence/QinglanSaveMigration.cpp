@@ -277,6 +277,25 @@ namespace QinglanSave
 				return false;
 			}
 		}
+		// AUD-37: permanent technique tiers are bounded and only name unlocked
+		// techniques at the authored tier range (1..2).
+		if (Save->TechniqueTiers.Num() > MaxTechniqueEntries)
+		{
+			UE_LOG(LogQinglanSave, Error, TEXT("Save invariant 'technique tier count' failed"));
+			OutError = Loc(TEXT("save.invalid"));
+			return false;
+		}
+		for (const TPair<FName, int32>& TierPair : Save->TechniqueTiers)
+		{
+			if (TierPair.Key.IsNone() || !Unlocked.Contains(TierPair.Key) ||
+				TierPair.Value < 1 || TierPair.Value > 2)
+			{
+				UE_LOG(LogQinglanSave, Error, TEXT("Save invariant 'technique tier entry' failed for %s"),
+					*TierPair.Key.ToString());
+				OutError = Loc(TEXT("save.invalid"));
+				return false;
+			}
+		}
 
 		if (!IsBoundedNameArray(Save->CampaignFlags, MaxFlagEntries, "campaign flags", OutError) ||
 			!IsBoundedNameArray(Save->CommittedTransactionIds, MaxTransactionEntries, "committed transactions", OutError))
@@ -347,7 +366,8 @@ namespace QinglanSave
 		if (!IsBoundedNameArray(Narrative.CompletedScenes, MaxNarrativeEntries, "completed scenes", OutError) ||
 			!IsBoundedNameArray(Narrative.CompletedSideStages, MaxNarrativeEntries, "completed side stages", OutError) ||
 			!IsBoundedNameArray(Narrative.Flags, MaxFlagEntries, "narrative flags", OutError) ||
-			!IsBoundedNameArray(Narrative.ReadRecords, MaxNarrativeEntries, "read records", OutError))
+			!IsBoundedNameArray(Narrative.ReadRecords, MaxNarrativeEntries, "read records", OutError) ||
+			!IsBoundedNameArray(Narrative.FiredEventLog, MaxNarrativeEntries, "fired event log", OutError))
 		{
 			return false;
 		}

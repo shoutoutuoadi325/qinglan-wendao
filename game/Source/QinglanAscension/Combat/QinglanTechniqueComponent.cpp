@@ -426,10 +426,17 @@ void UQinglanTechniqueComponent::ReleaseCurrentCast()
 	Context.Technique = Technique;
 	Context.CastId = CurrentCastId;
 	Context.Blessings = Blessings;
-	// docs/03 §3 tier-2 (+15% raw damage / heal / barrier). FIXME-CONTRACT:
-	// the profile scaffold exposes no per-technique tier query; tier-1 ships
-	// as 1.0 until the progression module provides tier data.
+	// docs/03 §3 tier-2 (+15% raw damage / heal / barrier). The profile owns
+	// the purchased tier; headless/no-profile contexts keep the base 1.0
+	// (AUD-37).
 	Context.TierMultiplier = 1.f;
+	if (UGameInstance* GameInstance = Owner->GetGameInstance())
+	{
+		if (const UQinglanProfileSubsystem* Profile = GameInstance->GetSubsystem<UQinglanProfileSubsystem>())
+		{
+			Context.TierMultiplier = Profile->GetTechniqueTierMultiplier(Technique->TechniqueId);
+		}
+	}
 	ResolveAim(this, Technique, Context.AimPoint, Context.AimDirection);
 	UQinglanTechniqueExecutors::Execute(Context);
 

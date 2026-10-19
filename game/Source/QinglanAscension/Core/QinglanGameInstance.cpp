@@ -1,5 +1,5 @@
 // Game instance implementation: bootstrap, early graphics, story registry
-// warm load, first-launch locale, and first-map travel.
+// warm load, startup locale, and first-map travel.
 //
 // Docs: docs/05-technical-architecture.md section 1 (UQinglanGameInstance =
 // bootstrap services, profile selection, travel coordination),
@@ -10,6 +10,10 @@
 // on OS match) and section 1.9 (scenes imported into data assets),
 // docs/dev/level-layout.md (map files L_Hub / realm maps).
 //
+// AUD-48: FQinglanLocalizationService loads the packaged bilingual table and
+// registers the runtime translation source before any text is resolved.
+// AUD-49: first-launch state is captured before profile 0 is created.
+//
 // FIXME-CONTRACT: the frozen scaffold header declares no storage members, so
 // the cached subsystem pointers and the streamable registry handle live in a
 // TU-local weak-keyed map beside each game instance (same pattern as
@@ -17,11 +21,10 @@
 // Merge them into the class when headers unfreeze.
 #include "Core/QinglanGameInstance.h"
 
+#include "Core/QinglanLocalizationService.h"
 #include "Engine/AssetManager.h"
 #include "Engine/StreamableManager.h"
 #include "Engine/World.h"
-#include "Internationalization/Culture.h" // complete FCulture for GetName()
-#include "Internationalization/Internationalization.h"
 #include "Kismet/GameplayStatics.h"
 #include "Narrative/QinglanStorySubsystem.h"
 #include "Persistence/QinglanSaveSubsystem.h"
@@ -67,6 +70,12 @@ namespace
 		/** Keeps the async registry load resident until shutdown. */
 		TSharedPtr<FStreamableHandle> RegistryHandle;
 		bool bEarlySettingsApplied = false;
+		/**
+		 * AUD-49: sampled in Init before profile 0 is created. StartFirstMap
+		 * must reuse this value; re-querying after creation would always say
+		 * "returning player".
+		 */
+		bool bFirstLaunch = false;
 	};
 
 	TMap<TWeakObjectPtr<UQinglanGameInstance>, FQinglanInstanceExtra>& InstanceExtras()
@@ -129,24 +138,38 @@ namespace
 		return true;
 	}
 
-	/** First launch auto-selects zh-Hans when the OS language matches (blueprint section 1.8). */
-	void ApplyFirstLaunchLocale(UQinglanGameInstance* Instance)
+	/**
+	 * AUD-49: startup culture priority is
+	 *   explicit persisted preference > first-launch OS detection > en-US.
+	 * bFirstLaunch is passed in because it must be sampled before Init creates
+	 * profile 0; querying first-launch state here re-introduced the bug.
+	 */
+	void ApplyStartupLocale(bool bFirstLaunch)
 	{
-		if (!IsFirstLaunch(Instance))
+		FString ExplicitPreference;
+		const bool bHasExplicitPreference =
+			FQinglanLocalizationService::ReadPreferredCulture(ExplicitPreference);
+
+		bool bShouldPersistDetected = false;
+		const FString Culture = FQinglanLocalizationService::ResolveStartupCulture(
+			bFirstLaunch,
+			bHasExplicitPreference ? ExplicitPreference : FString(),
+			FQinglanLocalizationService::GetOSDefaultCultureName(),
+			bShouldPersistDetected);
+
+		// First-launch detection becomes the persisted preference so a Chinese
+		// OS keeps zh-Hans on subsequent launches (it is still lower priority
+		// than any explicit player choice saved through the settings flow).
+		if (bShouldPersistDetected)
 		{
-			return; // returning players keep their persisted culture
+			FQinglanLocalizationService::WritePreferredCulture(Culture);
 		}
-		FInternationalization& I18N = FInternationalization::Get();
-		// GetCurrentLanguage returns an FCultureRef (TSharedRef<FCulture>); the
-		// culture name (eg "zh-Hans-CN") is the string the prefix check needs.
-		const FString OSLanguage = I18N.GetCurrentLanguage()->GetName();
-		if (OSLanguage.StartsWith(TEXT("zh")))
-		{
-			if (I18N.SetCurrentCulture(TEXT("zh-Hans")))
-			{
-				UE_LOG(LogQinglan, Log, TEXT("First launch: OS language matched, zh-Hans culture applied"));
-			}
-		}
+
+		FQinglanLocalizationService::ApplyCulture(Culture);
+		UE_LOG(LogQinglan, Log, TEXT("Startup locale: %s (first launch: %s, explicit preference: %s)"),
+			*Culture,
+			bFirstLaunch ? TEXT("yes") : TEXT("no"),
+			bHasExplicitPreference ? TEXT("yes") : TEXT("no"));
 	}
 
 	void TravelToMap(UQinglanGameInstance* Instance, const TCHAR* MapPath, const TCHAR* Options)
@@ -174,6 +197,10 @@ void UQinglanGameInstance::Init()
 {
 	Super::Init();
 
+	// AUD-48: load the packaged en-US + zh-Hans table and register the
+	// text-localization source before any FText is resolved below.
+	FQinglanLocalizationService::InitializeRuntimeResources();
+
 	FQinglanInstanceExtra& Extra = ExtraFor(this);
 
 	// Cache subsystems at boot (gameplay code reaches them through the game
@@ -184,6 +211,12 @@ void UQinglanGameInstance::Init()
 	Extra.Run = GetSubsystem<UQinglanRunSubsystem>();
 	Extra.Story = GetSubsystem<UQinglanStorySubsystem>();
 
+	// AUD-49: capture first-launch state BEFORE profile creation below. The
+	// old order created profile 0 first, so ApplyFirstLaunchLocale always saw
+	// an existing profile and never selected zh-Hans.
+	Extra.bFirstLaunch = IsFirstLaunch(this);
+	ApplyStartupLocale(Extra.bFirstLaunch);
+
 	// First launch creates profile slot 0 here rather than in StartFirstMap:
 	// the GameDefaultMap path (L_Hub) loads the map directly and never routes
 	// through StartFirstMap, and without an active slot the hub autosave has
@@ -191,7 +224,7 @@ void UQinglanGameInstance::Init()
 	// authored; when it exists this creation moves behind it.
 	if (UQinglanSaveSubsystem* Save = Extra.Save.Get())
 	{
-		if (IsFirstLaunch(this))
+		if (Extra.bFirstLaunch)
 		{
 			Save->CreateNewProfile(0);
 		}
@@ -212,8 +245,6 @@ void UQinglanGameInstance::Init()
 			FStreamableManager::DefaultAsyncLoadPriority);
 		UE_LOG(LogQinglan, Log, TEXT("Story registry warm load requested"));
 	}
-
-	ApplyFirstLaunchLocale(this);
 
 	UE_LOG(LogQinglan, Log, TEXT("Game instance initialized"));
 }
@@ -267,7 +298,9 @@ void UQinglanGameInstance::StartFirstMap()
 	// and it must land before the first heavy scene per docs/06 section 4).
 	ApplyEarlyPlatformSettings();
 
-	const bool bFirstLaunch = IsFirstLaunch(this);
+	// AUD-49: reuse the flag captured before Init created profile 0; a fresh
+	// IsFirstLaunch() here would always report false after that creation.
+	const bool bFirstLaunch = ExtraFor(this).bFirstLaunch;
 
 #if UE_BUILD_SHIPPING
 	// Shipping uses the tested default flow: benchmark maps are stripped from

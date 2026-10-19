@@ -117,7 +117,11 @@ namespace
 		}
 
 		UPackage* Package = WBP->GetOutermost();
-		Package->FullyLoad(); // discovery can leave packages half-open; saves refuse those
+		// MakeWidgetBlueprint already forced a full load (or created a fresh
+		// package). Re-running FullyLoad here on a package that now holds the
+		// just-compiled blueprint objects re-enters async loading with dirty
+		// in-memory exports and fatals in UE 5.8; the load above is the only
+		// place that needs it.
 		const FString FileName = FPackageName::LongPackageNameToFilename(
 			Package->GetName(), FPackageName::GetAssetPackageExtension());
 		FSavePackageArgs Args;

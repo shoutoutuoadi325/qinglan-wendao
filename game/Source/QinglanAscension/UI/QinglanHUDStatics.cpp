@@ -1,17 +1,19 @@
 // HUD/UI static helpers implementation.
 //
-// Text: every FText originates from the string table
-// /Game/Qinglan/Data/ST_Game via FText::FromStringTable (code-contracts.md
-// "Localization keys"; docs/11-english-style-and-ui.md section on keys and
-// formatting). Numbers: FText::AsNumber/AsPercent route through the active
-// culture, so en-US and zh-Hans both format correctly after a live language
-// switch (docs/11: live switching without restart).
+// Text: GameText resolves through FQinglanLocalizationService (AUD-48: the
+// packaged en-US + zh-Hans DT_Localization table) and falls back to the
+// /Game/Qinglan/Data/ST_Game source strings via FText::FromStringTable
+// (code-contracts.md "Localization keys"; docs/11-english-style-and-ui.md
+// section on keys and formatting). Numbers: FText::AsNumber/AsPercent route
+// through the active culture, so en-US and zh-Hans both format correctly after
+// a live language switch (docs/11: live switching without restart).
 #include "UI/QinglanHUDStatics.h"
 
 #include "Blueprint/UserWidget.h"
 #include "Combat/QinglanCharacter.h"
 #include "Combat/QinglanCombatComponent.h"
 #include "Combat/QinglanTechniqueComponent.h"
+#include "Core/QinglanLocalizationService.h"
 #include "Core/QinglanTrialDirector.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
@@ -114,18 +116,32 @@ FName UQinglanHUDStatics::GameStringTableId()
 
 FText UQinglanHUDStatics::GameText(FName Key)
 {
-	// FText::FromStringTable is the single sanctioned resolution path
+	// AUD-48: the runtime bilingual service (packaged DT_Localization) is the
+	// primary resolver; it follows the active culture and falls back en-US.
+	// ST_Game remains the final fallback so a missing/unqueued importer output
+	// never turns player-facing text blank.
+	FText Result;
+	if (FQinglanLocalizationService::TryResolve(Key, Result))
+	{
+		return Result;
+	}
+
+	// FText::FromStringTable is the sanctioned source-string path
 	// (code-contracts.md); it logs internally for malformed table ids.
-	FText Result = FText::FromStringTable(GGameStringTablePath, Key.ToString());
+	Result = FText::FromStringTable(GGameStringTablePath, Key.ToString());
 	if (Result.IsEmpty())
 	{
-		UE_LOG(LogQinglanUI, Warning, TEXT("GameText: string table has no key '%s'"), *Key.ToString());
+		UE_LOG(LogQinglanUI, Warning, TEXT("GameText: no runtime translation or string table key '%s'"), *Key.ToString());
 	}
 	return Result;
 }
 
 bool UQinglanHUDStatics::HasGameText(FName Key)
 {
+	if (FQinglanLocalizationService::HasKey(Key))
+	{
+		return true;
+	}
 	if (UStringTable* Table = LoadGameStringTable())
 	{
 		const TSharedPtr<FStringTable> Root = Table->GetMutableStringTable();

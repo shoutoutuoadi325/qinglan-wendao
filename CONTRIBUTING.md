@@ -2,7 +2,7 @@
 
 ## Current stage
 
-This repository is a planning baseline. There is no `.uproject`, gameplay executable, or completed effect yet. Start implementation with M0 in the production plan; do not mark performance, licensing, or Store compatibility verified before evidence exists.
+This repository contains an Unreal Engine project at `game/` (engine association 5.8) with C++ gameplay modules, authored data, generated content, and editor automation tests. The last recorded Linux Development editor build succeeded and the automation suite ran 35/35 green; see `docs/dev/evidence/`. That evidence covers compilation and scripted subsystem behavior only. Do not mark performance, licensing, rendered play, or Store compatibility verified before the corresponding evidence exists; the open audit items are tracked in `docs/dev/completion-audit-todo.md`.
 
 ## Local documentation workflow
 
@@ -14,7 +14,7 @@ python3 tools/validate_repository.py
 
 Use Python 3.10+ without third-party packages for repository validation. All code comments, documentation, developer logs, issues, branches, and commit messages use English. Chinese UI copy belongs in `localization/zh-Hans.json` or its future runtime localization outputs.
 
-## Gameplay environment, once M0 begins
+## Gameplay environment
 
 Obtain the selected released Unreal patch under the owner's applicable free license. Record Windows build tools/GDK versions and Mac Xcode/SDK versions. Build and test each platform on its own OS. Do not commit the engine or signing credentials. Do not use paid-only plugins or plugins without native Mac support.
 

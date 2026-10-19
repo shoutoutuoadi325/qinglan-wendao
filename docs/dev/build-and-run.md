@@ -14,24 +14,39 @@ Environment used for development:
 ## Build (editor target)
 
 ```bash
-bash /inspire/hdd/project/qianghuaxuexi/s26044/build-game.sh
-tail -5 /inspire/hdd/project/qianghuaxuexi/s26044/game-build.log   # rc=0 on success
+bash tools/build/build-game.sh
 ```
 
-The script prefers the `qdev` account when it exists and otherwise builds as the current user.
-Output binary: `game/Binaries/Linux/UnrealEditor-QinglanAscension` (+ module `.so` files under
-`game/Binaries/Linux/`).
+The script is committed and portable: it resolves the repository root from its
+own location and takes external roots from the environment —
+`QINGLAN_ENGINE_ROOT` (engine checkout; defaults beside the repository),
+`QINGLAN_PROJECT_DIR`, `QINGLAN_TARGET`, `QINGLAN_CONFIG`, `QINGLAN_PLATFORM`.
+The tested engine revision and toolchain are locked in
+[`tools/build/versions.lock`](../../tools/build/versions.lock). It exits
+nonzero when inputs are missing or when UBT reports success without producing
+the binaries. It prefers the `qdev` account when it exists and otherwise builds
+as the current user. Output binary: `game/Binaries/Linux/UnrealEditor-QinglanAscension`
+(+ module `.so` files under `game/Binaries/Linux/`).
 
 ## Content pipeline (editor commandlets, run once after build / after data changes)
 
-Run from the engine root with the project path; every commandlet is headless (`-unattended`):
+The committed wrapper runs the whole sequence and fails when mandatory outputs
+are missing (AUD-57):
 
 ```bash
-E=/inspire/hdd/project/qianghuaxuexi/s26044/UnrealEngine
-P=/inspire/hdd/project/qianghuaxuexi/s26044/qinglan-wendao/game/QinglanAscension.uproject
+bash tools/build/regenerate-content.sh
+```
+
+Headless invocation form for individual steps (the module-qualified commandlet
+name is required: project commandlets live in the PostEngineInit editor module):
+
+```bash
+E="${QINGLAN_ENGINE_ROOT:-$PWD/../UnrealEngine}"
+P="${QINGLAN_PROJECT_DIR:-$PWD/game}/QinglanAscension.uproject"
+DATA="${QINGLAN_PROJECT_DIR:-$PWD/game}/../data"
 
 # 1) Story data -> /Game/Qinglan/Data assets (registry, techniques, realms, ST_Game)
-$E/Engine/Binaries/Linux/UnrealEditor-Cmd "$P" -run=QinglanAscensionEditor.QinglanDataImportCommandlet -data=/inspire/hdd/project/qianghuaxuexi/s26044/qinglan-wendao/data -unattended -nop4 -nosplash
+$E/Engine/Binaries/Linux/UnrealEditor-Cmd "$P" -run=QinglanAscensionEditor.QinglanDataImportCommandlet -data="$DATA" -unattended -nop4 -nosplash
 
 # 2) Core content: four maps, master materials, input assets
 $E/Engine/Binaries/Linux/UnrealEditor-Cmd "$P" -run=QinglanAscensionEditor.QinglanContentBootstrapCommandlet -unattended -nop4 -nosplash

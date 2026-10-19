@@ -20,6 +20,7 @@
 #include "Core/QinglanCoreTypes.h"
 #include "QinglanStatusComponent.generated.h"
 
+class ACharacter;
 class UQinglanCombatComponent;
 
 /** Broadcast for HUD/cue listeners; RemainingSeconds is 0 for one-shot effects.
@@ -34,7 +35,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FQinglanTimedStatusRemoved, EQinglan
  * paused game time; never wall clock.
  */
 UCLASS(ClassGroup = (Qinglan), meta = (BlueprintSpawnableComponent))
-class UQinglanStatusComponent : public UActorComponent
+class QINGLANASCENSION_API UQinglanStatusComponent : public UActorComponent // linkage-only export for editor automation specs
 {
 	GENERATED_BODY()
 
@@ -70,11 +71,28 @@ public:
 	/** Localized display name from /Game/Qinglan/Data/ST_Game (keys status.wet ...). */
 	UFUNCTION(BlueprintPure) FText GetStatusDisplayName(EQinglanStatus Status) const;
 
+	/**
+	 * Advances every status countdown by DeltaSeconds. TickComponent delegates
+	 * here; automation specs call it directly on unregistered components,
+	 * where UActorComponent::TickComponent would assert.
+	 */
+	void AdvanceTime(float DeltaSeconds);
+
 	// --- Movement queries (docs/02 §7 Root semantics) ---
 	UFUNCTION(BlueprintPure) bool IsRooted() const;
 	UFUNCTION(BlueprintPure) bool IsSlowed() const;
 	/** 0 while rooted, 0.9 while boss-slowed, otherwise 1. */
 	UFUNCTION(BlueprintPure) float GetMoveSpeedMultiplier() const;
+
+	/**
+	 * AUD-36: applies the current movement multiplier to a character's
+	 * CharacterMovement->MaxWalkSpeed, saving the unmodified speed on the
+	 * transition into root/slow and restoring it when the status ends. The
+	 * player and AI share this sink; it keeps working when another system
+	 * (dodge dash, AI controller) rewrites MaxWalkSpeed mid-status because an
+	 * external change is re-captured as the new baseline before re-applying.
+	 */
+	UFUNCTION(BlueprintCallable) void ApplyToCharacterMovement(ACharacter* Character);
 
 	UPROPERTY(BlueprintAssignable) FQinglanTimedStatusApplied OnStatusApplied;
 	UPROPERTY(BlueprintAssignable) FQinglanTimedStatusRemoved OnStatusRemoved;
@@ -124,6 +142,11 @@ private:
 	float SlowRemaining = 0.f;
 	/** Active slow fraction (1 - BossSlowPercent/100) while slowed. */
 	float ActiveSlowFraction = 1.f;
+	/** Movement sink bookkeeping (AUD-36): unmodified speed captured on the
+	 *  transition into root/slow, and the value this component last wrote. */
+	float MovementBaseSpeed = -1.f;
+	float MovementAppliedSpeed = -1.f;
+	bool bMovementModifierActive = false;
 	/** Mirrored Wet/Burn countdowns; the combat component is the authority. */
 	float WetRemainingMirror = 0.f;
 	float BurnRemainingMirror = 0.f;

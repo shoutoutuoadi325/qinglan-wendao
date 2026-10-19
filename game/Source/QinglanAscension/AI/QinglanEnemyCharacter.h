@@ -11,6 +11,9 @@ class UQinglanStatusComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQinglanEnemyDied, AQinglanEnemyCharacter*, Enemy, FName, EnemyId);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQinglanEnemyTelegraph, AQinglanEnemyCharacter*, Enemy, float, Duration);
+/** AUD-41: phase-two ember warning. SafeLaneDegrees is the deterministic gap
+ *  presentation must keep visible; the mechanic is quality-independent. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FQinglanEmberVolleyTelegraph, AQinglanEnemyCharacter*, Enemy, float, SafeLaneDegrees, float, WarningSeconds);
 
 /**
  * Base enemy. One shared humanoid rig; archetypes differ by data asset.
@@ -31,6 +34,12 @@ public:
 	UFUNCTION(BlueprintPure) EQinglanAIState GetAIState() const { return AIState; }
 	UFUNCTION(BlueprintPure) FName GetEnemyId() const;
 	UFUNCTION(BlueprintPure) bool IsAlive() const;
+	/**
+	 * AUD-36: single authoritative boss identity. InitializeFromData tags
+	 * UQinglanBossDataAsset actors with Qinglan.Boss; this query also checks
+	 * the data asset directly so callers never depend on tag ordering.
+	 */
+	UFUNCTION(BlueprintPure) bool IsBoss() const;
 
 	/** Pooling contract: clears timers, victims, owner, tags, collision, lifetime. */
 	void ResetForPool();
@@ -41,6 +50,15 @@ public:
 
 	UPROPERTY(BlueprintAssignable) FQinglanEnemyDied OnDied;
 	UPROPERTY(BlueprintAssignable) FQinglanEnemyTelegraph OnTelegraph;
+	/** Phase-two ember warning with the safe-lane bearing (world-space yaw,
+	 *  degrees). Presentation uses it for the visible lane marker at every
+	 *  quality tier; gameplay never depends on a presenter existing. */
+	UPROPERTY(BlueprintAssignable) FQinglanEmberVolleyTelegraph OnEmberVolleyTelegraph;
+
+	/** AUD-41 telemetry/presentation queries. */
+	UFUNCTION(BlueprintPure) bool IsPhaseTwoEmbersArmed() const { return bPhaseTwoEmbersArmed; }
+	UFUNCTION(BlueprintPure) bool IsEmberTelegraphActive() const { return bEmberTelegraphActive; }
+	UFUNCTION(BlueprintPure) float GetEmberSafeLaneDegrees() const { return EmberSafeLaneDeg; }
 
 protected:
 	/** Decision tick at 5-10 Hz: Acquire/Approach/Windup transitions. */

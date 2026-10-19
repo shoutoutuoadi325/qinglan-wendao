@@ -16,6 +16,7 @@
 
 #include "AI/QinglanEncounterDirector.h"
 #include "Combat/QinglanCharacter.h"
+#include "Combat/QinglanCombatComponent.h"
 #include "Components/SphereComponent.h"
 #include "Core/QinglanTrialDirector.h"
 #include "Core/QinglanTrialAdmission.h"
@@ -47,6 +48,7 @@ namespace
 	const FName GHubBambooGateId(TEXT("hub.bamboo_gate"));
 	const FName GHubAshenGateId(TEXT("hub.ashen_gate"));
 	const FName GHubTrialGateId(TEXT("hub.trial_gate"));
+	const FName GHubShrineId(TEXT("hub.shrine"));
 	const FName GCultivationShrineId(TEXT("hub.cultivation_shrine"));
 	const FName GTrialPrepShrineId(TEXT("trial.preparation_shrine"));
 	const FName GHubWorkbenchId(TEXT("hub.workbench"));
@@ -446,6 +448,89 @@ namespace
 		}
 		return false;
 	}
+
+	// --- Gameplay-proof guards (AUD-11) ---
+
+	/** Registry objective lookup used by the anchor proof path. */
+	const FQinglanRegistryObjective* QinglanFindRegistryObjective(const UQinglanStorySubsystem* Story, FName SceneId, FName ObjectiveId)
+	{
+		const UQinglanStoryRegistry* Registry = Story ? Story->GetRegistry() : nullptr;
+		if (Registry == nullptr || SceneId.IsNone() || ObjectiveId.IsNone())
+		{
+			return nullptr;
+		}
+		FName QuestId = NAME_None;
+		const FQinglanRegistryScene* Scene = Registry->FindMainScene(SceneId);
+		if (Scene == nullptr)
+		{
+			Scene = Registry->FindSideStage(SceneId, QuestId);
+		}
+		if (Scene == nullptr)
+		{
+			return nullptr;
+		}
+		for (const FQinglanRegistryObjective& Objective : Scene->Objectives)
+		{
+			if (Objective.ObjectiveId == ObjectiveId)
+			{
+				return &Objective;
+			}
+		}
+		return nullptr;
+	}
+
+	bool QinglanObjectiveHasGuard(const UQinglanStorySubsystem* Story, FName SceneId, FName ObjectiveId)
+	{
+		const FQinglanRegistryObjective* Objective = QinglanFindRegistryObjective(Story, SceneId, ObjectiveId);
+		return Objective != nullptr && Objective->Guard.AllOf.Num() > 0;
+	}
+
+	/**
+	 * Next authored ordered step. EvaluateGuard appends ordered terms' remaining
+	 * steps to Missing in authored order, so the first remaining step is the
+	 * interaction this anchor should register. Returns None when every ordered
+	 * prefix is already complete or the objective has no ordered term.
+	 */
+	FName QinglanNextExpectedOrderedStep(const UQinglanStorySubsystem* Story, FName SceneId, FName ObjectiveId)
+	{
+		const FQinglanRegistryObjective* Objective = QinglanFindRegistryObjective(Story, SceneId, ObjectiveId);
+		if (Objective == nullptr)
+		{
+			return NAME_None;
+		}
+		const QinglanStoryRuntime::FQinglanGuardReport Report =
+			QinglanStoryRuntime::EvaluateObjectiveGuard(Story, SceneId, ObjectiveId);
+		for (const FQinglanRegistryGuardTerm& Term : Objective->Guard.AllOf)
+		{
+			if (Term.Kind != FName(TEXT("ordered")))
+			{
+				continue;
+			}
+			for (const FName Step : Term.OrderedSteps)
+			{
+				if (Report.Missing.Contains(Step))
+				{
+					return Step;
+				}
+			}
+		}
+		return NAME_None;
+	}
+
+	/** Localized guard notice; `guard.missing` is not authored yet, so the
+	 *  scaffold literal is the fallback (no JSON key is added here). */
+	FText QinglanGuardMissingText()
+	{
+		const FName Key(TEXT("guard.missing"));
+		return UQinglanHUDStatics::HasGameText(Key)
+			? UQinglanHUDStatics::GameText(Key)
+			: NSLOCTEXT("Qinglan", "Guard.Missing", "The required proof is not complete yet.");
+	}
+
+	FText QinglanGuardOrderResetText()
+	{
+		return NSLOCTEXT("Qinglan", "Guard.OrderReset", "The sequence was out of order; start again.");
+	}
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -776,11 +861,30 @@ void AQinglanInteractable::ExecuteInteraction(AQinglanCharacter* Player)
 	UQinglanProfileSubsystem* Profile = Instance ? Instance->GetSubsystem<UQinglanProfileSubsystem>() : nullptr;
 	const FString Id = InteractionId.ToString();
 
+	// AUD-11 producer: the shrine is the free recovery station. Restore health
+	// and spiritual energy (no cost) before any scene routing so the authored
+	// CH00_S02 proof is registered on every shrine interaction.
+	if (InteractionId == GHubShrineId && Player != nullptr)
+	{
+		if (UQinglanCombatComponent* Combat = Player->GetCombat())
+		{
+			const FQinglanAttributes Attributes = Combat->GetAttributes();
+			Combat->Heal(Attributes.MaxHealth);
+			Combat->GrantEnergy(Attributes.MaxSpiritualEnergy);
+		}
+		if (Story != nullptr)
+		{
+			QinglanStoryRuntime::NotifyGameplayEvent(Story, FName(TEXT("shrine.recovery_used")), {});
+		}
+	}
+
 	// Objective-proof pass (blueprint section 1.9 "the dispatcher binds
 	// gameplay events -> mq_* flags"): choice-free scenes commit only through
 	// NotifyObjectiveCompleted, so a re-press at the anchor after the script
 	// played out IS the gameplay proof for training/examination/preparation
-	// objectives. Runs before every scene-beginning branch below.
+	// objectives. Objectives that author a gameplay guard are evaluated
+	// instead; ordered device guards advance one authored step per press
+	// (AUD-11). Runs before every scene-beginning branch below.
 	const bool bAnchorProofConsumed = [&]()
 	{
 		FName ProofScene = NAME_None;
@@ -794,6 +898,40 @@ void AQinglanInteractable::ExecuteInteraction(AQinglanCharacter* Player)
 				// Trial scenes (CH03_S02 sits at trial.foundation_arena): the
 				// proof is surviving the timed wave trial, not the re-press.
 				return TryBeginTrialAtAnchor(this, Player, Story, ProofScene, ProofObjective);
+			}
+			if (QinglanObjectiveHasGuard(Story, ProofScene, ProofObjective))
+			{
+				QinglanStoryRuntime::FQinglanGuardReport Report =
+					QinglanStoryRuntime::EvaluateObjectiveGuard(Story, ProofScene, ProofObjective);
+				if (Report.Status == QinglanStoryRuntime::EQinglanGuardStatus::OrderReset)
+				{
+					QinglanStoryRuntime::ResetOrderedProgress(Story, ProofScene);
+					Player->ShowGameMessage(QinglanGuardOrderResetText());
+					return true;
+				}
+				// Advance the current ordered step, if this objective authors
+				// one. The event name comes straight from the registry data.
+				const FName NextStep = QinglanNextExpectedOrderedStep(Story, ProofScene, ProofObjective);
+				if (NextStep != NAME_None)
+				{
+					QinglanStoryRuntime::NotifyGameplayEvent(Story, NextStep, {});
+					Report = QinglanStoryRuntime::EvaluateObjectiveGuard(Story, ProofScene, ProofObjective);
+					if (Report.Status == QinglanStoryRuntime::EQinglanGuardStatus::OrderReset)
+					{
+						QinglanStoryRuntime::ResetOrderedProgress(Story, ProofScene);
+						Player->ShowGameMessage(QinglanGuardOrderResetText());
+						return true;
+					}
+				}
+				if (Report.Status == QinglanStoryRuntime::EQinglanGuardStatus::Satisfied)
+				{
+					Story->NotifySceneObjectiveCompleted(ProofScene, ProofObjective);
+				}
+				else
+				{
+					Player->ShowGameMessage(QinglanGuardMissingText());
+				}
+				return true;
 			}
 			Story->NotifySceneObjectiveCompleted(ProofScene, ProofObjective);
 			return true;

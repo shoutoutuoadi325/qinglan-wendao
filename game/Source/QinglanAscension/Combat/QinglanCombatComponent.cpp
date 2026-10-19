@@ -7,19 +7,20 @@
 // every behavior lives inside the declared function bodies below. Private
 // member state is reachable only from these functions.
 #include "Combat/QinglanCombatComponent.h"
+#include "Abilities/QinglanBlessingLibrary.h"
 #include "Combat/QinglanCharacter.h"
 #include "Combat/QinglanDamageMath.h"
+#include "Combat/QinglanDodgeComponent.h"
 #include "Combat/QinglanStatusComponent.h"
+#include "Engine/GameInstance.h"
+#include "Engine/World.h"
 #include "Progression/QinglanEconomyLibrary.h"
+#include "Progression/QinglanProfileSubsystem.h"
 #include "QinglanAscension.h"
 #include "HAL/ThreadSafeCounter.h"
 
 namespace
 {
-	// Dodge duration is 0.45 s (docs/02 §2); the observation-based re-arm guard
-	// sits slightly above it so a chained dodge re-arms cleanly.
-	constexpr float DodgeReArmWindow = 0.5f;
-
 	// Safety valve: per-swing victim list and hit-key set are reset well before
 	// they could grow unbounded (pool reuse, marathon fights).
 	constexpr int32 MaxSwordSwingVictims = 64;
@@ -32,6 +33,106 @@ UQinglanCombatComponent::UQinglanCombatComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.bStartWithTickEnabled = true;
+}
+
+void UQinglanCombatComponent::BeginPlay()
+{
+	Super::BeginPlay();
+
+	// AUD-34: bind the dodge component's start notification instead of
+	// polling the character state once per frame. The notification is
+	// frame-exact and fires for every dodge, including consecutive ones whose
+	// starts are closer than the old 0.5 s observation guard.
+	if (AActor* Owner = GetOwner())
+	{
+		if (UQinglanDodgeComponent* Dodge = Owner->FindComponentByClass<UQinglanDodgeComponent>())
+		{
+			Dodge->OnDodgeStarted.AddUniqueDynamic(this, &UQinglanCombatComponent::HandleDodgeStarted);
+		}
+	}
+
+	// AUD-37: fold permanent-equipment maxima on spawn and whenever the
+	// profile commits (purchase/equip/unequip/load). Only the player pawn has
+	// a profile; enemies never bind.
+	if (Cast<AQinglanCharacter>(GetOwner()) != nullptr)
+	{
+		if (UGameInstance* GameInstance = GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
+		{
+			if (UQinglanProfileSubsystem* Profile = GameInstance->GetSubsystem<UQinglanProfileSubsystem>())
+			{
+				Profile->OnProfileCommitted.AddUniqueDynamic(this, &UQinglanCombatComponent::HandleProfileCommitted);
+			}
+		}
+		RefreshEquipmentAttributeBonuses();
+	}
+}
+
+void UQinglanCombatComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (UGameInstance* GameInstance = GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
+	{
+		if (UQinglanProfileSubsystem* Profile = GameInstance->GetSubsystem<UQinglanProfileSubsystem>())
+		{
+			Profile->OnProfileCommitted.RemoveDynamic(this, &UQinglanCombatComponent::HandleProfileCommitted);
+		}
+	}
+	Super::EndPlay(EndPlayReason);
+}
+
+void UQinglanCombatComponent::HandleDodgeStarted(float Duration)
+{
+	(void)Duration;
+	const UWorld* World = GetWorld();
+	NotifyDodgeStarted(World ? World->GetTimeSeconds() : 0.f);
+}
+
+void UQinglanCombatComponent::NotifyDodgeStarted(float StartTimeSeconds)
+{
+	// Unconditional re-anchor: each dodge owns its own immunity clock. A
+	// second dodge starting before the first one's tail must not inherit the
+	// old start (AUD-34 acceptance: 0.10-0.28 s from *this* dodge's start).
+	DodgeStartTime = StartTimeSeconds;
+}
+
+void UQinglanCombatComponent::HandleProfileCommitted()
+{
+	RefreshEquipmentAttributeBonuses();
+}
+
+void UQinglanCombatComponent::RefreshEquipmentAttributeBonuses()
+{
+	// Only the player pawn folds permanent equipment maxima; enemies have no
+	// profile and keep their archetype-derived values.
+	if (Cast<AQinglanCharacter>(GetOwner()) == nullptr)
+	{
+		AppliedEquipmentMaxHealthBonus = 0.f;
+		AppliedEquipmentMaxStaminaBonus = 0.f;
+		return;
+	}
+
+	float NewHealthBonus = 0.f;
+	float NewStaminaBonus = 0.f;
+	UQinglanEconomyLibrary::GetPermanentAttributeBonuses(this, NewHealthBonus, NewStaminaBonus);
+
+	const float HealthDelta = NewHealthBonus - AppliedEquipmentMaxHealthBonus;
+	const float StaminaDelta = NewStaminaBonus - AppliedEquipmentMaxStaminaBonus;
+	AppliedEquipmentMaxHealthBonus = NewHealthBonus;
+	AppliedEquipmentMaxStaminaBonus = NewStaminaBonus;
+
+	if (FMath::IsNearlyZero(HealthDelta) && FMath::IsNearlyZero(StaminaDelta))
+	{
+		return;
+	}
+
+	// Delta application keeps recomputation idempotent: equip/unequip adds or
+	// removes its own contribution once, never stacks on repeated commits.
+	Attributes.MaxHealth = FMath::Max(1.f, Attributes.MaxHealth + HealthDelta);
+	Attributes.MaxStamina = FMath::Max(1.f, Attributes.MaxStamina + StaminaDelta);
+	Attributes.Health = FMath::Clamp(Attributes.Health, 0.f, Attributes.MaxHealth);
+	Attributes.Stamina = FMath::Clamp(Attributes.Stamina, 0.f, Attributes.MaxStamina);
+
+	OnHealthChanged.Broadcast(Attributes.Health, Attributes.MaxHealth);
+	OnStaminaChanged.Broadcast(Attributes.Stamina, Attributes.MaxStamina);
 }
 
 void UQinglanCombatComponent::TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -48,19 +149,8 @@ void UQinglanCombatComponent::TickComponent(float DeltaTime, enum ELevelTick Tic
 	// countdowns and timestamps are pause-safe.
 	const float Now = World->GetTimeSeconds();
 
-	// --- Dodge i-frame tracking -------------------------------------------
-	// FIXME-CONTRACT: the scaffold header exposes DodgeStartTime but no
-	// NotifyDodgeStarted()/BeginDodge() setter, so the dodge start is observed
-	// from the owning character's combat state. A dedicated setter on the
-	// component (called from AQinglanCharacter::TryDodge) would be frame-exact;
-	// this observation can lag one frame depending on tick order.
-	if (AQinglanCharacter* PlayerOwner = Cast<AQinglanCharacter>(GetOwner()))
-	{
-		if (PlayerOwner->GetCombatState() == EQinglanCombatState::Dodging && (Now - DodgeStartTime) > DodgeReArmWindow)
-		{
-			DodgeStartTime = Now;
-		}
-	}
+	// Dodge i-frames are re-anchored by UQinglanDodgeComponent::OnDodgeStarted
+	// (BeginPlay binding); no per-frame observation is needed (AUD-34).
 
 	// --- Resource regen (docs/02 §5) --------------------------------------
 	RegenResources(DeltaTime);
@@ -120,7 +210,9 @@ void UQinglanCombatComponent::TickComponent(float DeltaTime, enum ELevelTick Tic
 		OnDamageResultResolved.Broadcast(TickResult);
 
 		--BurnTicksRemaining;
-		BurnNextTickAt = BurnNextTickAt + QinglanCombatTunables::BurnTickIntervalSeconds;
+		// AUD-37: the requested duration is spread across the three-tick
+		// contract, so a longer (bonus) Burn keeps exactly three ticks.
+		BurnNextTickAt = BurnNextTickAt + BurnTickInterval;
 	}
 	if (BurnTicksRemaining <= 0 && ActiveStatuses.Contains(EQinglanStatus::Burn))
 	{
@@ -243,15 +335,16 @@ bool UQinglanCombatComponent::IsInvulnerable() const
 	// in paused game time so the window is identical at 30/60/120 FPS
 	// (docs/08 §2 "Dodge" acceptance).
 	const UWorld* World = GetWorld();
-	if (!World)
-	{
-		return false;
-	}
-	const float Elapsed = World->GetTimeSeconds() - DodgeStartTime;
+	return World ? IsInvulnerableAtTime(World->GetTimeSeconds()) : false;
+}
+
+bool UQinglanCombatComponent::IsInvulnerableAtTime(float TimeSeconds) const
+{
+	const float Elapsed = TimeSeconds - DodgeStartTime;
 	return Elapsed >= InvulnerableWindowStart && Elapsed <= InvulnerableWindowEnd;
 }
 
-float UQinglanCombatComponent::ResolveReactionMultiplier(EQinglanElement IncomingElement)
+float UQinglanCombatComponent::ResolveReactionMultiplier(EQinglanElement IncomingElement, AActor* Attacker)
 {
 	// Conduct: Thunder vs Wet -> one 1.25x application, consumes Wet once
 	// (docs/02 §7). Consuming Wet here makes the reaction one-shot per Wet
@@ -262,7 +355,23 @@ float UQinglanCombatComponent::ResolveReactionMultiplier(EQinglanElement Incomin
 		&& ActiveStatuses[EQinglanStatus::Wet] > 0.f)
 	{
 		RemoveStatus(EQinglanStatus::Wet);
-		return QinglanCombatTunables::ConductMultiplier; // 1.25
+
+		// AUD-37: Elemental Insight / Thunder Charm / expedition blessings
+		// raise the reaction once. Only the player's own attacks may read the
+		// player profile (attacker == the caster character for sword,
+		// technique, and projectile damage); enemy sources keep the base 1.25
+		// so the player's gear never buffs enemy Lightning.
+		float ConductPercent = 0.f;
+		if (Cast<AQinglanCharacter>(Attacker) != nullptr)
+		{
+			FQinglanBlessingModifiers Modifiers;
+			TArray<FName> OwnedBlessings;
+			UQinglanBlessingLibrary::GetOwnedBlessings(Attacker, OwnedBlessings);
+			UQinglanBlessingLibrary::ComputeModifiers(OwnedBlessings, Modifiers);
+			UQinglanEconomyLibrary::AppendPermanentModifiers(Attacker, Modifiers);
+			ConductPercent = FMath::Max(0.f, Modifiers.ConductDamagePercent);
+		}
+		return QinglanCombatTunables::ConductMultiplier * (1.f + ConductPercent / 100.f);
 	}
 	return 1.f;
 }
@@ -333,7 +442,7 @@ bool UQinglanCombatComponent::ApplyDamage(const FQinglanDamageEvent& Request)
 	// Conduct and multiplies the damage instead. Precedence vs. the damage
 	// number: the multiplier must be known before the math, while barrier and
 	// health changes happen on the next stage.
-	const float ReactionMultiplier = ResolveReactionMultiplier(Event.Element);
+	const float ReactionMultiplier = ResolveReactionMultiplier(Event.Element, Event.Attacker.Get());
 	if (Event.Element == EQinglanElement::Fire && HasStatus(EQinglanStatus::Wet))
 	{
 		RemoveStatus(EQinglanStatus::Wet);
@@ -444,6 +553,12 @@ void UQinglanCombatComponent::SetDerivedAttributes(const FQinglanAttributes& New
 
 	Attributes = Next;
 
+	// AUD-37: permanent equipment maxima (Grounded Steps +10 stamina, Steady
+	// Foundation/Mountain Token health) participate in every derived
+	// recomputation, including checkpoint restores and rank/breakthrough
+	// updates. Delta tracking prevents repeated calls from stacking.
+	RefreshEquipmentAttributeBonuses();
+
 	OnHealthChanged.Broadcast(Attributes.Health, Attributes.MaxHealth);
 	OnEnergyChanged.Broadcast(Attributes.SpiritualEnergy, Attributes.MaxSpiritualEnergy);
 	OnStaminaChanged.Broadcast(Attributes.Stamina, Attributes.MaxStamina);
@@ -553,6 +668,11 @@ void UQinglanCombatComponent::ResetForPool()
 {
 	AppliedHitKeys.Reset();
 	NotifySwordSwingStarted();
+	// No stale immunity clock or burn cadence from a pooled actor's prior life.
+	DodgeStartTime = -1000.f;
+	BurnTicksRemaining = 0;
+	BurnNextTickAt = -1.f;
+	BurnTickInterval = QinglanCombatTunables::BurnTickIntervalSeconds;
 }
 
 void UQinglanCombatComponent::Heal(float Amount)
@@ -561,7 +681,21 @@ void UQinglanCombatComponent::Heal(float Amount)
 	{
 		return;
 	}
-	Attributes.Health = FMath::Clamp(Attributes.Health + Amount, 0.f, Attributes.MaxHealth);
+
+	// AUD-37: every player heal path (Verdant Pulse's heal-over-time, Healing
+	// Talisman, future relics) resolves permanent healing percent once here:
+	// Herbal Knowledge (+10%) and Verdant Seed. Enemies keep raw amounts.
+	float EffectiveAmount = Amount;
+	if (Cast<AQinglanCharacter>(GetOwner()) != nullptr)
+	{
+		float UnusedEnergyRegen = 0.f;
+		float UnusedStaminaRegen = 0.f;
+		float HealingPercent = 0.f;
+		UQinglanEconomyLibrary::AppendPermanentRegen(this, UnusedEnergyRegen, UnusedStaminaRegen, HealingPercent);
+		EffectiveAmount *= (1.f + FMath::Max(0.f, HealingPercent) / 100.f);
+	}
+
+	Attributes.Health = FMath::Clamp(Attributes.Health + EffectiveAmount, 0.f, Attributes.MaxHealth);
 	OnHealthChanged.Broadcast(Attributes.Health, Attributes.MaxHealth);
 }
 
@@ -573,22 +707,30 @@ void UQinglanCombatComponent::ApplyStatus(EQinglanStatus Status, float Magnitude
 	switch (Status)
 	{
 	case EQinglanStatus::Wet:
-		// Wet: 5 s, refreshes on reapplication (docs/02 §7). Only authored
-		// Water attacks or explicit gameplay puddles reach this call; cosmetic
-		// rain never does.
-		ActiveStatuses.Add(EQinglanStatus::Wet,
-			Magnitude > 0.f ? Magnitude : QinglanCombatTunables::WetDurationSeconds);
+		// Wet: 5 s base plus the accumulated WetDurationBonus, refreshes on
+		// reapplication (docs/02 §7). Only authored Water attacks or explicit
+		// gameplay puddles reach this call; cosmetic rain never does. The
+		// delivered magnitude is the bonus (mist_step passes the blessing /
+		// relic total), so the base duration is never replaced by it.
+		ActiveStatuses.Add(EQinglanStatus::Wet, QinglanCombatTunables::WetDurationSeconds
+			+ FMath::Max(0.f, Magnitude));
 		OnStatusApplied.Broadcast(EQinglanStatus::Wet);
 		break;
 
 	case EQinglanStatus::Burn:
-		// Burn: 3 s, three 4-damage ticks, refresh duration without stacking,
-		// maximum three ticks after the latest refresh (docs/02 §7): the tick
+		// Burn: requested duration (base 3 s + BurnDurationBonus), exactly three
+		// 4-damage ticks spread across it, refresh duration without stacking,
+		// maximum three ticks after the latest refresh (docs/02 §7). The tick
 		// counter RESETS to three; it never accumulates past the authored max.
-		ActiveStatuses.Add(EQinglanStatus::Burn, QinglanCombatTunables::BurnDurationSeconds);
-		BurnTicksRemaining = QinglanCombatTunables::BurnTickCount;
-		BurnNextTickAt = Now + QinglanCombatTunables::BurnTickIntervalSeconds;
-		OnStatusApplied.Broadcast(EQinglanStatus::Burn);
+		{
+			const float Duration = Magnitude > 0.f
+				? Magnitude : QinglanCombatTunables::BurnDurationSeconds;
+			ActiveStatuses.Add(EQinglanStatus::Burn, FMath::Max(0.01f, Duration));
+			BurnTicksRemaining = QinglanCombatTunables::BurnTickCount;
+			BurnTickInterval = FMath::Max(0.01f, Duration / static_cast<float>(QinglanCombatTunables::BurnTickCount));
+			BurnNextTickAt = Now + BurnTickInterval;
+			OnStatusApplied.Broadcast(EQinglanStatus::Burn);
+		}
 		break;
 
 	case EQinglanStatus::Root:

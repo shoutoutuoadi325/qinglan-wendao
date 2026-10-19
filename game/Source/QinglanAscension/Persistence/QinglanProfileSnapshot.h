@@ -30,6 +30,8 @@ struct FQinglanProfileSnapshot
 	UPROPERTY() FQinglanInventory Inventory;
 	UPROPERTY() TArray<FName> UnlockedTechniques;
 	UPROPERTY() TArray<FName> EquippedTechniques;
+	/** AUD-37: permanent technique upgrade tiers (1 = base, 2 = upgraded). */
+	UPROPERTY() TMap<FName, int32> TechniqueTiers;
 	/** Permanent relics bought at the sanctuary (docs/03 section 5); equip at most one. */
 	UPROPERTY() TArray<FName> OwnedRelics;
 	UPROPERTY() FName EquippedRelic = NAME_None;

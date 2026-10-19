@@ -2,9 +2,16 @@
 // These do not prove disk durability, save migration, or gameplay entry wiring.
 #include "Misc/AutomationTest.h"
 
+#include "Combat/QinglanCombatComponent.h"
+#include "Combat/QinglanStatusComponent.h"
+#include "Core/QinglanLocalizationService.h"
 #include "Core/QinglanTrialAdmission.h"
 #include "Progression/QinglanEconomyLibrary.h"
+#include "VFX/QinglanVFXCueComponent.h"
+#include "Engine/EngineBaseTypes.h"
 #include "Engine/GameInstance.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "Narrative/QinglanStoryIdentity.h"
 #include "Narrative/QinglanEndingRules.h"
 #include "Narrative/QinglanStoryRuntime.h"
@@ -898,6 +905,469 @@ bool FQinglanAuditAgreementRevisionFlow::RunTest(const FString& Parameters)
 	UQinglanStorySubsystem* UnplayedStory = NewObject<UQinglanStorySubsystem>(Owner);
 	ImportNarrativeState(UnplayedStory, MakeAuditProtocolStart());
 	TestFalse(TEXT("Uncompleted stage refuses the revision"), BeginRevisionScene(UnplayedStory, FName(TEXT("SQ02.S2"))));
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// AUD-34: consecutive dodges re-anchor the immunity clock at their own start.
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditConsecutiveDodgeImmunity,
+	"Qinglan.Combat.ConsecutiveDodgeImmunity", AuditFrameworkTestFlags)
+
+bool FQinglanAuditConsecutiveDodgeImmunity::RunTest(const FString& Parameters)
+{
+	AActor* Dummy = NewObject<AActor>(GetTransientPackage());
+	UQinglanCombatComponent* Combat = NewObject<UQinglanCombatComponent>(Dummy);
+	if (!TestNotNull(TEXT("Combat component"), Combat))
+	{
+		return false;
+	}
+
+	// First dodge starts at t=10.0: immunity only inside [10.10, 10.28].
+	Combat->NotifyDodgeStarted(10.f);
+	TestEqual(TEXT("First dodge start is recorded exactly"), Combat->GetDodgeStartTime(), 10.f);
+	TestFalse(TEXT("Start of dodge is not immune"), Combat->IsInvulnerableAtTime(10.05f));
+	TestTrue(TEXT("Window opens at +0.10 s"), Combat->IsInvulnerableAtTime(10.10f));
+	TestTrue(TEXT("Window closes at +0.28 s"), Combat->IsInvulnerableAtTime(10.28f));
+	TestFalse(TEXT("Window is closed at +0.29 s"), Combat->IsInvulnerableAtTime(10.29f));
+
+	// A second dodge starts at t=10.45, before the old 0.5 s re-arm guard
+	// would have fired. Its window must be measured from 10.45, not 10.0.
+	Combat->NotifyDodgeStarted(10.45f);
+	TestEqual(TEXT("Consecutive dodge re-anchors the clock"), Combat->GetDodgeStartTime(), 10.45f);
+	TestFalse(TEXT("Second dodge start is not immune"), Combat->IsInvulnerableAtTime(10.50f));
+	TestTrue(TEXT("Second window opens at its own +0.10 s"), Combat->IsInvulnerableAtTime(10.55f));
+	TestTrue(TEXT("Second window closes at its own +0.28 s"), Combat->IsInvulnerableAtTime(10.73f));
+	TestFalse(TEXT("Second window is closed at its own +0.29 s"), Combat->IsInvulnerableAtTime(10.74f));
+	TestFalse(TEXT("Old clock cannot grant immunity to the second dodge"), Combat->IsInvulnerableAtTime(10.29f));
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// AUD-36: movement multiplier contract (root 0, boss slow 0.9, expiry 1).
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditStatusMoveMultiplier,
+	"Qinglan.Combat.StatusMoveMultiplier", AuditFrameworkTestFlags)
+
+bool FQinglanAuditStatusMoveMultiplier::RunTest(const FString& Parameters)
+{
+	AActor* Dummy = NewObject<AActor>(GetTransientPackage());
+	UQinglanStatusComponent* Status = NewObject<UQinglanStatusComponent>(Dummy);
+	if (!TestNotNull(TEXT("Status component"), Status))
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("No status: full speed"), Status->GetMoveSpeedMultiplier(), 1.f);
+	TestFalse(TEXT("Not rooted initially"), Status->IsRooted());
+
+	// Ordinary target: hard root, multiplier 0, immediate and while active.
+	Status->ApplyRootMovement(1.f, /*bBossOwner=*/false);
+	TestTrue(TEXT("Ordinary target is rooted"), Status->IsRooted());
+	TestEqual(TEXT("Root stops movement (multiplier 0)"), Status->GetMoveSpeedMultiplier(), 0.f);
+	Status->AdvanceTime(0.5f);
+	TestEqual(TEXT("Root persists at half duration"), Status->GetMoveSpeedMultiplier(), 0.f);
+
+	// Boss: downgraded to the authored 10% slow instead of a hard root.
+	Status->ApplyRootMovement(1.f, /*bBossOwner=*/true);
+	TestFalse(TEXT("Boss is never rooted"), Status->IsRooted());
+	TestTrue(TEXT("Boss is slowed"), Status->IsSlowed());
+	TestNearlyEqual(TEXT("Boss slow multiplier is 0.9"), Status->GetMoveSpeedMultiplier(), 0.9f, 1e-6f);
+	Status->AdvanceTime(0.5f);
+	TestNearlyEqual(TEXT("Boss slow persists at half duration"), Status->GetMoveSpeedMultiplier(), 0.9f, 1e-6f);
+
+	// Expiry restores normal locomotion.
+	Status->AdvanceTime(0.6f);
+	TestFalse(TEXT("Slow expired"), Status->IsSlowed());
+	TestEqual(TEXT("Expiry restores multiplier 1.0"), Status->GetMoveSpeedMultiplier(), 1.f);
+
+	// Explicit removal (Cleansing Talisman/pool reset) also restores.
+	Status->ApplyRootMovement(5.f, /*bBossOwner=*/false);
+	TestEqual(TEXT("Second root applies"), Status->GetMoveSpeedMultiplier(), 0.f);
+	Status->ClearRootMovement();
+	TestEqual(TEXT("Explicit clear restores multiplier 1.0"), Status->GetMoveSpeedMultiplier(), 1.f);
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// AUD-37: tier-2 purchase state, idempotency, and the 1.15 multiplier.
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditTechniqueTierBonus,
+	"Qinglan.Progression.TechniqueTierBonus", AuditFrameworkTestFlags)
+
+bool FQinglanAuditTechniqueTierBonus::RunTest(const FString& Parameters)
+{
+	UGameInstance* Owner = NewObject<UGameInstance>(GetTransientPackage());
+	UQinglanProfileSubsystem* Profile = NewObject<UQinglanProfileSubsystem>(Owner);
+	if (!TestNotNull(TEXT("Profile subsystem"), Profile))
+	{
+		return false;
+	}
+
+	FQinglanProfileSnapshot Snapshot;
+	Snapshot.CultivationStage = EQinglanStage::FoundationEstablishment;
+	Snapshot.CultivationRank = 0;
+	Snapshot.Inventory.SpiritShards = 250;
+	Snapshot.Inventory.VeinCrystal = 2;
+	Snapshot.UnlockedTechniques = { FName(TEXT("jade_sword_arc")) };
+	Snapshot.EquippedTechniques = { FName(TEXT("jade_sword_arc")) };
+	Profile->ImportStateFromSave(Snapshot);
+
+	const FName TechniqueId(TEXT("jade_sword_arc"));
+	TestEqual(TEXT("Techniques start at tier 1"), Profile->GetTechniqueTier(TechniqueId), 1);
+	TestEqual(TEXT("Tier 1 multiplier is 1.0"), Profile->GetTechniqueTierMultiplier(TechniqueId), 1.f);
+
+	const FName UpgradeTx(TEXT("tx.tier2.jade_sword_arc"));
+	TestTrue(TEXT("Tier 2 purchase commits at Foundation"), Profile->TryPurchaseTechniqueTier(UpgradeTx, TechniqueId));
+	TestEqual(TEXT("Tier is now 2"), Profile->GetTechniqueTier(TechniqueId), 2);
+	TestEqual(TEXT("Tier 2 multiplier is 1.15"), Profile->GetTechniqueTierMultiplier(TechniqueId),
+		UQinglanEconomyLibrary::Tier2MagnitudeMultiplier);
+	TestEqual(TEXT("Tier 2 charges exactly 100 shards"), Profile->GetInventory().SpiritShards, int64(150));
+	TestEqual(TEXT("Tier 2 charges exactly 1 crystal"), Profile->GetInventory().VeinCrystal, int64(1));
+
+	// Replaying the same transaction is a no-op that still reports success.
+	TestTrue(TEXT("Replayed transaction succeeds"), Profile->TryPurchaseTechniqueTier(UpgradeTx, TechniqueId));
+	TestEqual(TEXT("Replay does not charge shards"), Profile->GetInventory().SpiritShards, int64(150));
+	TestEqual(TEXT("Replay does not charge crystals"), Profile->GetInventory().VeinCrystal, int64(1));
+	TestEqual(TEXT("Replay keeps tier 2"), Profile->GetTechniqueTier(TechniqueId), 2);
+
+	// A different transaction on an already-upgraded technique commits without
+	// double-charging, matching the other purchase APIs' idempotency style.
+	TestTrue(TEXT("Second transaction on upgraded technique is a no-op success"),
+		Profile->TryPurchaseTechniqueTier(FName(TEXT("tx.tier2.jade_sword_arc.again")), TechniqueId));
+	TestEqual(TEXT("No second charge on shards"), Profile->GetInventory().SpiritShards, int64(150));
+	TestEqual(TEXT("No second charge on crystals"), Profile->GetInventory().VeinCrystal, int64(1));
+
+	TestFalse(TEXT("Unknown technique is rejected"), Profile->TryPurchaseTechniqueTier(
+		FName(TEXT("tx.tier2.unknown")), FName(TEXT("unknown_technique"))));
+	TestFalse(TEXT("Empty transaction id is rejected"), Profile->TryPurchaseTechniqueTier(
+		NAME_None, TechniqueId));
+
+	// Tier-2 is unavailable before Foundation Establishment.
+	UGameInstance* QiOwner = NewObject<UGameInstance>(GetTransientPackage());
+	UQinglanProfileSubsystem* QiProfile = NewObject<UQinglanProfileSubsystem>(QiOwner);
+	FQinglanProfileSnapshot QiSnapshot = Snapshot;
+	QiSnapshot.CultivationStage = EQinglanStage::QiRefining;
+	QiProfile->ImportStateFromSave(QiSnapshot);
+	TestFalse(TEXT("Qi Refining cannot buy tier 2"),
+		QiProfile->TryPurchaseTechniqueTier(FName(TEXT("tx.tier2.qi")), TechniqueId));
+	TestEqual(TEXT("Rejected Qi purchase keeps tier 1"), QiProfile->GetTechniqueTier(TechniqueId), 1);
+	TestEqual(TEXT("Rejected Qi purchase charges nothing"), QiProfile->GetInventory().SpiritShards, int64(250));
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// AUD-43: every cue light is tracked; decay and pool reset return to baseline.
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditCueLightBookkeeping,
+	"Qinglan.VFX.CueLightBookkeeping", AuditFrameworkTestFlags)
+
+bool FQinglanAuditCueLightBookkeeping::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	if (!TestNotNull(TEXT("Transient world"), World))
+	{
+		return false;
+	}
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.ObjectFlags |= RF_Transient;
+	AActor* OwnerActor = World->SpawnActor<AActor>(AActor::StaticClass(), FTransform::Identity, SpawnParams);
+	if (!TestNotNull(TEXT("Cue owner"), OwnerActor))
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
+	UQinglanVFXCueComponent* Cues = NewObject<UQinglanVFXCueComponent>(OwnerActor);
+	OwnerActor->AddOwnedComponent(Cues);
+	Cues->RegisterComponent();
+
+	const FName CueId(TEXT("vfx.sword_impact"));
+	for (int32 Index = 0; Index < 100; ++Index)
+	{
+		Cues->PlayCue(CueId, FTransform::Identity, FVector::ZeroVector, EQinglanElement::Fire, 1.f);
+	}
+	TestEqual(TEXT("100 cues are tracked"), Cues->GetActiveCueCount(), 100);
+	TestTrue(TEXT("At least one cue light is tracked"), Cues->GetActiveLightCount() > 0);
+	TestTrue(TEXT("Cue lights respect the bounded budget"), Cues->GetActiveLightCount() <= 16);
+
+	// Decay: all cue components and every stored light are destroyed together.
+	Cues->TickComponent(1.f, LEVELTICK_All, nullptr);
+	TestEqual(TEXT("Decay releases all cue instances"), Cues->GetActiveCueCount(), 0);
+	TestEqual(TEXT("Decay destroys all tracked lights"), Cues->GetActiveLightCount(), 0);
+
+	// Pool reset also returns to baseline after another burst.
+	for (int32 Index = 0; Index < 100; ++Index)
+	{
+		Cues->PlayCue(CueId, FTransform::Identity, FVector::ZeroVector, EQinglanElement::Fire, 1.f);
+	}
+	Cues->ResetForPool();
+	TestEqual(TEXT("Pool reset clears cue instances"), Cues->GetActiveCueCount(), 0);
+	TestEqual(TEXT("Pool reset clears cue lights"), Cues->GetActiveLightCount(), 0);
+
+	World->DestroyWorld(false);
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// AUD-11: gameplay-proof guard evaluation and confirmation gating.
+// ---------------------------------------------------------------------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditGuardBlocksDialogueOnlyProgress,
+	"Qinglan.Narrative.GuardBlocksDialogueOnlyProgress", AuditFrameworkTestFlags)
+
+bool FQinglanAuditGuardBlocksDialogueOnlyProgress::RunTest(const FString& Parameters)
+{
+	using namespace QinglanStoryRuntime;
+	UGameInstance* Owner = NewObject<UGameInstance>(GetTransientPackage());
+	UQinglanStorySubsystem* Story = NewObject<UQinglanStorySubsystem>(Owner);
+	UQinglanStoryRegistry* Registry = NewObject<UQinglanStoryRegistry>(GetTransientPackage());
+	FQinglanRegistryScene& Scene = Registry->MainScenes.AddDefaulted_GetRef();
+	Scene.SceneId = FName(TEXT("audit_guard_scene"));
+	FQinglanRegistryObjective& Objective = Scene.Objectives.AddDefaulted_GetRef();
+	Objective.ObjectiveId = FName(TEXT("audit_guard_objective"));
+	const FName EventA(TEXT("audit.proof.a"));
+	const FName EventB(TEXT("audit.proof.b"));
+	const FName EventC(TEXT("audit.proof.c"));
+	for (const FName Event : { EventA, EventB, EventC })
+	{
+		FQinglanRegistryGuardTerm& Term = Objective.Guard.AllOf.AddDefaulted_GetRef();
+		Term.Kind = FName(TEXT("event"));
+		Term.Event = Event;
+	}
+	const FScopedAuditStoryRegistry RegistryOverride(Registry);
+
+	// Dialogue playback alone never advances an authored proof: with no
+	// gameplay events the guard is Missing and the objective stays open.
+	FQinglanGuardReport Report = EvaluateObjectiveGuard(Story, Scene.SceneId, Objective.ObjectiveId);
+	TestEqual(TEXT("Unauthored progress is missing"), static_cast<int32>(Report.Status), static_cast<int32>(EQinglanGuardStatus::Missing));
+	TestEqual(TEXT("Every authored term is missing"), Report.Missing.Num(), 3);
+	TestEqual(TEXT("No term is satisfied yet"), Report.Progress, 0);
+	TestEqual(TEXT("Report counts the authored terms"), Report.Total, 3);
+	TestFalse(TEXT("Dialogue alone does not credit the objective"),
+		IsSceneObjectiveCompleted(Story, Scene.SceneId, Objective.ObjectiveId));
+
+	NotifyGameplayEvent(Story, EventA, {});
+	Report = EvaluateObjectiveGuard(Story, Scene.SceneId, Objective.ObjectiveId);
+	TestEqual(TEXT("First proof event advances progress"), Report.Progress, 1);
+	TestEqual(TEXT("Two terms remain"), Report.Missing.Num(), 2);
+	TestFalse(TEXT("Partial proof cannot credit the objective"),
+		IsSceneObjectiveCompleted(Story, Scene.SceneId, Objective.ObjectiveId));
+
+	NotifyGameplayEvent(Story, EventB, {});
+	Report = EvaluateObjectiveGuard(Story, Scene.SceneId, Objective.ObjectiveId);
+	TestEqual(TEXT("Second proof event advances progress"), Report.Progress, 2);
+	TestEqual(TEXT("One term remains"), Report.Missing.Num(), 1);
+
+	NotifyGameplayEvent(Story, EventC, {});
+	Report = EvaluateObjectiveGuard(Story, Scene.SceneId, Objective.ObjectiveId);
+	TestEqual(TEXT("All proof events satisfy the guard"), static_cast<int32>(Report.Status), static_cast<int32>(EQinglanGuardStatus::Satisfied));
+	TestEqual(TEXT("Every term is satisfied"), Report.Progress, 3);
+	TestTrue(TEXT("Satisfied guard auto-completes the objective"),
+		IsSceneObjectiveCompleted(Story, Scene.SceneId, Objective.ObjectiveId));
+	TestTrue(TEXT("Choice-free scene commits through its objective"), Story->IsSceneCompleted(Scene.SceneId));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditOrderedGuardReset,
+	"Qinglan.Narrative.OrderedGuardReset", AuditFrameworkTestFlags)
+
+bool FQinglanAuditOrderedGuardReset::RunTest(const FString& Parameters)
+{
+	using namespace QinglanStoryRuntime;
+	UGameInstance* Owner = NewObject<UGameInstance>(GetTransientPackage());
+	UQinglanStoryRegistry* Registry = NewObject<UQinglanStoryRegistry>(GetTransientPackage());
+	FQinglanRegistryScene& Scene = Registry->MainScenes.AddDefaulted_GetRef();
+	Scene.SceneId = FName(TEXT("audit_ordered_scene"));
+	FQinglanRegistryObjective& Objective = Scene.Objectives.AddDefaulted_GetRef();
+	Objective.ObjectiveId = FName(TEXT("audit_ordered_objective"));
+	FQinglanRegistryGuardTerm& Ordered = Objective.Guard.AllOf.AddDefaulted_GetRef();
+	Ordered.Kind = FName(TEXT("ordered"));
+	const FName StepA(TEXT("audit.step.a"));
+	const FName StepB(TEXT("audit.step.b"));
+	const FName StepC(TEXT("audit.step.c"));
+	Ordered.OrderedSteps = { StepA, StepB, StepC };
+	const FScopedAuditStoryRegistry RegistryOverride(Registry);
+
+	UQinglanStorySubsystem* InOrder = NewObject<UQinglanStorySubsystem>(Owner);
+	for (const FName Step : Ordered.OrderedSteps)
+	{
+		NotifyGameplayEvent(InOrder, Step, {});
+	}
+	FQinglanGuardReport Report = EvaluateObjectiveGuard(InOrder, Scene.SceneId, Objective.ObjectiveId);
+	TestEqual(TEXT("Authored order satisfies the guard"), static_cast<int32>(Report.Status), static_cast<int32>(EQinglanGuardStatus::Satisfied));
+	TestEqual(TEXT("No step is missing"), Report.Missing.Num(), 0);
+	TestTrue(TEXT("Ordered proof auto-completes the objective"),
+		IsSceneObjectiveCompleted(InOrder, Scene.SceneId, Objective.ObjectiveId));
+
+	UQinglanStorySubsystem* OutOfOrder = NewObject<UQinglanStorySubsystem>(Owner);
+	NotifyGameplayEvent(OutOfOrder, StepC, {});
+	NotifyGameplayEvent(OutOfOrder, StepA, {});
+	NotifyGameplayEvent(OutOfOrder, StepB, {});
+	Report = EvaluateObjectiveGuard(OutOfOrder, Scene.SceneId, Objective.ObjectiveId);
+	TestEqual(TEXT("Out-of-order step resets the sequence"), static_cast<int32>(Report.Status), static_cast<int32>(EQinglanGuardStatus::OrderReset));
+	TestEqual(TEXT("Only the out-of-order step remains missing"), Report.Missing.Num(), 1);
+	TestEqual(TEXT("The missing step is the one fired early"), Report.Missing[0], StepC);
+	TestFalse(TEXT("Out-of-order proof cannot credit the objective"),
+		IsSceneObjectiveCompleted(OutOfOrder, Scene.SceneId, Objective.ObjectiveId));
+
+	ResetOrderedProgress(OutOfOrder, Scene.SceneId);
+	Report = EvaluateObjectiveGuard(OutOfOrder, Scene.SceneId, Objective.ObjectiveId);
+	TestEqual(TEXT("Reset returns the guard to its initial state"), static_cast<int32>(Report.Status), static_cast<int32>(EQinglanGuardStatus::Missing));
+	TestEqual(TEXT("Reset clears every sequence step"), Report.Missing.Num(), 3);
+	TestTrue(TEXT("Reset restores the first expected step"), Report.Missing.Contains(StepA));
+
+	// A retried in-order sequence satisfies the guard after the reset.
+	for (const FName Step : Ordered.OrderedSteps)
+	{
+		NotifyGameplayEvent(OutOfOrder, Step, {});
+	}
+	Report = EvaluateObjectiveGuard(OutOfOrder, Scene.SceneId, Objective.ObjectiveId);
+	TestEqual(TEXT("Retried order satisfies the guard"), static_cast<int32>(Report.Status), static_cast<int32>(EQinglanGuardStatus::Satisfied));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditConfirmationGuardGate,
+	"Qinglan.Narrative.ConfirmationGuardGate", AuditFrameworkTestFlags)
+
+bool FQinglanAuditConfirmationGuardGate::RunTest(const FString& Parameters)
+{
+	using namespace QinglanStoryRuntime;
+	UGameInstance* Owner = NewObject<UGameInstance>(GetTransientPackage());
+	UQinglanStorySubsystem* Story = NewObject<UQinglanStorySubsystem>(Owner);
+	UQinglanStoryRegistry* Registry = NewObject<UQinglanStoryRegistry>(GetTransientPackage());
+	FQinglanRegistrySideQuest& Quest = Registry->SideQuests.AddDefaulted_GetRef();
+	Quest.QuestId = FName(TEXT("audit_gate_quest"));
+	FQinglanRegistryScene& Stage = Quest.Stages.AddDefaulted_GetRef();
+	Stage.SceneId = FName(TEXT("audit_gate_s3"));
+	Stage.ScriptTrigger = FName(TEXT("confirmation_checks_ready"));
+	const FName RequiredFlag(TEXT("audit_gate_flag"));
+	const FName RequiredEvent(TEXT("audit_gate_event"));
+	FQinglanRegistryGuardTerm& FlagTerm = Stage.ConfirmationGuardTerms.AllOf.AddDefaulted_GetRef();
+	FlagTerm.Kind = FName(TEXT("flag"));
+	FlagTerm.Flag = RequiredFlag;
+	FQinglanRegistryGuardTerm& EventTerm = Stage.ConfirmationGuardTerms.AllOf.AddDefaulted_GetRef();
+	EventTerm.Kind = FName(TEXT("event"));
+	EventTerm.Event = RequiredEvent;
+	const FScopedAuditStoryRegistry RegistryOverride(Registry);
+
+	TestTrue(TEXT("Structured confirmation guard is detected"), SceneHasCommitGuard(Story, Stage.SceneId));
+	FQinglanGuardReport Report = EvaluateSceneCommitGuard(Story, Stage.SceneId);
+	TestEqual(TEXT("Confirmation checks start unmet"), static_cast<int32>(Report.Status), static_cast<int32>(EQinglanGuardStatus::Missing));
+	TestFalse(TEXT("Confirmation scene refuses to begin before its checks"),
+		Story->BeginScene(Stage.SceneId));
+
+	// One satisfied term is not enough.
+	FQinglanNarrativeState Partial;
+	Partial.Flags.Add(RequiredFlag);
+	ImportNarrativeState(Story, Partial);
+	TestFalse(TEXT("Flag alone leaves the confirmation gate closed"), Story->BeginScene(Stage.SceneId));
+
+	NotifyGameplayEvent(Story, RequiredEvent, {});
+	Report = EvaluateSceneCommitGuard(Story, Stage.SceneId);
+	TestEqual(TEXT("Both authored checks satisfy the confirmation guard"), static_cast<int32>(Report.Status), static_cast<int32>(EQinglanGuardStatus::Satisfied));
+	TestTrue(TEXT("Confirmation scene begins once its checks are ready"),
+		Story->BeginScene(Stage.SceneId));
+	return true;
+}
+
+// AUD-48: both shipped locales resolve from the runtime service; a key missing
+// from zh-Hans falls back to en-US, and a key missing everywhere falls back to
+// the key itself. Tables are injected, so this stays headless and disk-free.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditLocalizationResolve,
+	"Qinglan.Localization.BilingualKeyParityAndResolve", AuditFrameworkTestFlags)
+
+bool FQinglanAuditLocalizationResolve::RunTest(const FString& Parameters)
+{
+	TMap<FString, FString> English;
+	TMap<FString, FString> Chinese;
+	English.Add(TEXT("game.title"), TEXT("Qinglan: Path of Ascension"));
+	Chinese.Add(TEXT("game.title"), TEXT("青岚问道"));
+	English.Add(TEXT("hud.clock"), TEXT("{minutes}:{seconds}"));
+	Chinese.Add(TEXT("hud.clock"), TEXT("{minutes}:{seconds}"));
+	English.Add(TEXT("only.english"), TEXT("English only"));
+	Chinese.Add(TEXT("only.english"), TEXT("English only"));
+
+	// Bilingual key parity: same authored key set before testing fallback.
+	TArray<FString> EnglishKeys;
+	TArray<FString> ChineseKeys;
+	English.GetKeys(EnglishKeys);
+	Chinese.GetKeys(ChineseKeys);
+	EnglishKeys.Sort();
+	ChineseKeys.Sort();
+	TestEqual(TEXT("Bilingual tables declare the same key count"), EnglishKeys.Num(), ChineseKeys.Num());
+	for (int32 KeyIndex = 0; KeyIndex < EnglishKeys.Num() && KeyIndex < ChineseKeys.Num(); ++KeyIndex)
+	{
+		TestEqual(*FString::Printf(TEXT("Bilingual key %d is shared"), KeyIndex), ChineseKeys[KeyIndex], EnglishKeys[KeyIndex]);
+	}
+
+	// Exercise the en fallback with a deliberately zh-missing key.
+	Chinese.Remove(TEXT("only.english"));
+	FQinglanLocalizationService::SetTranslationTablesForTesting(English, Chinese);
+
+	TestTrue(TEXT("Injected bilingual resources are reported loaded"), FQinglanLocalizationService::AreResourcesLoaded());
+	TestEqual(TEXT("en-US resolves the source string"),
+		FQinglanLocalizationService::ResolveForCulture(FName(TEXT("game.title")), TEXT("en-US")).ToString(),
+		FString(TEXT("Qinglan: Path of Ascension")));
+	TestEqual(TEXT("zh-Hans resolves the translated string"),
+		FQinglanLocalizationService::ResolveForCulture(FName(TEXT("game.title")), TEXT("zh-Hans")).ToString(),
+		FString(TEXT("青岚问道")));
+	TestEqual(TEXT("A regional Chinese culture normalizes to zh-Hans"),
+		FQinglanLocalizationService::ResolveForCulture(FName(TEXT("game.title")), TEXT("zh-Hans-CN")).ToString(),
+		FString(TEXT("青岚问道")));
+	TestEqual(TEXT("A key missing from zh-Hans falls back to en-US"),
+		FQinglanLocalizationService::ResolveForCulture(FName(TEXT("only.english")), TEXT("zh-Hans")).ToString(),
+		FString(TEXT("English only")));
+	TestEqual(TEXT("A key missing everywhere falls back to the key"),
+		FQinglanLocalizationService::ResolveForCulture(FName(TEXT("missing.key")), TEXT("zh-Hans")).ToString(),
+		FString(TEXT("missing.key")));
+	TestEqual(TEXT("Named placeholders survive translation"),
+		FQinglanLocalizationService::ResolveForCulture(FName(TEXT("hud.clock")), TEXT("zh-Hans")).ToString(),
+		FString(TEXT("{minutes}:{seconds}")));
+	TestTrue(TEXT("HasKey sees the English fallback"), FQinglanLocalizationService::HasKey(FName(TEXT("only.english"))));
+	TestFalse(TEXT("HasKey rejects an absent key"), FQinglanLocalizationService::HasKey(FName(TEXT("missing.key"))));
+
+	FQinglanLocalizationService::ResetTranslationTablesForTesting();
+	return true;
+}
+
+// AUD-49: the startup decision must be driven by the first-launch flag sampled
+// before profile 0 exists, and an explicit persisted preference must win.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditFirstLaunchLocaleOrdering,
+	"Qinglan.Localization.FirstLaunchOrdering", AuditFrameworkTestFlags)
+
+bool FQinglanAuditFirstLaunchLocaleOrdering::RunTest(const FString& Parameters)
+{
+	// A truly new profile (captured before CreateNewProfile) on a Chinese OS.
+	bool bShouldPersistDetected = false;
+	FString Culture = FQinglanLocalizationService::ResolveStartupCulture(
+		/*bFirstLaunch*/ true, FString(), TEXT("zh-Hans-CN"), bShouldPersistDetected);
+	TestEqual(TEXT("Chinese OS on first launch selects zh-Hans"), Culture, FString(TEXT("zh-Hans")));
+	TestTrue(TEXT("First-launch detection is persisted as the later preference"), bShouldPersistDetected);
+
+	Culture = FQinglanLocalizationService::ResolveStartupCulture(
+		/*bFirstLaunch*/ true, FString(), TEXT("en-US"), bShouldPersistDetected);
+	TestEqual(TEXT("English OS on first launch selects en-US"), Culture, FString(TEXT("en-US")));
+
+	// The pre-fix ordering sampled first-launch after profile creation; this is
+	// exactly that scenario and must fall through to the stable default.
+	Culture = FQinglanLocalizationService::ResolveStartupCulture(
+		/*bFirstLaunch*/ false, FString(), TEXT("zh-Hans-CN"), bShouldPersistDetected);
+	TestEqual(TEXT("A returning launch without a preference defaults to en-US"), Culture, FString(TEXT("en-US")));
+	TestFalse(TEXT("A returning launch does not clear or overwrite a preference"), bShouldPersistDetected);
+
+	// Explicit player preference outranks first-launch OS detection.
+	Culture = FQinglanLocalizationService::ResolveStartupCulture(
+		/*bFirstLaunch*/ true, TEXT("en-US"), TEXT("zh-Hans-CN"), bShouldPersistDetected);
+	TestEqual(TEXT("Explicit preference wins over first-launch OS detection"), Culture, FString(TEXT("en-US")));
+	TestFalse(TEXT("Explicit preference is never overwritten by detection"), bShouldPersistDetected);
+
+	Culture = FQinglanLocalizationService::ResolveStartupCulture(
+		/*bFirstLaunch*/ false, TEXT("zh-Hans"), TEXT("en-US"), bShouldPersistDetected);
+	TestEqual(TEXT("Persisted preference is re-applied on later launches"), Culture, FString(TEXT("zh-Hans")));
+
+	Culture = FQinglanLocalizationService::ResolveStartupCulture(
+		/*bFirstLaunch*/ false, TEXT("fr-FR"), TEXT("en-US"), bShouldPersistDetected);
+	TestEqual(TEXT("An unsupported stored value falls back to en-US"), Culture, FString(TEXT("en-US")));
 	return true;
 }
 #endif // WITH_DEV_AUTOMATION_TESTS

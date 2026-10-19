@@ -145,15 +145,11 @@ bool UQinglanTalismanComponent::ExecuteEffect(const FQinglanTalismanCatalogEntry
 {
 	if (Entry.EffectKind == FName(TEXT("heal_25")))
 	{
-		// Healing Talisman: heal the catalog magnitude, bounded by maximum
-		// health (docs/03 section 5; docs/02 section 6 healing bound) and
-		// scaled by the permanent healing percent (Herbal Knowledge, Verdant
-		// Seed) through the authoritative Heal entry point.
-		float UnusedEnergyRegen = 0.f;
-		float UnusedStaminaRegen = 0.f;
-		float HealingPercent = 0.f;
-		UQinglanEconomyLibrary::AppendPermanentRegen(this, UnusedEnergyRegen, UnusedStaminaRegen, HealingPercent);
-		Combat.Heal(Entry.Magnitude * (1.f + HealingPercent / 100.f));
+		// Healing Talisman: heal the catalog magnitude through the
+		// authoritative Heal entry point, which folds the permanent healing
+		// percent (Herbal Knowledge +10%, Verdant Seed) exactly once for the
+		// player. Scaling here as well would double-apply the bonus (AUD-37).
+		Combat.Heal(Entry.Magnitude);
 		return true;
 	}
 	if (Entry.EffectKind == FName(TEXT("cleanse")))
@@ -205,9 +201,9 @@ bool UQinglanTalismanComponent::ExecuteEffect(const FQinglanTalismanCatalogEntry
 			{
 				continue;
 			}
-			if (Enemy->ActorHasTag(FName(QinglanCombatTunables::QinglanBossTag)))
+			if (Enemy->IsBoss())
 			{
-				continue; // ordinary enemies only (docs/03 section 5)
+				continue; // ordinary enemies only, through the authoritative boss identity (AUD-36)
 			}
 			if (FVector::Dist(Origin, Enemy->GetActorLocation()) > ShockRange)
 			{

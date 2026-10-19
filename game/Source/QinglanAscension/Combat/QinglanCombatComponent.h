@@ -58,6 +58,8 @@ class QINGLANASCENSION_API UQinglanCombatComponent : public UActorComponent // Q
 public:
 	UQinglanCombatComponent();
 
+	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 	// --- Attributes ---
@@ -83,6 +85,15 @@ public:
 	bool IsAlive() const { return Attributes.Health > 0.f; }
 	/** True while inside the dodge i-frame window (paused-game-time based). */
 	UFUNCTION(BlueprintPure) bool IsInvulnerable() const;
+	/** True when TimeSeconds lies inside [0.10, 0.28] s of the current dodge.
+	 *  World-free seam so automation can assert consecutive-dodge clocks. */
+	UFUNCTION(BlueprintPure) bool IsInvulnerableAtTime(float TimeSeconds) const;
+	/** AUD-34: explicitly re-anchor the immunity clock at a dodge's start.
+	 *  Every dodge start (dodge component notification or direct call) resets
+	 *  the window; no frame-observation lag and no carry-over from a previous
+	 *  dodge. Clears any prior dodge bookkeeping. */
+	UFUNCTION(BlueprintCallable) void NotifyDodgeStarted(float StartTimeSeconds);
+	UFUNCTION(BlueprintPure) float GetDodgeStartTime() const { return DodgeStartTime; }
 
 	// --- Barriers (absorb before health; stronger replaces weaker; never stack) ---
 	UFUNCTION(BlueprintCallable) void ApplyBarrier(EQinglanElement Element, float Amount, float Duration);
@@ -94,8 +105,9 @@ public:
 	UFUNCTION(BlueprintCallable) void GrantEnergy(float Amount);
 	/**
 	 * Authoritative heal: clamps to max health, broadcasts OnHealthChanged.
-	 * The caller folds healing-percent modifiers (docs/03 section 4
-	 * Herbal Knowledge, Verdant Seed relic) into Amount.
+	 * For the player pawn the permanent healing percent (docs/03 section 4
+	 * Herbal Knowledge, Verdant Seed relic) is folded here exactly once;
+	 * callers pass the authored raw magnitude, never a pre-scaled amount.
 	 */
 	UFUNCTION(BlueprintCallable) void Heal(float Amount);
 	/** Sword-hit energy restore: 4 per unique target, capped 8 per swing. */
@@ -135,8 +147,16 @@ public:
 
 private:
 	void RegenResources(float DeltaTime);
-	/** Damage-side Conduct resolution: Thunder vs Wet -> 1.25x once, consumes Wet. */
-	float ResolveReactionMultiplier(EQinglanElement IncomingElement);
+	/** Damage-side Conduct resolution: Thunder vs Wet -> 1.25x once, consumes
+	 *  Wet. The attacker's blessing/permanent ElementalInsight-style
+	 *  ConductDamagePercent raises the multiplier once. */
+	float ResolveReactionMultiplier(EQinglanElement IncomingElement, AActor* Attacker);
+	/** AUD-34: dodge component start notification (frame-exact re-anchor). */
+	UFUNCTION() void HandleDodgeStarted(float Duration);
+	/** AUD-37: Grounded Steps / Steady Foundation / Mountain Token fold onto
+	 *  the player-owned derived maxima exactly once (delta-tracked). */
+	void RefreshEquipmentAttributeBonuses();
+	UFUNCTION() void HandleProfileCommitted();
 
 	FQinglanAttributes Attributes;
 	/** Active statuses with remaining paused-game-time. */
@@ -151,7 +171,17 @@ private:
 	TArray<AActor*> SwordSwingVictims;
 	int32 SwordSwingEnergyGranted = 0;
 
-	// Burn bookkeeping: three 4-damage ticks across 3 s.
+	// Equipment-derived maxima already folded into Attributes (delta tracking
+	// keeps recomputation idempotent across profile commits and checkpoint
+	// restores).
+	float AppliedEquipmentMaxHealthBonus = 0.f;
+	float AppliedEquipmentMaxStaminaBonus = 0.f;
+
+	// Burn bookkeeping: three 4-damage ticks across the requested duration.
+	// The requested duration is recorded at application time; the tick cadence
+	// is Duration/3 so a BurnDurationBonus extends the window without ever
+	// exceeding the maximum-three-ticks-after-refresh contract.
 	float BurnNextTickAt = -1.f;
+	float BurnTickInterval = 1.f;
 	int32 BurnTicksRemaining = 0;
 };

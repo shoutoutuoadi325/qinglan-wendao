@@ -270,6 +270,19 @@ namespace
 		Dump += TCHAR('|');
 		AppendNameArray(Dump, Save->EquippedTechniques);
 		Dump += TCHAR('|');
+		{
+			// AUD-37: fold permanent technique tiers by key order so the
+			// checksum is independent of TMap iteration order.
+			TArray<FName> TierKeys;
+			Save->TechniqueTiers.GetKeys(TierKeys);
+			TierKeys.Sort([](const FName& A, const FName& B) { return A.LexicalLess(B); });
+			for (const FName& Key : TierKeys)
+			{
+				const int32* Tier = Save->TechniqueTiers.Find(Key);
+				Dump += FString::Printf(TEXT("%s=%d;"), *Key.ToString(), Tier ? *Tier : 0);
+			}
+			Dump += TCHAR('|');
+		}
 		AppendNameArray(Dump, Save->OwnedRelics);
 		Dump += TCHAR('|');
 		Dump += Save->EquippedRelic.ToString();
@@ -482,6 +495,7 @@ namespace
 		Snapshot.Inventory = Save->Inventory;
 		Snapshot.UnlockedTechniques = Save->UnlockedTechniques;
 		Snapshot.EquippedTechniques = Save->EquippedTechniques;
+		Snapshot.TechniqueTiers = Save->TechniqueTiers;
 		Snapshot.OwnedRelics = Save->OwnedRelics;
 		Snapshot.EquippedRelic = Save->EquippedRelic;
 		Snapshot.OwnedPassives = Save->OwnedPassives;
@@ -502,6 +516,7 @@ namespace
 		Save->Inventory = Snapshot.Inventory;
 		Save->UnlockedTechniques = Snapshot.UnlockedTechniques;
 		Save->EquippedTechniques = Snapshot.EquippedTechniques;
+		Save->TechniqueTiers = Snapshot.TechniqueTiers;
 		Save->OwnedRelics = Snapshot.OwnedRelics;
 		Save->EquippedRelic = Snapshot.EquippedRelic;
 		Save->OwnedPassives = Snapshot.OwnedPassives;

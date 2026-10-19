@@ -65,6 +65,9 @@ struct FQinglanNarrativeState
 	UPROPERTY() TMap<FName, FName> EffectiveAgreements;
 	/** Hub story clock in seconds; advanced only by safe hub time advances. */
 	UPROPERTY() double StoryClockSeconds = 0.0;
+	/** Ordered gameplay-event history for proof evaluation (event_count and
+	 *  ordered guards); bounded by the validator's MaxNarrativeEntries. */
+	UPROPERTY() TArray<FName> FiredEventLog;
 	/** QuestId -> pending courier delivery (SQ02/SQ03 round trips). */
 	UPROPERTY() TMap<FName, FQinglanNarrativeDelivery> Deliveries;
 	UPROPERTY() EQinglanEnding ConfirmedEnding = EQinglanEnding::None;
@@ -87,6 +90,8 @@ public:
 	UPROPERTY() FQinglanInventory Inventory;
 	UPROPERTY() TArray<FName> UnlockedTechniques;
 	UPROPERTY() TArray<FName> EquippedTechniques;
+	/** AUD-37: permanent technique upgrade tiers (1 base, 2 upgraded). */
+	UPROPERTY() TMap<FName, int32> TechniqueTiers;
 	/** Permanent relics bought at the sanctuary (docs/03 section 5); equip at most one. */
 	UPROPERTY() TArray<FName> OwnedRelics;
 	UPROPERTY() FName EquippedRelic = NAME_None;

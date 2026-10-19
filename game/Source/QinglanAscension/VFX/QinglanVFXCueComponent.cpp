@@ -7,10 +7,12 @@
 #include "Components/DecalComponent.h"
 #include "Components/PointLightComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/GameInstance.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialParameterCollectionInstance.h" // IWYU
+#include "Platform/QinglanGraphicsSettingsService.h"
 #include "UObject/SoftObjectPath.h"
 
 namespace QinglanVFXCues
@@ -60,6 +62,45 @@ namespace
 	}
 
 	bool QualityAllowsLights(EQinglanVFXQuality Q) { return Q >= EQinglanVFXQuality::Balanced; }
+
+	/** AUD-43: bounded cosmetic-light budget per component (docs/06 VFX GPU
+	 *  budget); exceeded cues keep their mesh silhouette but spawn no light. */
+	constexpr int32 MaxActiveCueLights = 16;
+
+	/** Actual player configuration, resolved from the graphics service. A
+	 *  headless/test world without a GameInstance keeps the Balanced preset
+	 *  with low-flash off, which is the authored default. */
+	struct FQinglanResolvedCueSettings
+	{
+		EQinglanVFXQuality Quality = EQinglanVFXQuality::Balanced;
+		bool bLowFlash = false;
+	};
+
+	EQinglanVFXQuality ToVFXQuality(EQinglanQualityPreset Preset)
+	{
+		switch (Preset)
+		{
+		case EQinglanQualityPreset::Low:      return EQinglanVFXQuality::Low;
+		case EQinglanQualityPreset::Balanced: return EQinglanVFXQuality::Balanced;
+		case EQinglanQualityPreset::High:     return EQinglanVFXQuality::High;
+		case EQinglanQualityPreset::Ultra:    return EQinglanVFXQuality::Ultra;
+		default:                              return EQinglanVFXQuality::Balanced;
+		}
+	}
+
+	FQinglanResolvedCueSettings ResolveCueSettings(const UWorld* World)
+	{
+		FQinglanResolvedCueSettings Resolved;
+		UGameInstance* GameInstance = World ? World->GetGameInstance() : nullptr;
+		if (const UQinglanGraphicsSettingsService* Graphics = GameInstance
+			? GameInstance->GetSubsystem<UQinglanGraphicsSettingsService>() : nullptr)
+		{
+			const FQinglanGraphicsSettings Settings = Graphics->GetCurrentSettings();
+			Resolved.Quality = ToVFXQuality(Settings.Preset);
+			Resolved.bLowFlash = Settings.bLowFlashMode;
+		}
+		return Resolved;
+	}
 }
 
 UQinglanVFXCueComponent::UQinglanVFXCueComponent()
@@ -102,16 +143,17 @@ UMaterialInterface* UQinglanVFXCueComponent::GetCueMaterial(FName MaterialKey)
 void UQinglanVFXCueComponent::PlayTelegraph(FVector Center, float Radius, float Duration, EQinglanElement Element)
 {
 	UWorld* World = GetWorld();
-	if (!World)
+	AActor* OwnerActor = GetOwner();
+	if (!World || !OwnerActor)
 	{
 		return;
 	}
-	USceneComponent* RootComp = Cast<USceneComponent>(GetOwner()->GetRootComponent());
+	USceneComponent* RootComp = Cast<USceneComponent>(OwnerActor->GetRootComponent());
 	if (!RootComp)
 	{
 		return;
 	}
-	UDecalComponent* Decal = NewObject<UDecalComponent>(GetOwner());
+	UDecalComponent* Decal = NewObject<UDecalComponent>(OwnerActor);
 	Decal->SetupAttachment(RootComp);
 	Decal->SetWorldLocation(Center);
 	Decal->SetWorldRotation(FRotator(-90.f, 0.f, 0.f));
@@ -141,9 +183,10 @@ void UQinglanVFXCueComponent::PlayTelegraph(FVector Center, float Radius, float 
 void UQinglanVFXCueComponent::PlayCue(FName CueId, const FTransform& Source, FVector TargetPoint, EQinglanElement Element, float Intensity)
 {
 	UWorld* World = GetWorld();
-	if (!World)
+	AActor* OwnerActor = GetOwner();
+	if (!World || !OwnerActor)
 	{
-		return;
+		return; // headless contexts cannot host render components
 	}
 	// Choose geometry per cue family.
 	const bool bIsRing = CueId == QinglanVFXCues::ThunderSealStrike || CueId == QinglanVFXCues::SwordImpact || CueId == QinglanVFXCues::EmberTrail;
@@ -174,8 +217,8 @@ void UQinglanVFXCueComponent::PlayCue(FName CueId, const FTransform& Source, FVe
 		Mesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Sphere"));
 	}
 
-	USceneComponent* RootComp = Cast<USceneComponent>(GetOwner()->GetRootComponent());
-	UStaticMeshComponent* Comp = NewObject<UStaticMeshComponent>(GetOwner());
+	USceneComponent* RootComp = Cast<USceneComponent>(OwnerActor->GetRootComponent());
+	UStaticMeshComponent* Comp = NewObject<UStaticMeshComponent>(OwnerActor);
 	Comp->SetStaticMesh(Mesh);
 	Comp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Comp->SetWorldLocationAndRotation(Location, Rotation);
@@ -191,17 +234,25 @@ void UQinglanVFXCueComponent::PlayCue(FName CueId, const FTransform& Source, FVe
 	}
 	Comp->RegisterComponent();
 
+	// AUD-43: build the complete instance (including the light) BEFORE putting
+	// it into ActiveCues, so DecayCues/ResetForPool can always destroy the real
+	// light. Quality and low-flash come from the player's actual settings, not
+	// a hardcoded Balanced check. Low/low-flash keep the mesh silhouette and
+	// suppress only decorative dynamic lights.
+	const FQinglanResolvedCueSettings CueSettings = ResolveCueSettings(World);
+	const bool bLightAllowed = !bIsBarrier
+		&& !CueSettings.bLowFlash
+		&& QualityAllowsLights(CueSettings.Quality)
+		&& GetActiveLightCount() < MaxActiveCueLights;
+
 	FCueInstance Inst;
 	Inst.Root = Comp;
 	Inst.Remaining = 0.6f;
 	Inst.Total = 0.6f;
 	Inst.BaseRadius = 100.f * Scale.X;
-	ActiveCues.Add(Inst);
-
-	// Dynamic light for readable impacts (Balanced+).
-	if (QualityAllowsLights(EQinglanVFXQuality::Balanced) && !bIsBarrier)
+	if (bLightAllowed)
 	{
-		UPointLightComponent* Light = NewObject<UPointLightComponent>(GetOwner());
+		UPointLightComponent* Light = NewObject<UPointLightComponent>(OwnerActor);
 		Light->SetupAttachment(RootComp ? RootComp : Comp);
 		Light->SetWorldLocation(Location);
 		Light->SetIntensity(8000.f * Intensity);
@@ -209,7 +260,22 @@ void UQinglanVFXCueComponent::PlayCue(FName CueId, const FTransform& Source, FVe
 		Light->SetAttenuationRadius(1200.f);
 		Light->RegisterComponent();
 		Inst.Light = Light;
+		Inst.LightBaseIntensity = 8000.f * Intensity;
 	}
+	ActiveCues.Add(Inst);
+}
+
+int32 UQinglanVFXCueComponent::GetActiveLightCount() const
+{
+	int32 Count = 0;
+	for (const FCueInstance& Inst : ActiveCues)
+	{
+		if (Inst.Light.IsValid())
+		{
+			++Count;
+		}
+	}
+	return Count;
 }
 
 void UQinglanVFXCueComponent::ResetForPool()
@@ -255,7 +321,8 @@ void UQinglanVFXCueComponent::DecayCues(float DeltaTime)
 		}
 		if (UPointLightComponent* Light = Inst.Light.Get())
 		{
-			Light->SetIntensity(Light->Intensity * Alpha);
+			// Scale from the authored base, never compound frame-to-frame.
+			Light->SetIntensity(Inst.LightBaseIntensity * Alpha);
 		}
 		if (Inst.Remaining <= 0.f)
 		{

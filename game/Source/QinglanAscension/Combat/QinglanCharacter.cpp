@@ -34,6 +34,7 @@
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/SkeletalMesh.h"
+#include "Misc/CommandLine.h"
 #include "Misc/PackageName.h"
 #include "UObject/SoftObjectPath.h"
 #include "GameFramework/SpringArmComponent.h"
@@ -1965,6 +1966,13 @@ void AQinglanCharacter::OpenGameMenu()
 void AQinglanCharacter::OpenProfileFrontendIfNeeded()
 {
 	if (bProfileFrontendOpen)
+	{
+		return;
+	}
+	// QA capture (`-QinglanTrial=`) renders arena hazards without a slot; the
+	// selector would cover the frame and the trial does not need a profile.
+	FString TrialCaptureValue;
+	if (FParse::Value(FCommandLine::Get(), TEXT("QinglanTrial="), TrialCaptureValue))
 	{
 		return;
 	}

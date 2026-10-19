@@ -17,6 +17,7 @@
 // untouched, and the engine's completion path skips room rewards because
 // trials never open an expedition (its Run->IsInExpedition() guard).
 #include "Core/QinglanTrialDirector.h"
+#include "VFX/QinglanVFXCueComponent.h"
 
 #include "AI/QinglanAIController.h"
 #include "AI/QinglanEncounterDirector.h"
@@ -213,6 +214,10 @@ AQinglanTrialDirector::AQinglanTrialDirector()
 	USceneComponent* Root = CreateDefaultSubobject<USceneComponent>(TEXT("TrialRoot"));
 	SetRootComponent(Root);
 
+	// AUD-42: storm strikes must show their warning outline; the delegate has
+	// no guaranteed external listener, so the director owns a presenter.
+	HazardVfx = CreateDefaultSubobject<UQinglanVFXCueComponent>(TEXT("HazardVfx"));
+
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.bStartWithTickEnabled = true;
 }
@@ -226,7 +231,8 @@ void AQinglanTrialDirector::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	Super::EndPlay(EndPlayReason);
 }
 
-bool AQinglanTrialDirector::BeginTrial(FName SceneId, FName ObjectiveId, float DurationSeconds, int32 Tier)
+bool AQinglanTrialDirector::BeginTrial(FName SceneId, FName ObjectiveId, float DurationSeconds, int32 Tier,
+	bool bSkipAdmissionForCapture)
 {
 	if (bActive)
 	{
@@ -236,27 +242,33 @@ bool AQinglanTrialDirector::BeginTrial(FName SceneId, FName ObjectiveId, float D
 	UGameInstance* Instance = GetGameInstance();
 	UQinglanProfileSubsystem* Profile = Instance ? Instance->GetSubsystem<UQinglanProfileSubsystem>() : nullptr;
 	UQinglanStorySubsystem* Story = Instance ? Instance->GetSubsystem<UQinglanStorySubsystem>() : nullptr;
-	const QinglanTrialAdmission::FResult Admission = QinglanTrialAdmission::EvaluateScene(SceneId, ObjectiveId, Profile, Story);
-	if (!Admission.IsAllowed())
+	// QA capture (`-QinglanTrial=`) proves hazard rendering without a
+	// progressed profile; admission and authored-duration validation stay
+	// authoritative for every gameplay call (default false).
+	if (!bSkipAdmissionForCapture)
 	{
-		if (AQinglanCharacter* Player = GetTrialPlayer(this))
+		const QinglanTrialAdmission::FResult Admission = QinglanTrialAdmission::EvaluateScene(SceneId, ObjectiveId, Profile, Story);
+		if (!Admission.IsAllowed())
 		{
-			Player->ShowGameMessage(UQinglanHUDStatics::GameText(Admission.ReasonKey));
+			if (AQinglanCharacter* Player = GetTrialPlayer(this))
+			{
+				Player->ShowGameMessage(UQinglanHUDStatics::GameText(Admission.ReasonKey));
+			}
+			return false;
 		}
-		return false;
+		QinglanTrialAdmission::ETrial Trial;
+		QinglanTrialAdmission::ResolveScene(SceneId, Trial); // EvaluateScene validated the scene.
+		const float RequiredDuration = Trial == QinglanTrialAdmission::ETrial::Foundation ? 90.f : 150.f;
+		const int32 RequiredTier = Trial == QinglanTrialAdmission::ETrial::Foundation ? 1 : 2;
+		if (!FMath::IsNearlyEqual(DurationSeconds, RequiredDuration) || Tier != RequiredTier)
+		{
+			UE_LOG(LogQinglan, Warning, TEXT("Trial refused: duration %.1f/tier %d does not match the authored %.1f/%d"),
+				DurationSeconds, Tier, RequiredDuration, RequiredTier);
+			return false;
+		}
 	}
-	QinglanTrialAdmission::ETrial Trial;
-	QinglanTrialAdmission::ResolveScene(SceneId, Trial); // EvaluateScene validated the scene.
-	const float RequiredDuration = Trial == QinglanTrialAdmission::ETrial::Foundation ? 90.f : 150.f;
-	const int32 RequiredTier = Trial == QinglanTrialAdmission::ETrial::Foundation ? 1 : 2;
 	const UQinglanRunSubsystem* Run = Instance ? Instance->GetSubsystem<UQinglanRunSubsystem>() : nullptr;
 	AQinglanCharacter* Player = GetTrialPlayer(this);
-	if (!FMath::IsNearlyEqual(DurationSeconds, RequiredDuration) || Tier != RequiredTier)
-	{
-		UE_LOG(LogQinglan, Warning, TEXT("Trial refused: duration %.1f/tier %d does not match the authored %.1f/%d"),
-			DurationSeconds, Tier, RequiredDuration, RequiredTier);
-		return false;
-	}
 	if (Run && Run->IsInExpedition())
 	{
 		UE_LOG(LogQinglan, Warning, TEXT("Trial refused: an expedition is still active"));
@@ -600,6 +612,14 @@ void AQinglanTrialDirector::EnqueueStrikeVolley(AQinglanCharacter* Player)
 	// for the whole warning window, then one distance-checked impact each.
 	OnTrialHazardTelegraph.Broadcast(this, Centers,
 		QinglanTrialStorm::StrikeRadiusCm, QinglanTrialStorm::StrikeWarnSeconds);
+	if (HazardVfx)
+	{
+		for (const FVector& Center : Centers)
+		{
+			HazardVfx->PlayTelegraph(Center, QinglanTrialStorm::StrikeRadiusCm,
+				QinglanTrialStorm::StrikeWarnSeconds, EQinglanElement::Lightning);
+		}
+	}
 	if (UGameInstance* Instance = GetGameInstance())
 	{
 		if (UQinglanAudioSubsystem* Audio = Instance->GetSubsystem<UQinglanAudioSubsystem>())

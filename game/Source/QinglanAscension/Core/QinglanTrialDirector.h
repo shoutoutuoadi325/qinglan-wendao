@@ -136,7 +136,8 @@ public:
 	 * admission/story prerequisites fail, the world has no wave engine, or the
 	 * catalog yielded no archetypes. Rejection never grants objective proof.
 	 */
-	bool BeginTrial(FName SceneId, FName ObjectiveId, float DurationSeconds, int32 Tier);
+	bool BeginTrial(FName SceneId, FName ObjectiveId, float DurationSeconds, int32 Tier,
+		bool bSkipAdmissionForCapture = false);
 	/** Ordinary retreat action: discard this attempt, keep permanent progression, save and return. */
 	UFUNCTION(BlueprintCallable) bool CancelTrialAndReturnToHub();
 
@@ -193,6 +194,10 @@ private:
 	void SweepEngineEnemies();
 
 	UPROPERTY() TObjectPtr<AQinglanEncounterDirector> WaveEngine = nullptr;
+	/** AUD-42: presents the storm's ground-outline telegraphs. The delegate
+	 *  carries the data for other subscribers; this component is the built-in
+	 *  presenter so warnings exist even in a build with no other listener. */
+	UPROPERTY(VisibleAnywhere) TObjectPtr<class UQinglanVFXCueComponent> HazardVfx = nullptr;
 	/** Cached archetype data assets (QinglanEnemyCatalog::GetAllArchetypes). */
 	UPROPERTY() TArray<TObjectPtr<UQinglanEnemyDataAsset>> CatalogAssets;
 

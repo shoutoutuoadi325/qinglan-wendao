@@ -20,6 +20,7 @@
 #include "Combat/QinglanStatusComponent.h"
 #include "Core/QinglanInteractable.h"
 #include "Core/QinglanRoomLayout.h"
+#include "Core/QinglanTrialDirector.h"
 #include "Misc/PackageName.h"
 #include "TimerManager.h"
 #include "Misc/CommandLine.h" // FParse
@@ -169,6 +170,18 @@ void AQinglanHubGameMode::BeginPlay()
 	Super::BeginPlay();
 	UE_LOG(LogQinglan, Log, TEXT("Hub mode active (sanctuary)"));
 	SetupQinglanShotMode(this);
+
+	// QA capture (`-QinglanTrial=`): travel straight to the arena. Packaged
+	// builds ignore a positional map URL when GameDefaultMap is set, so the
+	// capture flag performs the travel itself; the realm mode then starts the
+	// trial (see AQinglanRealmGameMode::BeginPlay).
+	FString TrialCaptureValue;
+	if (FParse::Value(FCommandLine::Get(), TEXT("QinglanTrial="), TrialCaptureValue))
+	{
+		UE_LOG(LogQinglan, Log, TEXT("QinglanTrial QA: traveling to L_TribulationArena"));
+		UGameplayStatics::OpenLevel(this, FName(TEXT("/Game/Qinglan/Maps/L_TribulationArena")));
+		return;
+	}
 
 	UGameInstance* Instance = GetGameInstance();
 
@@ -349,6 +362,46 @@ void AQinglanRealmGameMode::BeginPlay()
 	else
 	{
 		UE_LOG(LogQinglan, Error, TEXT("Realm mode has no encounter director; rooms will not spawn encounters"));
+	}
+
+	// QA capture hook (AUD-42/55): `-QinglanTrial=<seconds>` starts the
+	// foundation survival trial in the arena world once the pawn exists, so
+	// lightning hazards, telegraphs and wave enemies can be captured without
+	// an interactive run. Harmless unless the flag is passed on the command
+	// line (used by docs/dev/build-and-run rendered-QA commands).
+	FString TrialCaptureSeconds;
+	if (FParse::Value(FCommandLine::Get(), TEXT("QinglanTrial="), TrialCaptureSeconds))
+	{
+		// Foundation authored contract: 90 s, tier 1. The hook bypasses the
+		// progression gate only (admission checks stay in every gameplay call).
+		const float CaptureDuration = 90.f;
+		FTimerHandle TrialQaHandle;
+		GetWorldTimerManager().SetTimer(TrialQaHandle, FTimerDelegate::CreateWeakLambda(this, [this, CaptureDuration]()
+		{
+			UWorld* World = GetWorld();
+			AQinglanCharacter* Player = World
+				? Cast<AQinglanCharacter>(UGameplayStatics::GetPlayerCharacter(World, 0)) : nullptr;
+			if (!World || !Player)
+			{
+				UE_LOG(LogQinglan, Warning, TEXT("QinglanTrial QA: no player pawn; trial not started"));
+				return;
+			}
+			FActorSpawnParameters Params;
+			Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+			Params.Name = TEXT("QinglanTrialDirector_QA");
+			AQinglanTrialDirector* Director = World->SpawnActor<AQinglanTrialDirector>(
+				AQinglanTrialDirector::StaticClass(), Player->GetActorLocation(), FRotator::ZeroRotator, Params);
+			if (Director && Director->BeginTrial(FName(TEXT("CH03_S02")),
+					FName(TEXT("CH03_S02_OBJECTIVE")), CaptureDuration, /*Tier=*/1,
+					/*bSkipAdmissionForCapture=*/true))
+			{
+				UE_LOG(LogQinglan, Log, TEXT("QinglanTrial QA: foundation trial started (%.0fs)"), CaptureDuration);
+			}
+			else
+			{
+				UE_LOG(LogQinglan, Error, TEXT("QinglanTrial QA: BeginTrial failed"));
+			}
+		}), 3.f, /*bLoop=*/false);
 	}
 
 	UGameInstance* Instance = GetGameInstance();

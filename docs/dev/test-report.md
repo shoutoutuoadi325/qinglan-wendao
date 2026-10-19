@@ -3,21 +3,23 @@
 ## 0. Current evidence (2026-10-19) — supersedes the historical section below
 
 Environment: Linux (container, 64 physical cores), UE 5.8.3 source build, headless
-(`-nullrhi`), branch `fix/audit-repairs` at `f438ee1`.
+(`-nullrhi`), branch `fix/audit-repairs` at `73d9882` (wave 36).
 
 | Item | Result | Evidence |
 |---|---|---|
 | Editor target build (Linux, Development, UHT + editor modules) | ✅ Succeeded | `docs/dev/evidence/build-2026-10-19-wave6.log` |
-| Automation suite `RunTests Qinglan` | ✅ 53 started / 53 Success / 0 Fail | `docs/dev/evidence/automation-2026-10-19-final-64tests.log` |
+| Automation suite `RunTests Qinglan` | ✅ 67 performed / 67 Success / 0 Fail | `docs/dev/evidence/automation-2026-10-19-wave36-regen-67tests.log` |
+| Clean content regeneration (`tools/build/regenerate-content.sh`) | ✅ rc_all=0 from a deleted `Data`/`UI`/montage state; Niagara systems, per-rig ABPs, hit-react montages, maps, tables, audio, textures all present | `docs/dev/evidence/content-regeneration-2026-10-19-niagara-abp.log` |
 | Planning validators | ✅ pass | `python3 tools/validate_repository.py`, `tools/validate_story.py` |
-| Linux Shipping package (UAT BuildCookRun) | ✅ rc=0; all four maps, DT_Localization, ST_Game, registry, widgets, montages, meshes, audio, materials in the IoStore inventory | `packaging/evidence/linux-shipping-2026-10-19.txt`, `docs/dev/evidence/package-linux-2026-10-19.log` |
-| Rendered packaged boot (`Xvfb` + NVIDIA Vulkan ICD, software/remote GPU) | ✅ hub renders; HUD text, skill slots, talisman charges, and vitals resolve; third-person camera and character scale correct | `docs/dev/evidence/rendered/hub-packaged-shipping-2026-10-19.png` |
-| Rendered packaged boot after audio/animation/anchor repairs | ✅ same clean HUD and camera from the final package | `docs/dev/evidence/rendered/hub-packaged-shipping-final-2026-10-19.png` |
-| Functional new-profile campaign journey (`QINGLAN_RUN_CAMPAIGN=1`) | ✅ **30/30 main scenes**, both timed trials, Foundation + Golden Core breakthroughs, ending confirmation, 0 blocked | `docs/dev/evidence/automation-2026-10-19-campaign-30of30.log` |
-| Functional new-profile side-quest journey (`QINGLAN_RUN_CAMPAIGN=1`) | ✅ **24/24 side stages**, 8 quest completion flags, courier 18 h/12 h round trips, 0 blocked | `docs/dev/evidence/automation-2026-10-19-sidequests-24of24.log` |
+| Linux Shipping package (UAT BuildCookRun) | ✅ rc=0; all four maps, DT_Localization, ST_Game, registry, widgets, montages, meshes, audio, materials, `NS_*` cue systems and `ABP_*` slot graphs in the IoStore inventory | `packaging/evidence/linux-shipping-2026-10-19-wave36.txt`, `docs/dev/evidence/package-linux-2026-10-19-wave36.log` |
+| Rendered packaged boot (`Xvfb` + NVIDIA Vulkan ICD, software/remote GPU) | ✅ hub renders; HUD text, skill slots, talisman charges, vitals, third-person camera and character scale correct | `docs/dev/evidence/rendered/hub-packaged-shipping-wave36-2026-10-19.png` |
+| Rendered packaged boot, Simplified Chinese | ✅ every HUD string resolves in `zh-Hans` and CJK glyphs render (no tofu) in the Shipping build | `docs/dev/evidence/rendered/hub-packaged-shipping-zh-Hans-2026-10-19.png` |
+| Rendered packaged boot, Low preset + low-flash + `zh-Hans` | ✅ the reduced-effects configuration boots and renders the same readable HUD | `docs/dev/evidence/rendered/hub-packaged-shipping-low-lowflash-zh-2026-10-19.png` |
+| Functional new-profile campaign journey (`QINGLAN_RUN_CAMPAIGN=1`) | ✅ **30/30 main scenes**, both timed trials, Foundation + Golden Core breakthroughs, ending confirmation, 0 blocked (run against the regenerated content) | `docs/dev/evidence/automation-2026-10-19-campaign-30of30-regen.log` |
+| Functional new-profile side-quest journey (`QINGLAN_RUN_CAMPAIGN=1`) | ✅ **24/24 side stages**, 8 quest completion flags, courier 18 h/12 h round trips, 0 blocked (run against the regenerated content) | `docs/dev/evidence/automation-2026-10-19-sidequests-24of24-regen.log` |
 | Sky atmosphere and hero skin material | ✅ blue sky/horizon renders in the packaged build; `MIC_HumanCharacter` binds the imported Quaternius palette texture (visual palette/UV art pass still open) | `docs/dev/evidence/rendered/hub-sky-atmosphere-2026-10-19.png` |
 
-Test suite composition: 27 cases from the pre-audit baseline + 37 repair cases
+Test suite composition: 27 cases from the pre-audit baseline + 40 repair cases
 across the audit waves (`Qinglan.Narrative.*` courier/guard/skip cases,
 `Qinglan.Persistence.*` delivery/migration/rotation cases, `Qinglan.Trial.*`
 phase-machine/hazard cases, `Qinglan.Combat.*` gate/immunity/status cases,

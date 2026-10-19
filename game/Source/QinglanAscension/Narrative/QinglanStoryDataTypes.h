@@ -206,7 +206,7 @@ struct FQinglanRealmRoom
 
 /** Realm (expedition template) data asset; mirrors data/examples/realm.json. */
 UCLASS()
-class UQinglanRealmDataAsset : public UPrimaryDataAsset
+class QINGLANASCENSION_API UQinglanRealmDataAsset : public UPrimaryDataAsset // linkage-only export for editor automation specs
 {
 	GENERATED_BODY()
 

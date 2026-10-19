@@ -2384,12 +2384,17 @@ void AQinglanCharacter::HandleRoomCompleted(int32 RoomIndex, int64 ShardsAwarded
 	}
 	// Dispatch the exact defeated encounter; never scan for the first eligible
 	// chapter scene (late chapters deliberately reuse local objective IDs).
+	// AUD-11: emit the authored boss-defeat proof event first; the guard-based
+	// auto-completion then proves the exact objective, and the direct notify
+	// below stays idempotent.
 	if (Realm->RealmId == FName(UQinglanEconomyLibrary::BambooRealmIdText))
 	{
+		QinglanStoryRuntime::NotifyGameplayEvent(Story, FName(TEXT("encounter.boss_defeated.bamboo")), {});
 		Story->NotifySceneObjectiveCompleted(FName(TEXT("CH02_S02")), FName(TEXT("CH02_S02_OBJECTIVE")));
 	}
 	else if (Realm->RealmId == FName(UQinglanEconomyLibrary::AshenRealmIdText))
 	{
+		QinglanStoryRuntime::NotifyGameplayEvent(Story, FName(TEXT("encounter.boss_defeated.ashen")), {});
 		Story->NotifySceneObjectiveCompleted(FName(TEXT("CH05_S01")), FName(TEXT("s01.objective")));
 	}
 }

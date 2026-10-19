@@ -1507,7 +1507,9 @@ bool FAutomationTestQinglanTrialGoldenCoreOrder::RunTest(const FString& Paramete
 	TestTrue(TEXT("Golden Core trial admitted"),
 		Director->BeginTrial(FName(TEXT("CH06_S02")), FName(TEXT("s02.objective")), 150.f, 2));
 
-	const FName ExpectedOrder[8] =
+	// AUD-11 adds the authored objective-proof beat after the shell dies; the
+	// trial director emits it last so the guard sees the completed encounter.
+	const FName ExpectedOrder[9] =
 	{
 		FName(TEXT("storm_time_0")),
 		FName(TEXT("first_lightning_telegraph")),
@@ -1517,6 +1519,7 @@ bool FAutomationTestQinglanTrialGoldenCoreOrder::RunTest(const FString& Paramete
 		FName(TEXT("shell_combat_started")),
 		FName(TEXT("first_shell_recovery_window")),
 		FName(TEXT("shell_defeated")),
+		FName(TEXT("trial.survived.golden_core")),
 	};
 	TArray<FName> Events;
 	Director->GetTrialEventLog(Events);
@@ -1605,9 +1608,9 @@ bool FAutomationTestQinglanTrialGoldenCoreOrder::RunTest(const FString& Paramete
 	TestEqual(TEXT("A resolved trial rests in Idle"), Director->GetTrialPhase(), EQinglanTrialPhase::Idle);
 
 	Director->GetTrialEventLog(Events);
-	TestEqual(TEXT("Exactly the eight authored beats fired"), Events.Num(), 8);
-	bool bInOrder = Events.Num() == 8;
-	for (int32 Index = 0; bInOrder && Index < 8; ++Index)
+	TestEqual(TEXT("Exactly the nine authored beats fired"), Events.Num(), 9);
+	bool bInOrder = Events.Num() == 9;
+	for (int32 Index = 0; bInOrder && Index < 9; ++Index)
 	{
 		bInOrder = Events[Index] == ExpectedOrder[Index];
 	}

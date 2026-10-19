@@ -88,6 +88,13 @@ class QINGLANASCENSION_API AQinglanCharacter : public ACharacter // linkage-only
 public:
 	AQinglanCharacter();
 
+	/**
+	 * Boss-room clear commits the realm's current choice-free scene (gameplay
+	 * proof). Public so the editor automation specs can bind the production
+	 * handler directly with AddDynamic (the runtime binds it in BeginPlay).
+	 */
+	UFUNCTION() void HandleRoomCompleted(int32 RoomIndex, int64 ShardsAwarded);
+
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 	virtual void PossessedBy(AController* NewController) override;
@@ -276,8 +283,6 @@ protected:
 	UFUNCTION() void HandleSceneEntered(FName SceneId);
 	UFUNCTION() void HandleSceneCompleted(FName SceneId);
 	UFUNCTION() void HandleRecordOpened(FName RecordId, const FText& Title, const FText& Body);
-	/** Boss-room clear commits the realm's current choice-free scene (gameplay proof). */
-	UFUNCTION() void HandleRoomCompleted(int32 RoomIndex, int64 ShardsAwarded);
 	/** Story choice-action delegates (Narrative/QinglanStoryRuntime.h). */
 	UFUNCTION() void HandleEnterTrialRequested(FName IdempotencyKey, FName SceneId);
 	UFUNCTION() void HandleStayAtHub(FName IdempotencyKey, FName SceneId);

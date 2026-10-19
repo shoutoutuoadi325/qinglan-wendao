@@ -32,6 +32,8 @@
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
 #include "Narrative/QinglanStoryDataTypes.h"
+#include "Narrative/QinglanStoryRuntime.h"
+#include "Narrative/QinglanStorySubsystem.h"
 #include "Persistence/QinglanSaveGame.h"
 #include "Persistence/QinglanProfileSnapshot.h"
 #include "Persistence/QinglanSaveSubsystem.h"
@@ -520,6 +522,17 @@ bool UQinglanRunSubsystem::EnterRoom(int32 RoomIndex)
 	// (docs/05 section 6 crash-resume restores room-entrance vitals).
 	State.EntryAttributes = SnapshotPlayerAttributes(this);
 	OnRoomEntered.Broadcast(RoomIndex);
+	// AUD-11: authored CH01_S02 proof term for reaching the room-3 shrine.
+	if (RoomIndex == 3)
+	{
+		if (UGameInstance* GameInstance = GetGameInstance())
+		{
+			if (UQinglanStorySubsystem* Story = GameInstance->GetSubsystem<UQinglanStorySubsystem>())
+			{
+				QinglanStoryRuntime::NotifyGameplayEvent(Story, FName(TEXT("shrine.room3_reached")), {});
+			}
+		}
+	}
 
 	// Room pipeline drives the encounter: the realm game mode owns the
 	// director actor; combat/elite/boss rooms begin their wave now, so doors
@@ -691,6 +704,15 @@ void UQinglanRunSubsystem::EndExpedition(bool bVictory, bool bVoluntaryRetreat)
 
 	// Profile commit callbacks above saw an open expedition and skipped the hub
 	// autosave. Close it now, then save profile + absence of checkpoint together.
+	// AUD-11: the authored banking proof term (CH01_S03); emitted only after
+	// the settlement above committed, so a failed bank never proves it.
+	if (UGameInstance* GameInstance = GetGameInstance())
+	{
+		if (UQinglanStorySubsystem* Story = GameInstance->GetSubsystem<UQinglanStorySubsystem>())
+		{
+			QinglanStoryRuntime::NotifyGameplayEvent(Story, FName(TEXT("bank.reward_banked")), {});
+		}
+	}
 	State.bInExpedition = false;
 	State.bNeedsCheckpointResume = false;
 	State.AcquiredBlessings.Reset();

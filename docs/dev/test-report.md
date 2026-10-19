@@ -8,14 +8,14 @@ Environment: Linux (container, 64 physical cores), UE 5.8.3 source build, headle
 | Item | Result | Evidence |
 |---|---|---|
 | Editor target build (Linux, Development, UHT + editor modules) | ✅ Succeeded | `docs/dev/evidence/build-2026-10-19-wave6.log` |
-| Automation suite `RunTests Qinglan` | ✅ 53 started / 53 Success / 0 Fail | `docs/dev/evidence/automation-2026-10-19-wave15-61tests.log` |
+| Automation suite `RunTests Qinglan` | ✅ 53 started / 53 Success / 0 Fail | `docs/dev/evidence/automation-2026-10-19-wave19-62tests.log` |
 | Planning validators | ✅ pass | `python3 tools/validate_repository.py`, `tools/validate_story.py` |
 | Linux Shipping package (UAT BuildCookRun) | ✅ rc=0; all four maps, DT_Localization, ST_Game, registry, widgets, montages, meshes, audio, materials in the IoStore inventory | `packaging/evidence/linux-shipping-2026-10-19.txt`, `docs/dev/evidence/package-linux-2026-10-19.log` |
 | Rendered packaged boot (`Xvfb` + NVIDIA Vulkan ICD, software/remote GPU) | ✅ hub renders; HUD text, skill slots, talisman charges, and vitals resolve; third-person camera and character scale correct | `docs/dev/evidence/rendered/hub-packaged-shipping-2026-10-19.png` |
 | Rendered packaged boot after audio/animation/anchor repairs | ✅ same clean HUD and camera from the final package | `docs/dev/evidence/rendered/hub-packaged-shipping-final-2026-10-19.png` |
 | Sky atmosphere and hero skin material | ✅ blue sky/horizon renders in the packaged build; `MIC_HumanCharacter` binds the imported Quaternius palette texture (visual palette/UV art pass still open) | `docs/dev/evidence/rendered/hub-sky-atmosphere-2026-10-19.png` |
 
-Test suite composition: 27 cases from the pre-audit baseline + 34 repair cases
+Test suite composition: 27 cases from the pre-audit baseline + 35 repair cases
 across the audit waves (`Qinglan.Narrative.*` courier/guard/skip cases,
 `Qinglan.Persistence.*` delivery/migration/rotation cases, `Qinglan.Trial.*`
 phase-machine/hazard cases, `Qinglan.Combat.*` gate/immunity/status cases,

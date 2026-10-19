@@ -873,14 +873,6 @@ void AQinglanTrialDirector::EndTrial(bool bSuccess, FName ReasonKey)
 		return;
 	}
 
-	if (!bFoundation)
-	{
-		// Golden Core's proof names shell_defeated (CH06_S02 objective
-		// all_of); broadcast before the objective commit below so the scene
-		// state already carries the beat.
-		BroadcastTrialEvent(EvShellDefeated());
-	}
-
 	UE_LOG(LogQinglan, Log, TEXT("Trial %s survived; committing scoped objective %s"),
 		*TrialSceneId.ToString(), *TrialObjectiveId.ToString());
 	if (UGameInstance* Instance = GetGameInstance())
@@ -914,6 +906,16 @@ void AQinglanTrialDirector::EndTrial(bool bSuccess, FName ReasonKey)
 		{
 			Audio->SetMusicState(EQinglanMusicState::Explore); // completion beat
 		}
+		// AUD-11: authored trial beats are emitted after the settlement so the
+		// guard-driven objective completion cannot complete the scene before
+		// the admission recheck above (which would skip the campaign flag and
+		// the deterministic breakthrough).
+		if (!bFoundation)
+		{
+			BroadcastTrialEvent(EvShellDefeated());
+		}
+		BroadcastTrialEvent(FName(bFoundation ? TEXT("trial.survived.foundation") : TEXT("trial.survived.golden_core")));
+
 		if (bFoundation)
 		{
 			// TravelToMap saves first. A failed save keeps the player in the cleared

@@ -788,6 +788,9 @@ namespace
 			// after the release sequence; blueprint section 1.9 "mq_shen_released
 			// saved only after pattern dissolution".
 			Delegates.OnReleaseGuardian.Broadcast(Key, Scene.SceneId, FName(QinglanEnding::ShenReleasedFlag));
+			// AUD-11: authored CH06_S03 proof term; the release choice itself is
+			// the gameplay action, so emit it here in the production path.
+			QinglanStoryRuntime::NotifyGameplayEvent(Story, FName(TEXT("release.guardian_released")), {});
 		}
 		else if (IsAction(Action, TEXT("preview_ending")))
 		{
@@ -1391,6 +1394,8 @@ bool UQinglanStorySubsystem::ConfirmEnding(FName EndingId, bool bWarningAcknowle
 	{
 		CompleteSceneById(this, Session, ConfirmSceneId, false);
 	}
+	// AUD-11: authored CH06_S04 proof term for the atomic ending commit.
+	QinglanStoryRuntime::NotifyGameplayEvent(this, FName(TEXT("ending.confirmed")), {});
 	if (UGameInstance* GameInstance = GetGameInstance())
 	{
 		if (UQinglanProfileSubsystem* Profile = GameInstance->GetSubsystem<UQinglanProfileSubsystem>())

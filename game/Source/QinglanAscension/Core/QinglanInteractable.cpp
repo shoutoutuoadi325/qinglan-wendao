@@ -357,6 +357,8 @@ namespace
 		}
 		if (Director != nullptr && Director->BeginTrial(ProofScene, ProofObjective, DurationSeconds, Tier))
 		{
+			// AUD-11: authored preparation proof term (CH03_S01).
+			QinglanStoryRuntime::NotifyGameplayEvent(Story, FName(TEXT("trial.admission_confirmed")), {});
 			return true;
 		}
 
@@ -1028,6 +1030,11 @@ void AQinglanInteractable::ExecuteInteraction(AQinglanCharacter* Player)
 		{
 			return; // e.g. CH02_S03 intake reconnect plays before leaving
 		}
+		// AUD-11: authored exit-intake proof term (CH02_S03).
+		if (Story != nullptr)
+		{
+			QinglanStoryRuntime::NotifyGameplayEvent(Story, FName(TEXT("exit.reconnect_ack")), {});
+		}
 		if (Run != nullptr && Run->IsInExpedition())
 		{
 			// AUD-22: a victory is claimable only from the last (exit) room with
@@ -1054,6 +1061,13 @@ void AQinglanInteractable::ExecuteInteraction(AQinglanCharacter* Player)
 		return;
 	}
 
+	// AUD-11: CH00_S01's authored proof term. The courtyard bell is the only
+	// interaction at this anchor, so the press itself is the pulled bell.
+	if (InteractionId == FName(TEXT("hub.courtyard")) && Story != nullptr)
+	{
+		QinglanStoryRuntime::NotifyGameplayEvent(Story, FName(TEXT("interact.bell_pulled")), {});
+	}
+
 	// --- Hub gates: story-driven departure -> tutorial -> free expeditions ---
 	if (InteractionId == GHubBambooGateId)
 	{
@@ -1066,6 +1080,8 @@ void AQinglanInteractable::ExecuteInteraction(AQinglanCharacter* Player)
 		const bool bCh01Done = Story->HasFlag(GCh01CompleteFlag);
 		if (!bCh00Done)
 		{
+			// AUD-11: the gate press is the authored departure confirmation.
+			QinglanStoryRuntime::NotifyGameplayEvent(Story, FName(TEXT("interact.departure_confirmed")), {});
 			// First departure: the CH00_S04 gate scene runs instead of travel.
 			Story->BeginScene(FName(TEXT("CH00_S04")));
 			return;
@@ -1192,6 +1208,19 @@ void AQinglanInteractable::ExecuteInteraction(AQinglanCharacter* Player)
 				if (Profile->TryAdvanceRank(TransactionId))
 				{
 					bActed = true;
+					// AUD-11: authored CH03/CH06 preparation proof terms.
+					if (UQinglanStorySubsystem* RankStory = Player && Player->GetGameInstance()
+							? Player->GetGameInstance()->GetSubsystem<UQinglanStorySubsystem>() : nullptr)
+					{
+						if (Profile->GetCultivationStage() == EQinglanStage::QiRefining && Profile->GetCultivationRank() >= 3)
+						{
+							QinglanStoryRuntime::NotifyGameplayEvent(RankStory, FName(TEXT("cultivation.qi_rank_3")), {});
+						}
+						else if (Profile->GetCultivationStage() == EQinglanStage::FoundationEstablishment && Profile->GetCultivationRank() >= 3)
+						{
+							QinglanStoryRuntime::NotifyGameplayEvent(RankStory, FName(TEXT("cultivation.foundation_rank_3")), {});
+						}
+					}
 					if (Player)
 					{
 						Player->ShowGameMessage(UQinglanHUDStatics::FormatGameTextWithNumber(
@@ -1209,6 +1238,18 @@ void AQinglanInteractable::ExecuteInteraction(AQinglanCharacter* Player)
 			{
 				// Stage maxed or rankless: surface the authoritative reason.
 				Player->ShowGameMessage(BlockingReason);
+			}
+		}
+		// AUD-11: the authored CH03_S01 proof requires the admission confirmed
+		// "at shrine checkpoint"; the shrine IS the confirmation station. Emit
+		// it when the profile already meets the Foundation prerequisites (Qi
+		// rank 3 + Bamboo clear), which is non-circular: the trial itself is
+		// entered later, after CH03_S01 commits mq_ch03_prepared.
+		if (Story != nullptr && Profile->GetCultivationStage() == EQinglanStage::QiRefining)
+		{
+			if (Profile->GetCultivationRank() >= 3 && IsBambooCleared(Profile, Story))
+			{
+				QinglanStoryRuntime::NotifyGameplayEvent(Story, FName(TEXT("trial.admission_confirmed")), {});
 			}
 		}
 		// The shrine anchors a chapter scene too (CH03_S01 preparation); it

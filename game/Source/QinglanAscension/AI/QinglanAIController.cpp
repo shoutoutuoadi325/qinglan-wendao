@@ -14,6 +14,7 @@
 #include "Engine/Engine.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
@@ -143,6 +144,27 @@ void AQinglanAIController::UpdateSensing()
 	AQinglanEnemyCharacter* Enemy = GetEnemy();
 	UQinglanEnemyDataAsset* Data = EnemyDataRef.Get();
 	ACharacter* PlayerPawn = Cast<ACharacter>(UGameplayStatics::GetPlayerCharacter(this, 0));
+	if (PlayerPawn == nullptr)
+	{
+		// Headless worlds (automation fixtures) register no local player;
+		// the possessed player character in the world is the target.
+		if (UWorld* World = GetWorld())
+		{
+			TActorIterator<ACharacter> It(World);
+			while (It)
+			{
+				if (AController* PC = It->GetController())
+				{
+					if (PC->IsPlayerController())
+					{
+						PlayerPawn = *It;
+						break;
+					}
+				}
+				++It;
+			}
+		}
+	}
 	if (!Enemy || !Data || !PlayerPawn || !Enemy->IsAlive())
 	{
 		TargetPawn = nullptr;

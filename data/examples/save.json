@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "content_version": "design-1",
   "profile_id": "example-profile-001",
   "save_sequence": 1,
@@ -32,6 +32,8 @@
     "read_records": [],
     "pending_agreements": {},
     "effective_agreements": {},
+    "story_clock_seconds": 0.0,
+    "deliveries": {},
     "confirmed_ending": null
   }
 }

@@ -28,7 +28,8 @@ class QINGLANASCENSION_API UQinglanSaveSubsystem : public UGameInstanceSubsystem
 public:
 	static constexpr int32 ProfileSlotCount = 3;
 	static constexpr int32 BackupsPerProfile = 2;
-	static constexpr int32 CurrentSchemaVersion = 1;
+	/** v2 adds the narrative courier clock + per-quest delivery entries. */
+	static constexpr int32 CurrentSchemaVersion = 2;
 
 	/** Slot 0..2. Loads the primary or, when corrupt, the latest valid backup. */
 	UFUNCTION(BlueprintCallable) bool LoadProfile(int32 Slot, FText& OutNotice);

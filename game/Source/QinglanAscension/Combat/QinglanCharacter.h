@@ -165,6 +165,9 @@ protected:
 	UFUNCTION() void HandleBankingFailed();
 	UFUNCTION() void HandleReturnToHub(FName IdempotencyKey, FName SceneId);
 	UFUNCTION() void HandleCampaignComplete(FName IdempotencyKey, FName SceneId);
+	/** Courier reply arrived: shows the authored arrival notice (the rest
+	 *  station itself only reports the hours passed). */
+	UFUNCTION() void HandleDeliveryArrived(FName QuestId, FName Version);
 	/** Defeat: banks at 50% and returns to the hub after a short beat (docs/03 section 6). */
 	UFUNCTION() void HandleHealthChanged(float Current, float Maximum);
 	/** Delayed hub reload after the death beat (timer callback; OpenLevel off the input path). */

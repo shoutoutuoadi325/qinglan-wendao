@@ -1,6 +1,7 @@
 // Save schema migration registry + shared invariant validation.
 #include "Persistence/QinglanSaveMigration.h"
 
+#include "Narrative/QinglanStoryRuntime.h"
 #include "Persistence/QinglanSaveSubsystem.h"
 #include "QinglanAscension.h"
 
@@ -20,6 +21,8 @@ namespace
 	constexpr int32 MaxRoomEntries = 32;             // 7-room contract (§1.4), generous bound
 	constexpr int32 MaxTalismanChargeEntries = 16;   // bounded map (§1.6); 6 catalog talismans
 	constexpr int32 MaxTalismanCharges = 9;          // charges 0..9; catalog ships at most 2 (docs/03 section 5)
+	constexpr double MaxStoryClockSeconds = 366.0 * 10.0 * 86400.0; // ten in-fiction years of hub rests
+	constexpr double MaxDeliverySpanSeconds = 7.0 * 86400.0;        // round trips are 12-18 h; 7 d is the corruption bound
 	// FNV-1a constants for UQinglanSaveGame::BodyChecksum ("detects corruption,
 	// not tampering", docs/05-technical-architecture.md §6).
 	constexpr uint64 Fnv1a64OffsetBasis = 0xcbf29ce484222325ULL;
@@ -131,11 +134,13 @@ namespace QinglanSave
 
 	bool MigrateV1_ToV2(UQinglanSaveGame* Save, FText& OutError)
 	{
-		// Pattern step for the future v2 schema ("migration functions v1_to_v2,
-		// etc.", docs/05 §6). Dormant while CurrentSchemaVersion == 1: the chain
-		// in MigrateToCurrentSchema never applies it until the constant is
-		// bumped, and applying it manually today would fail the final invariant
-		// check because v2 > CurrentSchemaVersion.
+		// v2 adds the narrative courier clock and per-quest delivery entries
+		// (AUD-16). v1 persisted pending selections without dispatch
+		// timestamps, so every surviving pending version gains a fresh
+		// undispatched-in-fiction delivery from clock zero: the reply stays one
+		// sanctuary rest away while the effective agreement is retained
+		// (side-quests.json SQ02 closure: "restart the timestamp and retain old
+		// accepted agreement until a new agreement is confirmed").
 		if (Save == nullptr || Save->SchemaVersion != 1)
 		{
 			UE_LOG(LogQinglanSave, Error, TEXT("MigrateV1_ToV2: save is not a v1 save"));
@@ -146,9 +151,26 @@ namespace QinglanSave
 		{
 			return false;
 		}
+		Save->Narrative.StoryClockSeconds = 0.0;
+		for (auto It = Save->Narrative.PendingAgreements.CreateIterator(); It; ++It)
+		{
+			if (It.Key().IsNone() || It.Value().IsNone())
+			{
+				// An empty quest or version cannot carry a delivery; drop the slot
+				// instead of failing the whole profile over it.
+				UE_LOG(LogQinglanSave, Warning, TEXT("MigrateV1_ToV2: dropping empty pending agreement slot for %s"),
+					*It.Key().ToString());
+				It.RemoveCurrent();
+				continue;
+			}
+			FQinglanNarrativeDelivery Delivery;
+			Delivery.Version = It.Value();
+			Delivery.DispatchedAtSeconds = 0.0;
+			Delivery.ReadyAtStorySeconds = QinglanStoryRuntime::DeliveryGameHoursForQuest(It.Key()) * QinglanStoryRuntime::SecondsPerGameHour;
+			Delivery.bDelivered = false;
+			Save->Narrative.Deliveries.Add(It.Key(), Delivery);
+		}
 		Save->SchemaVersion = 2;
-		// FIXME-CONTRACT(v2): map v1 fields onto the authored v2 layout here
-		// when schema v2 exists. The placeholder preserves every v1 field.
 		return ValidateSaveInvariants(Save, OutError);
 	}
 
@@ -331,11 +353,48 @@ namespace QinglanSave
 		}
 		if (Narrative.ChoiceDecisions.Num() > MaxNarrativeEntries ||
 			Narrative.PendingAgreements.Num() > MaxNarrativeEntries ||
-			Narrative.EffectiveAgreements.Num() > MaxNarrativeEntries)
+			Narrative.EffectiveAgreements.Num() > MaxNarrativeEntries ||
+			Narrative.Deliveries.Num() > MaxNarrativeEntries)
 		{
 			UE_LOG(LogQinglanSave, Error, TEXT("Save invariant 'bounded narrative maps' failed"));
 			OutError = Loc(TEXT("save.invalid"));
 			return false;
+		}
+		// Courier clock + deliveries (schema v2): a finite clock within ten
+		// in-fiction years, complete entries, and consistency with the pending
+		// agreements each delivery must still answer.
+		if (!FMath::IsFinite(Narrative.StoryClockSeconds) ||
+			Narrative.StoryClockSeconds < 0.0 ||
+			Narrative.StoryClockSeconds > MaxStoryClockSeconds)
+		{
+			UE_LOG(LogQinglanSave, Error, TEXT("Save invariant 'story clock range' failed"));
+			OutError = Loc(TEXT("save.invalid"));
+			return false;
+		}
+		for (const TPair<FName, FQinglanNarrativeDelivery>& Entry : Narrative.Deliveries)
+		{
+			const FQinglanNarrativeDelivery& Delivery = Entry.Value;
+			const FName* PendingVersion = Narrative.PendingAgreements.Find(Entry.Key);
+			if (Entry.Key.IsNone() ||
+				Delivery.Version.IsNone() ||
+				!FMath::IsFinite(Delivery.DispatchedAtSeconds) || Delivery.DispatchedAtSeconds < 0.0 ||
+				!FMath::IsFinite(Delivery.ReadyAtStorySeconds) || Delivery.ReadyAtStorySeconds < 0.0 ||
+				Delivery.ReadyAtStorySeconds < Delivery.DispatchedAtSeconds ||
+				Delivery.ReadyAtStorySeconds - Delivery.DispatchedAtSeconds > MaxDeliverySpanSeconds ||
+				PendingVersion == nullptr || *PendingVersion != Delivery.Version)
+			{
+				UE_LOG(LogQinglanSave, Error, TEXT("Save invariant 'delivery entries' failed for quest %s"),
+					*Entry.Key.ToString());
+				OutError = Loc(TEXT("save.invalid"));
+				return false;
+			}
+			if (Delivery.bDelivered && Delivery.ReadyAtStorySeconds > Narrative.StoryClockSeconds + QinglanStoryRuntime::DeliveryArrivalToleranceSeconds)
+			{
+				UE_LOG(LogQinglanSave, Error, TEXT("Save invariant 'delivered reply within clock' failed for quest %s"),
+					*Entry.Key.ToString());
+				OutError = Loc(TEXT("save.invalid"));
+				return false;
+			}
 		}
 
 		if (Save->bHasCheckpoint)

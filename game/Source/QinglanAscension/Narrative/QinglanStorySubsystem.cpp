@@ -687,17 +687,6 @@ namespace
 		return nullptr;
 	}
 
-	/** Courier round-trip hours per quest (data/story/side-quests.json
-	 *  delivery_transition.elapsed_game_hours; blueprint section 1.9). */
-	double DeliveryHoursForQuest(FName QuestId)
-	{
-		if (QuestId == FName(TEXT("SQ02")))
-		{
-			return QinglanStoryRuntime::SQ02DeliveryGameHours; // 18 h
-		}
-		return QinglanStoryRuntime::SQ03DeliveryGameHours; // 12 h (SQ03 and any later proposal quest)
-	}
-
 	void BindActiveEncounterDirectors(UQinglanStorySubsystem* Story, FQinglanStorySession& Session)
 	{
 		if (!Session.Relay.IsValid())
@@ -809,8 +798,25 @@ namespace
 			{
 				// Atomic pending->effective replace; on failure (reply not yet
 				// delivered / version mismatch) the stage stays incomplete and
-				// the authored retry flow applies.
-				Story->DeliverAgreement(Session.CurrentSceneQuestId);
+				// the authored retry flow applies: the accept stage's retry line
+				// (side-quests.json retry_key) replaces this choice's responses
+				// so the player learns why nothing was accepted.
+				if (!Story->DeliverAgreement(Session.CurrentSceneQuestId))
+				{
+					const UQinglanStoryRegistry* Registry = LoadStoryRegistryOnce();
+					const FQinglanRegistrySideQuest* Quest = Registry ? Registry->FindQuest(Session.CurrentSceneQuestId) : nullptr;
+					const FQinglanRegistryScene* AcceptStage = Quest ? FindStageWithAction(*Quest, TEXT("accept_verified_proposal")) : nullptr;
+					const FName RetryKey = AcceptStage != nullptr ? AcceptStage->RetryKey : NAME_None;
+					if (RetryKey != NAME_None)
+					{
+						Session.PendingResponseKeys = { RetryKey };
+					}
+					else
+					{
+						UE_LOG(LogQinglanNarrative, Verbose, TEXT("Accept stage of %s authors no retry key; failed verification stays silent"),
+							*Session.CurrentSceneQuestId.ToString());
+					}
+				}
 			}
 		}
 		else
@@ -1392,7 +1398,8 @@ bool UQinglanStorySubsystem::SelectProposal(FName QuestId, FName ProposalVersion
 	// side-quests.json SQ02 implementation.closure).
 	FQinglanStoryDelivery& Delivery = Session.Deliveries.FindOrAdd(QuestId);
 	Delivery.Version = ProposalVersion;
-	Delivery.ReadyAtStorySeconds = Session.StoryClockSeconds + DeliveryHoursForQuest(QuestId) * QinglanStoryRuntime::SecondsPerGameHour;
+	Delivery.DispatchedAtSeconds = Session.StoryClockSeconds;
+	Delivery.ReadyAtStorySeconds = Session.StoryClockSeconds + QinglanStoryRuntime::DeliveryGameHoursForQuest(QuestId) * QinglanStoryRuntime::SecondsPerGameHour;
 	Delivery.bDelivered = false;
 
 	QinglanStoryRuntime::SaveStoryBoundary(this);
@@ -1727,23 +1734,36 @@ namespace QinglanStoryRuntime
 	bool AdvanceHubTime(UQinglanStorySubsystem* Story, double GameHours)
 	{
 		// Safe hub time advance: courier deliveries arrive in fiction time
-		// with zero real-time wait (blueprint section 1.9).
-		if (GameHours <= 0.0)
+		// with zero real-time wait (blueprint section 1.9). Arrivals collect
+		// first and broadcast after the loop so a handler reacting to a reply
+		// can never mutate the delivery map mid-iteration.
+		if (Story == nullptr || GameHours <= 0.0)
 		{
 			return false;
 		}
 		FQinglanStorySession& Session = StorySession(Story);
 		Session.StoryClockSeconds += GameHours * SecondsPerGameHour;
 		bool bAnyDeliveryReady = false;
+		TArray<TPair<FName, FName>> Arrivals;
 		for (TPair<FName, FQinglanStoryDelivery>& Pair : Session.Deliveries)
 		{
 			FQinglanStoryDelivery& Delivery = Pair.Value;
-			if (!Delivery.bDelivered && Delivery.Version != NAME_None && Session.StoryClockSeconds >= Delivery.ReadyAtStorySeconds)
+			if (!Delivery.bDelivered && Delivery.Version != NAME_None &&
+				Session.StoryClockSeconds >= Delivery.ReadyAtStorySeconds - QinglanStoryRuntime::DeliveryArrivalToleranceSeconds)
 			{
 				Delivery.bDelivered = true; // the matching reply has arrived
+				Arrivals.Add({ Pair.Key, Delivery.Version });
 				bAnyDeliveryReady = true;
 			}
 		}
+		for (const TPair<FName, FName>& Arrival : Arrivals)
+		{
+			Session.Delegates.OnDeliveryArrived.Broadcast(Arrival.Key, Arrival.Value);
+		}
+		// The clock and arrival flags are profile state: persist the boundary
+		// even when nothing arrived (SaveStoryBoundary no-ops safely without
+		// an active profile session, e.g. headless automation).
+		SaveStoryBoundary(Story);
 		return bAnyDeliveryReady;
 	}
 
@@ -1753,11 +1773,148 @@ namespace QinglanStoryRuntime
 		return Session ? Session->StoryClockSeconds : 0.0;
 	}
 
+	FQinglanDeliveryStatus QueryPendingDeliveries(const UQinglanStorySubsystem* Story)
+	{
+		// Pending = dispatched, un-arrived reply with a live version. The
+		// longest remaining round trip is what one sanctuary rest must cover;
+		// an arrival that already elapsed reports zero hours left.
+		FQinglanDeliveryStatus Status;
+		const FQinglanStorySession* Session = FindStorySession(Story);
+		if (Session == nullptr)
+		{
+			return Status;
+		}
+		for (const TPair<FName, FQinglanNarrativeDelivery>& Pair : Session->Deliveries)
+		{
+			const FQinglanNarrativeDelivery& Delivery = Pair.Value;
+			if (Delivery.bDelivered || Delivery.Version == NAME_None)
+			{
+				continue;
+			}
+			Status.bHasPending = true;
+			Status.Quests.Add(Pair.Key);
+			Status.RemainingHours = FMath::Max(Status.RemainingHours,
+				(Delivery.ReadyAtStorySeconds - Session->StoryClockSeconds) / SecondsPerGameHour);
+		}
+		Status.Quests.Sort(FNameLexicalLess());
+		return Status;
+	}
+
+	bool BeginRevisionScene(UQinglanStorySubsystem* Story, FName SceneId)
+	{
+		// AUD-17 protocol revision: replay a completed negotiation stage with
+		// live choices. Idempotence argument (why re-presenting a completed
+		// stage commits nothing by itself): CompleteSceneById early-exits for
+		// already-completed stages (no re-applied flags, no re-award), choice
+		// decisions overwrite their siblings within one family, SelectProposal
+		// replaces the pending slot and restarts the courier clock, and
+		// DeliverAgreement commits only a delivered, version-matching reply -
+		// so no committed state changes until the player makes a new explicit
+		// selection (docs/story/narrative-implementation.md section 9).
+		if (Story == nullptr)
+		{
+			return false;
+		}
+		FQinglanStorySession& Session = StorySession(Story);
+		if (Session.bScenePlaying)
+		{
+			return false; // a safe boundary never interrupts live playback
+		}
+		const UQinglanStoryRegistry* Registry = LoadStoryRegistryOnce();
+		FName QuestId = NAME_None;
+		const FQinglanRegistryScene* Stage = FindSceneAny(Registry, SceneId, QuestId);
+		if (Stage == nullptr || QuestId == NAME_None)
+		{
+			return false; // unknown scene or main scene: nothing to renegotiate
+		}
+		const FQinglanRegistrySideQuest* Quest = Registry->FindQuest(QuestId);
+		if (Quest == nullptr || FindStageWithAction(*Quest, TEXT("select_proposal")) == nullptr)
+		{
+			return false; // not a protocol (proposal round-trip) quest
+		}
+		if (Session.ConfirmedEnding != EQinglanEnding::None)
+		{
+			return false; // the campaign decision is final for this profile
+		}
+		if (!HasAllFlags(Session, Quest->Availability) || !HasAllFlags(Session, Stage->Prerequisites))
+		{
+			return false;
+		}
+		if (!Session.CompletedSideStages.Contains(SceneId))
+		{
+			return false; // revisions replay completed stages only
+		}
+		if (IsAnyEncounterActive(Story->GetGameInstance()))
+		{
+			// Never freeze the player mid-fight (spec section 3.2); the
+			// deferral resumes through BeginScene, which degrades such a stage
+			// to its brief revisit branch. Hub protocol stages never share a
+			// map with encounters, so this path is defensive only.
+			Session.DeferredSceneId = SceneId;
+			BindActiveEncounterDirectors(Story, Session);
+			return true;
+		}
+		StartScenePlayback(Story, Session, *Stage, QuestId, /*bRevisit=*/false);
+		return true;
+	}
+
+	FText PendingStatusText(const UQinglanStorySubsystem* Story, FName QuestId)
+	{
+		// Authored s3 status line (side-quests.json pending_status key):
+		// "Accepted plan: {effective}. Proposal awaiting confirmation:
+		// {pending}." Endings read the effective snapshot, never the draft.
+		if (Story == nullptr)
+		{
+			return FText::GetEmpty();
+		}
+		const UQinglanStoryRegistry* Registry = LoadStoryRegistryOnce();
+		const FQinglanRegistrySideQuest* Quest = Registry ? Registry->FindQuest(QuestId) : nullptr;
+		if (Quest == nullptr || FindStageWithAction(*Quest, TEXT("accept_verified_proposal")) == nullptr)
+		{
+			return FText::GetEmpty();
+		}
+		const FQinglanRegistryScene* SelectStage = FindStageWithAction(*Quest, TEXT("select_proposal"));
+		auto VersionText = [&SelectStage](FName Version)
+		{
+			if (Version == NAME_None)
+			{
+				return FText::GetEmpty();
+			}
+			if (SelectStage != nullptr)
+			{
+				for (const FQinglanRegistryChoice& Choice : SelectStage->Choices)
+				{
+					if (Choice.ChoiceId == Version)
+					{
+						return TableText(Choice.LabelKey);
+					}
+				}
+			}
+			return FText::FromString(Version.ToString());
+		};
+		const FName StatusKey(*FString::Printf(TEXT("story.%s.pending_status"), *QuestId.ToString().ToLower()));
+		FFormatNamedArguments Args;
+		Args.Add(TEXT("effective"), VersionText(Story->GetEffectiveAgreement(QuestId)));
+		Args.Add(TEXT("pending"), VersionText(GetPendingAgreement(Story, QuestId)));
+		return FText::Format(TableText(StatusKey), Args);
+	}
+
+	FText DeliveryTimeText(const UQinglanStorySubsystem* Story, FName QuestId)
+	{
+		// Authored arrival notice (accept stage delivery_time key, e.g.
+		// "Eighteen hours later."); the arrival broadcast is its only shower.
+		const UQinglanStoryRegistry* Registry = LoadStoryRegistryOnce();
+		const FQinglanRegistrySideQuest* Quest = Registry ? Registry->FindQuest(QuestId) : nullptr;
+		const FQinglanRegistryScene* AcceptStage = Quest ? FindStageWithAction(*Quest, TEXT("accept_verified_proposal")) : nullptr;
+		return AcceptStage != nullptr ? TableText(AcceptStage->DeliveryTimeKey) : FText::GetEmpty();
+	}
+
 	void ExportNarrativeState(const UQinglanStorySubsystem* Story, FQinglanNarrativeState& Out)
 	{
-		// Save bridge: fills exactly the story-owned members of the v1
-		// narrative save section (data/examples/save.json); the profile
-		// subsystem merges CompletedSideStages/ReadRecords on top.
+		// Save bridge: fills exactly the story-owned members of the narrative
+		// save section (data/examples/save.json; courier clock + deliveries
+		// since schema v2); the profile subsystem merges
+		// CompletedSideStages/ReadRecords on top.
 		const FQinglanStorySession* Session = FindStorySession(Story);
 		if (Session == nullptr)
 		{
@@ -1776,6 +1933,15 @@ namespace QinglanStoryRuntime
 		Out.ChoiceDecisions = NormalizeSavedChoices(LoadStoryRegistryOnce(), Session->ChoiceDecisions);
 		Out.PendingAgreements = Session->PendingAgreements;
 		Out.EffectiveAgreements = Session->EffectiveAgreements;
+		Out.StoryClockSeconds = Session->StoryClockSeconds;
+		Out.Deliveries.Reset();
+		for (const TPair<FName, FQinglanNarrativeDelivery>& Pair : Session->Deliveries)
+		{
+			if (Pair.Value.Version != NAME_None)
+			{
+				Out.Deliveries.Add(Pair.Key, Pair.Value); // invalidated dispatches are never persisted
+			}
+		}
 		Out.ConfirmedEnding = Session->ConfirmedEnding;
 	}
 
@@ -1835,11 +2001,28 @@ namespace QinglanStoryRuntime
 				}
 			}
 		}
-		// v1 persists no dispatch timestamps: restored pending selections keep
-		// their version but restart the courier clock on the next selection
-		// (side-quests.json SQ02 closure: "restart the timestamp and retain old
-		// accepted agreement until a new agreement is confirmed").
+		// Courier clock + deliveries persist since schema v2. A delivery whose
+		// version was invalidated (NAME_None), whose timestamps are not finite,
+		// or whose arrival cannot be reconciled with the restored clock is
+		// dropped rather than restored: the next selection restarts the round
+		// trip (side-quests.json SQ02 closure: "restart the timestamp and
+		// retain old accepted agreement until a new agreement is confirmed").
+		Session.StoryClockSeconds = FMath::IsFinite(In.StoryClockSeconds) ? FMath::Max(0.0, In.StoryClockSeconds) : 0.0;
 		Session.Deliveries.Reset();
+		for (const TPair<FName, FQinglanNarrativeDelivery>& Pair : In.Deliveries)
+		{
+			const FQinglanNarrativeDelivery& Delivery = Pair.Value;
+			const bool bTimesFinite = FMath::IsFinite(Delivery.DispatchedAtSeconds) && FMath::IsFinite(Delivery.ReadyAtStorySeconds);
+			const bool bArrivalConsistent = !Delivery.bDelivered || Delivery.ReadyAtStorySeconds <= Session.StoryClockSeconds;
+			if (Pair.Key != NAME_None && Delivery.Version != NAME_None && bTimesFinite && bArrivalConsistent)
+			{
+				Session.Deliveries.Add(Pair.Key, Delivery);
+			}
+			else
+			{
+				UE_LOG(LogQinglanNarrative, Warning, TEXT("Dropped unrestorable courier delivery for quest %s"), *Pair.Key.ToString());
+			}
+		}
 		Session.PreviewedEndings.Reset();
 	}
 

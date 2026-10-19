@@ -1,4 +1,4 @@
-// C++ constant specs for the six ordinary archetypes and three bosses.
+// C++ constant specs for the six ordinary archetypes and four bosses.
 // Numeric contracts from docs/02-combat-and-camera.md sections 8-9 and
 // docs/dev/implementation-blueprint.md section 2.4; every authored (doc
 // unspecified) value is marked. Specs are plain C++ constants: they are the
@@ -114,7 +114,9 @@ namespace QinglanEnemyCatalog
 	/** All six ordinary archetypes (docs/02 section 8). */
 	QINGLANASCENSION_API const TArray<FQinglanArchetypeSpec>& GetAllArchetypes();
 
-	/** The three bosses (docs/02 section 9; Broken Guardian for the Golden Core trial). */
+	/** The four bosses (docs/02 section 9; Broken Guardian for the Golden Core
+	 * trial; the elite construct appended last for the Foundation trial's
+	 * required kill, AUD-20 — BuildRoomWave's Bosses[0] fallback relies on order). */
 	QINGLANASCENSION_API const TArray<FQinglanArchetypeSpec>& GetAllBosses();
 
 	/** Finds an archetype or boss by id; nullptr when unknown. */

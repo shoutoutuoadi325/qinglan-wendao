@@ -105,6 +105,7 @@
   "trial.blocked.story_required": "Complete the required story preparation first.",
   "trial.blocked.completed": "This trial has already been completed.",
   "trial.unavailable": "The trial could not start. Your progress is unchanged; try again.",
+  "trial.spawn_failed": "The trial arena failed to open. Nothing was lost; press the trial anchor to retry.",
   "trial.in_progress": "A trial is already in progress.",
   "trial.return_hub": "Return to the sanctuary.",
   "save.resume_pending": "Your expedition checkpoint is ready. Interact to retry resuming.",
@@ -113,5 +114,11 @@
   "ending.warning_acknowledgment": "I have read the warning and understand this ending is permanent for this profile.",
   "ending.unavailable": "This ending is not available. Complete its requirements first.",
   "ending.preview_required": "Preview this ending before confirming it.",
+  "interact.hub.rest_station": "Rest at the sanctuary",
+  "interact.hub.ledger_table": "Ledger table",
+  "interact.hub.correspondence_table": "Correspondence table",
+  "hub.rest.none_pending": "No reply is expected right now.",
+  "hub.rest.summary": "Courier return: {hours} h. Pending: {quests}.",
+  "hub.rest.passed": "You rest. {hours} h pass; the courier's reply has arrived.",
   "action.continue": "Continue"
 }

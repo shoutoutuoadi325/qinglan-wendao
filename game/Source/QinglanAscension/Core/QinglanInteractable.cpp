@@ -50,6 +50,7 @@ namespace
 	const FName GCultivationShrineId(TEXT("hub.cultivation_shrine"));
 	const FName GTrialPrepShrineId(TEXT("trial.preparation_shrine"));
 	const FName GHubWorkbenchId(TEXT("hub.workbench"));
+	const FName GHubRestStationId(TEXT("hub.rest_station"));
 	const FName GBambooExitId(TEXT("bamboo.room_5_safe"));
 	const FName GAshenExitId(TEXT("ashen.boss_5"));
 
@@ -361,6 +362,90 @@ namespace
 		Player->ShowGameMessage(UQinglanHUDStatics::GameText(FName(TEXT("trial.unavailable"))));
 		return true;
 	}
+
+	// --- Agreement revision entry (AUD-17) ---
+
+	/** True when the stage carries a protocol negotiation action; only such
+	 *  completed stages may replay with live choices instead of the brief
+	 *  recap (side-quests.json select_proposal / accept_verified_proposal). */
+	bool IsAgreementRevisionStage(const FQinglanRegistryScene& Stage)
+	{
+		for (const FQinglanRegistryChoice& Choice : Stage.Choices)
+		{
+			if (Choice.Action == FName(TEXT("select_proposal"))
+				|| Choice.Action == FName(TEXT("accept_verified_proposal")))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** Quest availability gate mirroring GetAvailableSideQuests' check. */
+	bool QuestAvailabilityMet(const UQinglanStorySubsystem* Story, const FQinglanRegistrySideQuest& Quest)
+	{
+		for (const FName Flag : Quest.Availability)
+		{
+			if (!Story->HasFlag(Flag))
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/**
+	 * AUD-17 anchor pass: completed protocol stages replay as agreement
+	 * revisions (live choices) instead of the brief recap. When several
+	 * protocol quests share one anchor the undecided one (pending !=
+	 * effective) goes first, then registry order; one interaction begins one
+	 * revision and repeat presses reach the others (per-interaction
+	 * limitation of the hub loop). Returns true when a revision began.
+	 */
+	bool TryBeginRevisionAtAnchor(UQinglanStorySubsystem* Story, FName AnchorId, FName SlashForm, AQinglanCharacter* Player)
+	{
+		if (Story == nullptr || Story->IsEndingConfirmed())
+		{
+			return false;
+		}
+		const UQinglanStoryRegistry* Registry = Story->GetRegistry();
+		if (Registry == nullptr)
+		{
+			return false;
+		}
+		for (int32 TieBreak = 0; TieBreak < 2; ++TieBreak)
+		{
+			for (const FQinglanRegistrySideQuest& Quest : Registry->SideQuests)
+			{
+				const bool bUndecided = QinglanStoryRuntime::GetPendingAgreement(Story, Quest.QuestId)
+					!= Story->GetEffectiveAgreement(Quest.QuestId);
+				if (bUndecided != (TieBreak == 0) || !QuestAvailabilityMet(Story, Quest))
+				{
+					continue; // pass 0: undecided quests first; pass 1: the rest
+				}
+				for (const FQinglanRegistryScene& Stage : Quest.Stages)
+				{
+					if ((Stage.Location == AnchorId || Stage.Location == SlashForm)
+						&& IsAgreementRevisionStage(Stage) && Story->IsSceneCompleted(Stage.SceneId))
+					{
+						if (Player != nullptr)
+						{
+							// Status before the renegotiation: which plan is effective,
+							// which draft still awaits its reply.
+							Player->ShowGameMessage(QinglanStoryRuntime::PendingStatusText(Story, Quest.QuestId));
+						}
+						if (QinglanStoryRuntime::BeginRevisionScene(Story, Stage.SceneId))
+						{
+							return true;
+						}
+						// Guarded out (unmet stage prerequisites, live playback):
+						// fall back to the recap branch below.
+					}
+				}
+			}
+		}
+		return false;
+	}
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -410,7 +495,7 @@ int32 QinglanInteraction::MakeExpeditionSeed(FName RealmId, const UObject* World
 	return QinglanDeterminism::CanonicalSeed(Mixed);
 }
 
-bool QinglanInteraction::BeginSceneAtAnchor(UQinglanStorySubsystem* Story, FName AnchorId, bool bAllowRevisit)
+bool QinglanInteraction::BeginSceneAtAnchor(UQinglanStorySubsystem* Story, FName AnchorId, bool bAllowRevisit, AQinglanCharacter* Player)
 {
 	if (Story == nullptr)
 	{
@@ -424,10 +509,15 @@ bool QinglanInteraction::BeginSceneAtAnchor(UQinglanStorySubsystem* Story, FName
 	const FName SlashForm = SlashFormOfAnchor(AnchorId);
 
 	// Pass 1: uncompleted scenes in authored order (the player's next beat);
-	// Pass 2 (opt-in): completed scenes replay their brief revisit branch.
+	// Pass 2 (opt-in): completed protocol stages replay as agreement
+	// revisions (live choices) before any brief revisit branch.
 	for (int32 Pass = 0; Pass < 2; ++Pass)
 	{
 		const bool bRequireUncompleted = (Pass == 0) || !bAllowRevisit;
+		if (Pass == 1 && bAllowRevisit && TryBeginRevisionAtAnchor(Story, AnchorId, SlashForm, Player))
+		{
+			return true;
+		}
 		for (const FQinglanRegistryScene& Scene : Registry->MainScenes)
 		{
 			if ((Scene.Location == AnchorId || Scene.Location == SlashForm)
@@ -888,6 +978,12 @@ void AQinglanInteractable::ExecuteInteraction(AQinglanCharacter* Player)
 
 	if (InteractionId == GHubTrialGateId)
 	{
+		// The gate anchors CH05_S04 (Yun's confession aftermath); that scene
+		// plays before the admission check can travel anywhere (AUD-10).
+		if (QinglanInteraction::BeginSceneAtAnchor(Story, InteractionId, /*bAllowRevisit=*/false))
+		{
+			return;
+		}
 		const QinglanTrialAdmission::ETrial Trial = Profile
 			? QinglanTrialAdmission::SelectForStage(Profile->GetCultivationStage())
 			: QinglanTrialAdmission::ETrial::Foundation;
@@ -1089,8 +1185,69 @@ void AQinglanInteractable::ExecuteInteraction(AQinglanCharacter* Player)
 		return;
 	}
 
+	// --- Sanctuary rest station: safe hub time advance (AUD-15) ---
+	if (InteractionId == GHubRestStationId)
+	{
+		if (Story == nullptr)
+		{
+			UE_LOG(LogQinglan, Warning, TEXT("Rest station: story subsystem unavailable"));
+			return;
+		}
+		if (IsAnyEncounterActive(GetWorld()))
+		{
+			// Never advance fiction time mid-fight (mirrors the locked door).
+			UE_LOG(LogQinglan, Warning, TEXT("Rest station %s refused: encounter active"), *Id);
+			if (Player)
+			{
+				// FIXME-CONTRACT: no string-table key for the refused rest state.
+				Player->ShowGameMessage(NSLOCTEXT("Qinglan", "Rest.Locked", "Clear the enemies first."));
+			}
+			return;
+		}
+		const QinglanStoryRuntime::FQinglanDeliveryStatus Pending = QinglanStoryRuntime::QueryPendingDeliveries(Story);
+		if (!Pending.bHasPending)
+		{
+			if (Player)
+			{
+				Player->ShowGameMessage(UQinglanHUDStatics::GameText(FName(TEXT("hub.rest.none_pending"))));
+			}
+			return; // no reply in flight: the fiction clock does not move
+		}
+		// One rest settles every in-flight round trip: whole hours, at least
+		// one (an already-elapsed arrival still needs one positive advance).
+		const int32 RestHours = FMath::Max(1, FMath::CeilToInt(Pending.RemainingHours));
+		QinglanStoryRuntime::AdvanceHubTime(Story, RestHours);
+		if (Player)
+		{
+			const QinglanStoryRuntime::FQinglanDeliveryStatus After = QinglanStoryRuntime::QueryPendingDeliveries(Story);
+			if (After.bHasPending)
+			{
+				// Defensive: a rest that could not settle everything reports
+				// what is still in flight.
+				FFormatNamedArguments Args;
+				Args.Add(TEXT("hours"), FText::AsNumber(RestHours));
+				TArray<FString> QuestIds;
+				for (const FName Quest : After.Quests)
+				{
+					QuestIds.Add(Quest.ToString());
+				}
+				Args.Add(TEXT("quests"), FText::FromString(FString::Join(QuestIds, TEXT(", "))));
+				Player->ShowGameMessage(FText::Format(
+					UQinglanHUDStatics::GameText(FName(TEXT("hub.rest.summary"))), Args));
+			}
+			else
+			{
+				// The arrival notice itself is shown by the delivery-arrived
+				// binding (Character); this line only reports the hours passed.
+				Player->ShowGameMessage(UQinglanHUDStatics::FormatGameTextWithNumber(
+					FName(TEXT("hub.rest.passed")), FName(TEXT("hours")), RestHours));
+			}
+		}
+		return;
+	}
+
 	// --- Scene anchors ("hub.*", "sq.*", "bamboo.*"): BeginScene or Verbose ---
-	if (!QinglanInteraction::BeginSceneAtAnchor(Story, InteractionId))
+	if (!QinglanInteraction::BeginSceneAtAnchor(Story, InteractionId, /*bAllowRevisit=*/true, Player))
 	{
 		UE_LOG(LogQinglanNarrative, Verbose, TEXT("Interact %s: prerequisites unmet or no scene"), *Id);
 	}

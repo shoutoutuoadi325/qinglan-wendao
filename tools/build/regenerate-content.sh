@@ -51,10 +51,12 @@ run_cmdlet() {
 }
 
 rc_all=0
-run_cmdlet QinglanDataImport -data="$REPO_ROOT" || rc_all=1
-run_cmdlet QinglanContentBootstrap || rc_all=1
-run_cmdlet QinglanMeshImport || rc_all=1
-run_cmdlet QinglanUIBootstrap || rc_all=1
+# Project commandlets live in the PostEngineInit editor module, which is not
+# auto-discovered without the "Module.Class" form (-run appends "Commandlet").
+run_cmdlet QinglanAscensionEditor.QinglanDataImport -data="$REPO_ROOT/data" || rc_all=1
+run_cmdlet QinglanAscensionEditor.QinglanContentBootstrap || rc_all=1
+run_cmdlet QinglanAscensionEditor.QinglanMeshImport || rc_all=1
+run_cmdlet QinglanAscensionEditor.QinglanUIBootstrap || rc_all=1
 
 # Mandatory outputs: the commandlets can report success without producing
 # these (MeshImport logs missing skeletal files; AnimBootstrap pairs zero

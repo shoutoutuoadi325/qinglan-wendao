@@ -96,6 +96,8 @@ void UQinglanInteractionSpawner::OnWorldBeginPlay(UWorld& InWorld)
 		// The hub is the only gate map (docs/dev/level-layout.md "Maps" table);
 		// the dev-only benchmark map and others stay untouched.
 		SynthesizeHubGateAnchors(World, AnchorPositions);
+		SynthesizeHubRestAnchor(World, AnchorPositions);
+		SynthesizeHubSceneAnchors(World, AnchorPositions);
 	}
 
 	UE_LOG(LogQinglan, Log, TEXT("Interaction spawner: %d anchors found (%d spawned) in %s"),
@@ -157,6 +159,53 @@ void UQinglanInteractionSpawner::SynthesizeHubGateAnchors(UWorld* World, const T
 			continue; // authored anchor wins over synthesis
 		}
 		SpawnInteractableAt(World, Gate.Id, Base + FVector(Gate.Offset, 0.f, 0.f));
+	}
+}
+
+void UQinglanInteractionSpawner::SynthesizeHubRestAnchor(UWorld* World, const TMap<FName, FVector>& AnchorPositions)
+{
+	// The sanctuary rest station (safe hub time advance for courier replies)
+	// sits beside the courier board so the round trip is one walk apart
+	// (level-layout.md hub intent; task contract "rest at the sanctuary").
+	const FName RestStationId(TEXT("hub.rest_station"));
+	if (AnchorPositions.Contains(RestStationId))
+	{
+		return; // authored anchor wins over synthesis
+	}
+	const FVector* CourierBoard = AnchorPositions.Find(FName(TEXT("hub.courier_board")));
+	if (CourierBoard == nullptr)
+	{
+		UE_LOG(LogQinglan, Verbose, TEXT("Interaction spawner: no hub.courier_board to place the rest station beside"));
+		return;
+	}
+	SpawnInteractableAt(World, RestStationId, *CourierBoard + FVector(600.f, 0.f, 0.f));
+}
+
+void UQinglanInteractionSpawner::SynthesizeHubSceneAnchors(UWorld* World, const TMap<FName, FVector>& AnchorPositions)
+{
+	// AUD-10: CH05_S03 and the CH07 epilogue scenes route through two ledger/
+	// correspondence stations added to the bootstrap's HubAnchors. Old maps
+	// regenerated before that change still need a usable station, so derive
+	// them from nearby authored furniture (the shrine and archive table).
+	struct FDerivedSpec { FName Id; FName From; FVector Offset; };
+	const FDerivedSpec Derived[] = {
+		{ FName(TEXT("hub.ledger_table")), FName(TEXT("hub.shrine")), FVector(-600.f, -1400.f, 0.f) },
+		{ FName(TEXT("hub.correspondence_table")), FName(TEXT("hub.archive_table")), FVector(1600.f, 800.f, 0.f) },
+	};
+	for (const FDerivedSpec& Spec : Derived)
+	{
+		if (AnchorPositions.Contains(Spec.Id))
+		{
+			continue; // authored anchor wins over synthesis
+		}
+		const FVector* From = AnchorPositions.Find(Spec.From);
+		if (From == nullptr)
+		{
+			UE_LOG(LogQinglan, Verbose, TEXT("Interaction spawner: no %s to derive %s from"),
+				*Spec.From.ToString(), *Spec.Id.ToString());
+			continue;
+		}
+		SpawnInteractableAt(World, Spec.Id, *From + Spec.Offset);
 	}
 }
 

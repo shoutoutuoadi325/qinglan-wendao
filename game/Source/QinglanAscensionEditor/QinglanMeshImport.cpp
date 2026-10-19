@@ -77,6 +77,16 @@ int32 UQinglanMeshImportCommandlet::Main(const FString& Params)
 		for (const FString& F : Files)
 		{
 			const FString Base = FPaths::GetBaseFilename(F);
+			// Tree3.fbx contains a mesh ('Icosphere_008') the FBX SDK cannot
+			// triangulate, so the whole file yields zero importable objects
+			// and would fail the strict run. Nothing references it (the nature
+			// set is decorative; AUD-55); skip it rather than loosen the
+			// mandatory-output contract for every other file.
+			if (Base == TEXT("Tree3"))
+			{
+				UE_LOG(LogTemp, Warning, TEXT("skipping known-bad source (FBX SDK cannot triangulate Icosphere_008): %s"), *Base);
+				continue;
+			}
 			bOk &= ImportStaticFBX(RawRoot / Dir.Key / F, Dir.Value, Base);
 		}
 	}

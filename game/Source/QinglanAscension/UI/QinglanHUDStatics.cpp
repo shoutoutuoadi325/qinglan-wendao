@@ -321,10 +321,12 @@ bool UQinglanHUDStatics::GetTrialRemainingSeconds(const UObject* WorldContextObj
 {
 	// One trial director per arena world (spawned by the trial anchor's proof
 	// press); absent everywhere else - the query is a clean false, never a log.
+	// AUD-20: the countdown reads as the timed survival phase only; once the
+	// clock expires the required-kill fight is its own beat with no timer UI.
 	OutRemainingSeconds = 0.f;
 	AQinglanTrialDirector* Director = Cast<AQinglanTrialDirector>(
 		UGameplayStatics::GetActorOfClass(WorldContextObject, AQinglanTrialDirector::StaticClass()));
-	if (Director == nullptr || !Director->IsTrialActive())
+	if (Director == nullptr || !Director->IsTimedSurvivalActive())
 	{
 		return false;
 	}

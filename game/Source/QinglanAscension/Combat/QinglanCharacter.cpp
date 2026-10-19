@@ -10,6 +10,7 @@
 #include "Combat/QinglanTalismanComponent.h"
 #include "Combat/QinglanTechniqueComponent.h"
 #include "Core/QinglanCoreTypes.h"
+#include "Progression/QinglanEconomyLibrary.h"
 
 // The scaffold references UQinglanStatusComponent but the Combat folder scaffold does
 // not ship that header (parallel module SPELL-001 provides it). Compile with or
@@ -1493,7 +1494,8 @@ void AQinglanCharacter::HandleStayAtHub(FName IdempotencyKey, FName SceneId)
 	// Canceling preparation never completes a trial or grants a breakthrough.
 	if (UWorld* World = GetWorld())
 	{
-		for (TActorIterator<AQinglanTrialDirector> It(World); It; ++It)
+		TActorIterator<AQinglanTrialDirector> It(World);
+		if (It)
 		{
 			It->CancelTrialAndReturnToHub();
 			return;
@@ -1529,6 +1531,26 @@ void AQinglanCharacter::HandleCampaignComplete(FName IdempotencyKey, FName Scene
 	// FIXME-CONTRACT: no string-table key for the campaign-complete notice.
 	ShowGameMessage(NSLOCTEXT("Qinglan", "Campaign.Complete", "The first winter begins."));
 	QinglanInteraction::TravelToMap(this, QinglanInteraction::HubMapPath);
+}
+
+void AQinglanCharacter::HandleDeliveryArrived(FName QuestId, FName Version)
+{
+	// The arrival notice has exactly one shower: this binding (the rest
+	// station displays only the rested hours). Version names the answered
+	// draft for diagnostics; the player-facing line is the authored one.
+	UE_LOG(LogQinglanCombat, Verbose, TEXT("Courier reply arrived for %s (version %s)"),
+		*QuestId.ToString(), *Version.ToString());
+	UGameInstance* const Instance = GetGameInstance();
+	UQinglanStorySubsystem* const Story = Instance ? Instance->GetSubsystem<UQinglanStorySubsystem>() : nullptr;
+	if (!Story)
+	{
+		return;
+	}
+	const FText Arrival = QinglanStoryRuntime::DeliveryTimeText(Story, QuestId);
+	if (!Arrival.IsEmpty())
+	{
+		ShowGameMessage(Arrival);
+	}
 }
 
 void AQinglanCharacter::HandleHealthChanged(float Current, float Maximum)
@@ -1609,6 +1631,7 @@ void AQinglanCharacter::BindStoryDelegates()
 	Delegates.OnCancelConfirmation.AddDynamic(this, &AQinglanCharacter::HandleCancelConfirmation);
 	Delegates.OnReturnToHub.AddDynamic(this, &AQinglanCharacter::HandleReturnToHub);
 	Delegates.OnCompleteCampaign.AddDynamic(this, &AQinglanCharacter::HandleCampaignComplete);
+	Delegates.OnDeliveryArrived.AddDynamic(this, &AQinglanCharacter::HandleDeliveryArrived);
 	// Boss-room clears prove the realm's choice-free chapter scenes.
 	if (UQinglanRunSubsystem* const Run = Instance->GetSubsystem<UQinglanRunSubsystem>())
 	{
@@ -1645,6 +1668,7 @@ void AQinglanCharacter::UnbindStoryDelegates()
 			Delegates.OnCancelConfirmation.RemoveDynamic(this, &AQinglanCharacter::HandleCancelConfirmation);
 			Delegates.OnReturnToHub.RemoveDynamic(this, &AQinglanCharacter::HandleReturnToHub);
 			Delegates.OnCompleteCampaign.RemoveDynamic(this, &AQinglanCharacter::HandleCampaignComplete);
+			Delegates.OnDeliveryArrived.RemoveDynamic(this, &AQinglanCharacter::HandleDeliveryArrived);
 		}
 		if (UQinglanSaveSubsystem* Save = Instance->GetSubsystem<UQinglanSaveSubsystem>())
 		{

@@ -294,6 +294,24 @@ namespace
 		AppendNameMap(Dump, N.ChoiceDecisions);
 		AppendNameMap(Dump, N.PendingAgreements);
 		AppendNameMap(Dump, N.EffectiveAgreements);
+		Dump += FString::Printf(TEXT("|t%.2f"), N.StoryClockSeconds);
+		{
+			// Courier deliveries fold in quest order so re-parse comparisons
+			// stay stable regardless of TMap iteration order.
+			TArray<FName> DeliveryQuests;
+			N.Deliveries.GetKeys(DeliveryQuests);
+			DeliveryQuests.Sort([](const FName& A, const FName& B) { return A.LexicalLess(B); });
+			for (const FName Quest : DeliveryQuests)
+			{
+				const FQinglanNarrativeDelivery* Delivery = N.Deliveries.Find(Quest);
+				Dump += FString::Printf(TEXT("d%s=%s,%.0f,%.0f,%d,"),
+					*Quest.ToString(),
+					Delivery ? *Delivery->Version.ToString() : TEXT(""),
+					Delivery ? Delivery->DispatchedAtSeconds : 0.0,
+					Delivery ? Delivery->ReadyAtStorySeconds : 0.0,
+					Delivery && Delivery->bDelivered ? 1 : 0);
+			}
+		}
 		Dump += FString::Printf(TEXT("|e%d|ck%d"), static_cast<int32>(N.ConfirmedEnding), Save->bHasCheckpoint ? 1 : 0);
 		if (Save->bHasCheckpoint)
 		{

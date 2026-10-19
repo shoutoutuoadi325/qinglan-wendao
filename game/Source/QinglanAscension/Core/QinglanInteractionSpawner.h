@@ -11,8 +11,9 @@
 //   - "bamboo.room_*"        realm chapter scenes + the safe-room exit
 //   - "ashen.boss_5"         ashen exit station
 //   - "trial.*"              arena trial/decision/preparation stations
-// plus two synthesized families the bootstrap does not author:
+// plus synthesized anchors the bootstrap does not author:
 //   - hub realm gates ("hub.ashen_gate"/"hub.trial_gate") beside hub.bamboo_gate
+//   - hub rest station ("hub.rest_station") beside hub.courier_board
 //   - realm room doors at each corridor mouth (ids "door.<from>_<to>")
 //
 // UWorldSubsystem::OnWorldBeginPlay runs before AGameModeBase::StartPlay
@@ -44,6 +45,10 @@ private:
 	class AQinglanInteractable* SpawnInteractableAt(UWorld* World, const FName Key, const FVector& Location);
 	/** Hub-only: synthesizes the ashen/trial gate anchors beside hub.bamboo_gate when absent. */
 	void SynthesizeHubGateAnchors(UWorld* World, const TMap<FName, FVector>& AnchorPositions);
+	/** Hub-only: synthesizes the sanctuary rest station beside hub.courier_board when absent. */
+	void SynthesizeHubRestAnchor(UWorld* World, const TMap<FName, FVector>& AnchorPositions);
+	/** AUD-10: ledger/correspondence stations for maps authored before they existed. */
+	void SynthesizeHubSceneAnchors(UWorld* World, const TMap<FName, FVector>& AnchorPositions);
 	/** Realm-only: one door interactable at each corridor mouth (rooms 0..5 -> 1..6). */
 	void SynthesizeRealmDoors(UWorld* World);
 };

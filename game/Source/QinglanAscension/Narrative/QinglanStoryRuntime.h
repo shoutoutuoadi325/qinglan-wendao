@@ -39,6 +39,9 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQinglanStoryReturnToHub, FName, Id
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQinglanStoryCompleteCampaign, FName, IdempotencyKey, FName, SceneId);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQinglanStoryProposalSelected, FName, QuestId, FName, PendingVersion);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQinglanStoryAgreementEffective, FName, QuestId, FName, EffectiveVersion);
+/** A courier reply arrived for QuestId (a safe hub time advance flipped the
+ *  delivery); Version names the pending agreement it answers. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQinglanStoryDeliveryArrived, FName, QuestId, FName, Version);
 /** One ambient bark line, reusing the localized script-line struct. */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQinglanStoryBarkLine, FName, BarkId, const FQinglanScriptLine&, Line);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FQinglanStoryRecordOpened, FName, RecordId, const FText&, Title, const FText&, Body);
@@ -57,20 +60,14 @@ struct FQinglanStoryDelegates
 	FQinglanStoryCompleteCampaign OnCompleteCampaign;
 	FQinglanStoryProposalSelected OnProposalSelected;
 	FQinglanStoryAgreementEffective OnAgreementEffective;
+	FQinglanStoryDeliveryArrived OnDeliveryArrived;
 	FQinglanStoryBarkLine OnBarkLine;
 	FQinglanStoryRecordOpened OnRecordOpened;
 };
 
-/** One quest's pending courier delivery (SQ02/SQ03 proposal round trip). */
-struct FQinglanStoryDelivery
-{
-	/** Pending version this delivery was dispatched for; NAME_None = none. */
-	FName Version = NAME_None;
-	/** Story-clock second at which the matching reply arrives. */
-	double ReadyAtStorySeconds = 0.0;
-	/** True once the safe hub time advance delivered the matching reply. */
-	bool bDelivered = false;
-};
+/** One quest's pending courier delivery (SQ02/SQ03 proposal round trip);
+ *  persisted form lives in the save schema so migrations and validation share it. */
+using FQinglanStoryDelivery = FQinglanNarrativeDelivery;
 
 /**
  * Per-subsystem runtime state: persistent narrative mirror (FQinglanNarrativeState
@@ -180,6 +177,19 @@ namespace QinglanStoryRuntime
 	inline constexpr double SQ03DeliveryGameHours = 12.0;
 	/** Seconds per in-fiction hour for the hub story clock. */
 	inline constexpr double SecondsPerGameHour = 3600.0;
+	/** Hour fractions accumulate rounding error (17.9 h + 0.1 h can land a
+	 *  hair under an exact 18 h ready time); arrivals compare with this
+	 *  tolerance so authored whole-hour boundaries stay exact on both sides. */
+	inline constexpr double DeliveryArrivalToleranceSeconds = 1e-3;
+
+	/** Courier round-trip hours per quest (side-quests.json
+	 *  delivery_transition.elapsed_game_hours): SQ02 18 h, SQ03 12 h, and any
+	 *  later proposal quest inherits the SQ03 trip. Shared with the save
+	 *  migration so synthesized deliveries match live dispatches. */
+	inline double DeliveryGameHoursForQuest(FName QuestId)
+	{
+		return QuestId == FName(TEXT("SQ02")) ? SQ02DeliveryGameHours : SQ03DeliveryGameHours;
+	}
 
 	/** Bark scheduling defaults (docs/dev/implementation-blueprint.md section
 	 * 2.6: "cooldown 180 s, <=1/visit, combat-suppressed"); per-bark registry
@@ -213,9 +223,40 @@ namespace QinglanStoryRuntime
 
 	// --- Safe hub time advance (courier deliveries) ---
 	/** Advances the in-fiction hub clock; marks matching deliveries arrived.
-	 *  Returns true when at least one pending delivery became ready. */
-	bool AdvanceHubTime(UQinglanStorySubsystem* Story, double GameHours);
+	 *  Returns true when at least one pending delivery became ready.
+	 *  Exported for the editor automation specs (courier flow cases). */
+	QINGLANASCENSION_API bool AdvanceHubTime(UQinglanStorySubsystem* Story, double GameHours);
 	double GetStoryClockSeconds(const UQinglanStorySubsystem* Story);
+
+	// --- Agreement delivery / revision (SQ02/SQ03 courier round trips) ---
+	/** Pending-delivery snapshot for the sanctuary rest station and UI. */
+	struct FQinglanDeliveryStatus
+	{
+		/** True while at least one dispatched reply has not arrived yet. */
+		bool bHasPending = false;
+		/** Hours until the last in-flight reply arrives (longest round trip);
+		 *  what a single sanctuary rest must cover. */
+		double RemainingHours = 0.0;
+		/** Quests with a reply still in flight, lexical order. */
+		TArray<FName> Quests;
+	};
+	/** Queries the pending courier deliveries against the current clock. */
+	QINGLANASCENSION_API FQinglanDeliveryStatus QueryPendingDeliveries(const UQinglanStorySubsystem* Story);
+	/**
+	 * Replays one completed protocol stage with live choices so a settled
+	 * agreement can be renegotiated (docs/story/narrative-implementation.md
+	 * section 9). Guards: the stage belongs to a proposal quest, the quest is
+	 * available, no ending is confirmed, and the stage is completed; a live
+	 * encounter defers instead of freezing the player. Returns false when a
+	 * guard rejects the revision (callers fall back to the recap branch).
+	 */
+	QINGLANASCENSION_API bool BeginRevisionScene(UQinglanStorySubsystem* Story, FName SceneId);
+	/** "Accepted plan X. Proposal awaiting confirmation Y." for one quest
+	 *  (authored pending_status key); empty for non-protocol quests. */
+	QINGLANASCENSION_API FText PendingStatusText(const UQinglanStorySubsystem* Story, FName QuestId);
+	/** Authored arrival notice for one quest's courier reply (the accept
+	 *  stage's delivery_time key); empty when unauthored. */
+	QINGLANASCENSION_API FText DeliveryTimeText(const UQinglanStorySubsystem* Story, FName QuestId);
 
 	// --- Save bridge (see QinglanStorySubsystem.cpp FIXME-CONTRACT) ---
 	QINGLANASCENSION_API void ExportNarrativeState(const UQinglanStorySubsystem* Story, FQinglanNarrativeState& Out);
@@ -230,6 +271,6 @@ namespace QinglanStoryRuntime
 	// --- State queries for UI / automation specs ---
 	QINGLANASCENSION_API bool IsObjectiveCompleted(const UQinglanStorySubsystem* Story, FName ObjectiveId);
 	QINGLANASCENSION_API bool IsSceneObjectiveCompleted(const UQinglanStorySubsystem* Story, FName SceneId, FName ObjectiveId);
-	FName GetPendingAgreement(const UQinglanStorySubsystem* Story, FName QuestId);
+	QINGLANASCENSION_API FName GetPendingAgreement(const UQinglanStorySubsystem* Story, FName QuestId);
 	bool WasEndingPreviewed(const UQinglanStorySubsystem* Story, FName EndingId);
 } // namespace QinglanStoryRuntime

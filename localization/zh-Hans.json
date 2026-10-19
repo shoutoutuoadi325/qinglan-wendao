@@ -105,6 +105,7 @@
   "trial.blocked.story_required": "请先完成试炼所需的剧情准备。",
   "trial.blocked.completed": "此项试炼已经完成。",
   "trial.unavailable": "试炼未能启动，进度未发生变化。请重试。",
+  "trial.spawn_failed": "试炼场未能开启。没有任何损失；重新按下试炼锚点即可重试。",
   "trial.in_progress": "试炼正在进行中。",
   "trial.return_hub": "返回清岚别院。",
   "save.resume_pending": "远征检查点已就绪。按交互键重试恢复。",
@@ -113,5 +114,11 @@
   "ending.warning_acknowledgment": "我已阅读警告，并理解此结局在本存档中不可更改。",
   "ending.unavailable": "尚不能选择此结局，请先满足其条件。",
   "ending.preview_required": "请先预览此结局，再进行确认。",
+  "interact.hub.rest_station": "在山门休息",
+  "interact.hub.ledger_table": "账簿桌",
+  "interact.hub.correspondence_table": "书简桌",
+  "hub.rest.none_pending": "当前没有待送达的回信。",
+  "hub.rest.summary": "信使回程：{hours} 小时。待定：{quests}。",
+  "hub.rest.passed": "你休息了 {hours} 小时；信使的回信已经送到。",
   "action.continue": "继续"
 }

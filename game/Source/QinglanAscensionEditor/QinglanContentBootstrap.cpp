@@ -786,6 +786,9 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaps()
 			{TEXT("hub.stonewright_crate"), FVector(3600, 800, 600)},
 			{TEXT("hub.old_table"), FVector(-3800, 800, 600)},
 			{TEXT("hub.training_mat"), FVector(3000, 3300, 600)},
+			// AUD-10: CH05_S03 / CH07_S01-S03 scene anchors (ledger + correspondence).
+			{TEXT("hub.ledger_table"), FVector(-600, 1800, 600)},
+			{TEXT("hub.correspondence_table"), FVector(-1000, -1400, 600)},
 			{TEXT("record.hub.apprentice_quarters"), FVector(2200, 1600, 600)},
 			{TEXT("record.hub.courier_shelf"), FVector(1400, 3400, 600)},
 			{TEXT("record.hub.dry_bell"), FVector(0, 600, 600)},

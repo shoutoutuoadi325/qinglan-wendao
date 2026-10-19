@@ -269,8 +269,10 @@ void AQinglanHubGameMode::BeginPlay()
 	// Epilogue entry: the CH07 retrospective lives in the sanctuary (its
 	// locations are authored prose, so no hub anchor matches them); beginning
 	// the earliest uncompleted epilogue scene here keeps the chapter reachable
-	// after the ending decision. BeginScene itself validates the CH06
-	// prerequisites, so earlier visits are a Verbose no-op.
+	// after the ending decision. CH05 rides along so its hub-anchored beats
+	// (e.g. CH05_S04 at the trial gate) still surface on later arrivals even
+	// if the arena was entered from another route. BeginScene itself validates
+	// the chapter prerequisites, so earlier visits are a Verbose no-op.
 	if (UQinglanStorySubsystem* Story = Instance ? Instance->GetSubsystem<UQinglanStorySubsystem>() : nullptr)
 	{
 		if (Story->HasFlag(FName(QinglanProgression::FoundationTrialPassedStoryFlag))
@@ -280,7 +282,7 @@ void AQinglanHubGameMode::BeginPlay()
 		}
 		else
 		{
-			QinglanInteraction::BeginFirstSceneOfChapters(Story, { FName(TEXT("CH07")) });
+			QinglanInteraction::BeginFirstSceneOfChapters(Story, { FName(TEXT("CH05")), FName(TEXT("CH07")) });
 		}
 	}
 }

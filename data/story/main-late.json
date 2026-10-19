@@ -50,7 +50,8 @@
     {
       "id": "CH04_S01",
       "chapter": "CH04",
-      "location": "Ashen Peak approach, existing rooms 1–2",
+      "location": "ashen.approach_1_2",
+      "location_note": "Ashen Peak approach, existing rooms 1–2",
       "title_key": "story.ch04.s01.title",
       "prerequisites": [
         "mq_ch03_complete"
@@ -118,7 +119,24 @@
         {
           "id": "s01.objective",
           "text_key": "story.ch04.s01.objective",
-          "completion": "Both scale interactions read and room encounter cleared."
+          "completion": "Both scale interactions read and room encounter cleared.",
+          "proof": {
+            "all_of": [
+              {
+                "kind": "event_count",
+                "event": "record.opened.scale",
+                "count": 2
+              },
+              {
+                "kind": "event",
+                "event": "encounter.room_cleared.ashen.1"
+              },
+              {
+                "kind": "event",
+                "event": "encounter.room_cleared.ashen.2"
+              }
+            ]
+          }
         }
       ],
       "sets_flags": [
@@ -156,7 +174,8 @@
     {
       "id": "CH04_S02",
       "chapter": "CH04",
-      "location": "Ashen Peak archive, existing room 3",
+      "location": "ashen.archive_3",
+      "location_note": "Ashen Peak archive, existing room 3",
       "title_key": "story.ch04.s02.title",
       "prerequisites": [
         "mq_ashen_marks_read"
@@ -226,7 +245,23 @@
         {
           "id": "s02.objective",
           "text_key": "story.ch04.s02.objective",
-          "completion": "Three reader contacts aligned; agreement and witness transcript opened; acknowledgment selected."
+          "completion": "Three reader contacts aligned; agreement and witness transcript opened; acknowledgment selected.",
+          "proof": {
+            "all_of": [
+              {
+                "kind": "ordered",
+                "steps": [
+                  "device.reader_contacts.tab_one",
+                  "device.reader_contacts.tab_two",
+                  "device.reader_contacts.tab_three"
+                ]
+              },
+              {
+                "kind": "event",
+                "event": "record.opened.witness_transcript"
+              }
+            ]
+          }
         }
       ],
       "sets_flags": [
@@ -263,7 +298,8 @@
     {
       "id": "CH04_S03",
       "chapter": "CH04",
-      "location": "Ashen Peak archive, same room",
+      "location": "ashen.archive_3",
+      "location_note": "Ashen Peak archive, same room",
       "title_key": "story.ch04.s03.title",
       "prerequisites": [
         "mq_thirty_day_consent_read"
@@ -361,7 +397,20 @@
         {
           "id": "s03.objective",
           "text_key": "story.ch04.s03.objective",
-          "completion": "Four dated entries plus handover summary opened."
+          "completion": "Four dated entries plus handover summary opened.",
+          "proof": {
+            "all_of": [
+              {
+                "kind": "event_count",
+                "event": "record.opened.renewal_entry",
+                "count": 4
+              },
+              {
+                "kind": "event",
+                "event": "record.opened.handover_summary"
+              }
+            ]
+          }
         }
       ],
       "sets_flags": [
@@ -400,7 +449,8 @@
     {
       "id": "CH04_S04",
       "chapter": "CH04",
-      "location": "Ashen Peak release antechamber, existing room 4",
+      "location": "ashen.release_antechamber",
+      "location_note": "Ashen Peak release antechamber, existing room 4",
       "title_key": "story.ch04.s04.title",
       "prerequisites": [
         "mq_renewals_read"
@@ -449,7 +499,23 @@
         {
           "id": "s04.objective",
           "text_key": "story.ch04.s04.objective",
-          "completion": "Forecast and repair brief read; shrine activated."
+          "completion": "Forecast and repair brief read; shrine activated.",
+          "proof": {
+            "all_of": [
+              {
+                "kind": "event",
+                "event": "record.opened.forecast"
+              },
+              {
+                "kind": "event",
+                "event": "record.opened.repair_brief"
+              },
+              {
+                "kind": "event",
+                "event": "shrine.activated"
+              }
+            ]
+          }
         }
       ],
       "sets_flags": [
@@ -481,7 +547,8 @@
     {
       "id": "CH05_S01",
       "chapter": "CH05",
-      "location": "Ashen Peak boss arena",
+      "location": "ashen.boss_5",
+      "location_note": "Ashen Peak boss arena",
       "title_key": "story.ch05.s01.title",
       "prerequisites": [
         "mq_ch04_complete"
@@ -549,7 +616,15 @@
         {
           "id": "s01.objective",
           "text_key": "story.ch05.s01.objective",
-          "completion": "Ashen Guardian defeated; first-clear reward recorded as pending. Bank only at the normal sanctuary return, after CH05_S02."
+          "completion": "Ashen Guardian defeated; first-clear reward recorded as pending. Bank only at the normal sanctuary return, after CH05_S02.",
+          "proof": {
+            "all_of": [
+              {
+                "kind": "event",
+                "event": "encounter.boss_defeated.ashen"
+              }
+            ]
+          }
         }
       ],
       "sets_flags": [
@@ -582,7 +657,8 @@
     {
       "id": "CH05_S02",
       "chapter": "CH05",
-      "location": "Ashen Peak boss arena, safe state",
+      "location": "ashen.boss_5",
+      "location_note": "Ashen Peak boss arena, safe state",
       "title_key": "story.ch05.s02.title",
       "prerequisites": [
         "mq_ashen_guard_disabled"
@@ -650,7 +726,19 @@
         {
           "id": "s02.objective",
           "text_key": "story.ch05.s02.objective",
-          "completion": "Three ordered controls activated with no timing test."
+          "completion": "Three ordered controls activated with no timing test.",
+          "proof": {
+            "all_of": [
+              {
+                "kind": "ordered",
+                "steps": [
+                  "device.release_controls.first",
+                  "device.release_controls.second",
+                  "device.release_controls.third"
+                ]
+              }
+            ]
+          }
         }
       ],
       "sets_flags": [
@@ -684,7 +772,8 @@
     {
       "id": "CH05_S03",
       "chapter": "CH05",
-      "location": "Sanctuary ledger table",
+      "location": "hub.ledger_table",
+      "location_note": "Sanctuary ledger table",
       "title_key": "story.ch05.s03.title",
       "prerequisites": [
         "mq_storm_onset"
@@ -766,7 +855,16 @@
         {
           "id": "s03.objective",
           "text_key": "story.ch05.s03.objective",
-          "completion": "All sealed account pages opened; response selected."
+          "completion": "All sealed account pages opened; response selected.",
+          "proof": {
+            "all_of": [
+              {
+                "kind": "event_count",
+                "event": "record.opened.sealed_page",
+                "count": 4
+              }
+            ]
+          }
         }
       ],
       "sets_flags": [
@@ -801,7 +899,8 @@
     {
       "id": "CH05_S04",
       "chapter": "CH05",
-      "location": "Sanctuary governor edge, existing trial arena threshold",
+      "location": "hub.trial_gate",
+      "location_note": "Sanctuary governor edge, existing trial arena threshold",
       "title_key": "story.ch05.s04.title",
       "prerequisites": [
         "mq_yun_confession_read"
@@ -955,7 +1054,8 @@
     {
       "id": "CH06_S01",
       "chapter": "CH06",
-      "location": "Sanctuary preparation shrine",
+      "location": "trial.preparation_shrine",
+      "location_note": "Sanctuary preparation shrine",
       "title_key": "story.ch06.s01.title",
       "prerequisites": [
         "mq_ch05_complete"
@@ -1009,7 +1109,15 @@
         {
           "id": "s01.objective",
           "text_key": "story.ch06.s01.objective",
-          "completion": "Established realm requirements met and trial entry selected."
+          "completion": "Established realm requirements met and trial entry selected.",
+          "proof": {
+            "all_of": [
+              {
+                "kind": "event",
+                "event": "cultivation.foundation_rank_3"
+              }
+            ]
+          }
         }
       ],
       "sets_flags": [
@@ -1039,7 +1147,8 @@
     {
       "id": "CH06_S02",
       "chapter": "CH06",
-      "location": "Existing Golden Core trial arena",
+      "location": "trial.golden_core_arena",
+      "location_note": "Existing Golden Core trial arena",
       "title_key": "story.ch06.s02.title",
       "prerequisites": [
         "mq_core_trial_entered"
@@ -1115,7 +1224,19 @@
         {
           "id": "s02.objective",
           "text_key": "story.ch06.s02.objective",
-          "completion": "150 seconds survived and Broken Guardian shell defeated in the same successful attempt."
+          "completion": "150 seconds survived and Broken Guardian shell defeated in the same successful attempt.",
+          "proof": {
+            "all_of": [
+              {
+                "kind": "event",
+                "event": "trial.survived.golden_core"
+              },
+              {
+                "kind": "event",
+                "event": "shell_defeated"
+              }
+            ]
+          }
         }
       ],
       "sets_flags": [
@@ -1149,7 +1270,8 @@
     {
       "id": "CH06_S03",
       "chapter": "CH06",
-      "location": "Trial arena, quiet governor platform",
+      "location": "trial.quiet_governor_platform",
+      "location_note": "Trial arena, quiet governor platform",
       "title_key": "story.ch06.s03.title",
       "prerequisites": [
         "mq_governor_shell_disabled"
@@ -1248,7 +1370,15 @@
         {
           "id": "s03.objective",
           "text_key": "story.ch06.s03.objective",
-          "completion": "Unbinding authorized; living farewell completed or skipped with journal summary; pattern dissolved; final release transaction saved once."
+          "completion": "Unbinding authorized; living farewell completed or skipped with journal summary; pattern dissolved; final release transaction saved once.",
+          "proof": {
+            "all_of": [
+              {
+                "kind": "event",
+                "event": "release.guardian_released"
+              }
+            ]
+          }
         }
       ],
       "sets_flags": [
@@ -1292,7 +1422,8 @@
     {
       "id": "CH06_S04",
       "chapter": "CH06",
-      "location": "Trial arena decision platform / sanctuary return route",
+      "location": "trial.decision_platform",
+      "location_note": "Trial arena decision platform / sanctuary return route",
       "title_key": "story.ch06.s04.title",
       "prerequisites": [
         "mq_shen_released"
@@ -1451,7 +1582,15 @@
         {
           "id": "s04.objective",
           "text_key": "story.ch06.s04.objective",
-          "completion": "Exactly one available ending confirmed after preview acknowledgment."
+          "completion": "Exactly one available ending confirmed after preview acknowledgment.",
+          "proof": {
+            "all_of": [
+              {
+                "kind": "event",
+                "event": "ending.confirmed"
+              }
+            ]
+          }
         }
       ],
       "sets_flags": [
@@ -1497,7 +1636,8 @@
     {
       "id": "CH07_S01",
       "chapter": "CH07",
-      "location": "Sanctuary bell and ledger",
+      "location": "hub.ledger_table",
+      "location_note": "Sanctuary bell and ledger",
       "title_key": "story.ch07.s01.title",
       "prerequisites": [
         "mq_ch06_complete"
@@ -1583,7 +1723,15 @@
         {
           "id": "s01.objective",
           "text_key": "story.ch07.s01.objective",
-          "completion": "Morning outcome and ledger entry read."
+          "completion": "Morning outcome and ledger entry read.",
+          "proof": {
+            "all_of": [
+              {
+                "kind": "event",
+                "event": "record.opened.morning_ledger"
+              }
+            ]
+          }
         }
       ],
       "sets_flags": [
@@ -1618,7 +1766,8 @@
     {
       "id": "CH07_S02",
       "chapter": "CH07",
-      "location": "Sanctuary lower-channel viewing point and correspondence table",
+      "location": "hub.correspondence_table",
+      "location_note": "Sanctuary lower-channel viewing point and correspondence table",
       "title_key": "story.ch07.s02.title",
       "prerequisites": [
         "mq_epilogue_morning_seen"
@@ -1714,7 +1863,19 @@
         {
           "id": "s02.objective",
           "text_key": "story.ch07.s02.objective",
-          "completion": "Thirty-day time card and chosen outcome report read."
+          "completion": "Thirty-day time card and chosen outcome report read.",
+          "proof": {
+            "all_of": [
+              {
+                "kind": "event",
+                "event": "record.opened.thirty_day_card"
+              },
+              {
+                "kind": "event",
+                "event": "record.opened.outcome_report"
+              }
+            ]
+          }
         }
       ],
       "sets_flags": [
@@ -1747,7 +1908,8 @@
     {
       "id": "CH07_S03",
       "chapter": "CH07",
-      "location": "Sanctuary correspondence table",
+      "location": "hub.correspondence_table",
+      "location_note": "Sanctuary correspondence table",
       "title_key": "story.ch07.s03.title",
       "prerequisites": [
         "mq_epilogue_thirty_days_seen"
@@ -1824,7 +1986,15 @@
         {
           "id": "s03.objective",
           "text_key": "story.ch07.s03.objective",
-          "completion": "New correspondence read and response selected."
+          "completion": "New correspondence read and response selected.",
+          "proof": {
+            "all_of": [
+              {
+                "kind": "event",
+                "event": "record.opened.yun_new_letter"
+              }
+            ]
+          }
         }
       ],
       "sets_flags": [
@@ -1855,7 +2025,8 @@
     {
       "id": "CH07_S04",
       "chapter": "CH07",
-      "location": "Sanctuary bell, existing hub winter dressing",
+      "location": "hub.courtyard",
+      "location_note": "Sanctuary bell, existing hub winter dressing",
       "title_key": "story.ch07.s04.title",
       "prerequisites": [
         "mq_epilogue_yun_reply_seen"

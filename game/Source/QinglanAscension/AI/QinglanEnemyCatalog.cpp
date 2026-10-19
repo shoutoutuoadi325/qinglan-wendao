@@ -1,8 +1,9 @@
-// Constant enemy specs: six archetypes (docs/02 section 8) + three bosses
-// (docs/02 section 9; blueprint section 2.4). Numbers with a doc citation are
-// contract; numbers marked "authored" have no doc value and are the current
-// design pass. The editor importer may later mirror these into data assets;
-// the C++ constants stay the reference.
+// Constant enemy specs: six archetypes (docs/02 section 8) + four bosses
+// (docs/02 section 9; blueprint section 2.4; plus the Foundation trial's
+// elite construct, AUD-20). Numbers with a doc citation are contract; numbers
+// marked "authored" have no doc value and are the current design pass. The
+// editor importer may later mirror these into data assets; the C++ constants
+// stay the reference.
 #include "AI/QinglanEnemyCatalog.h"
 
 #include "Misc/Paths.h"
@@ -23,7 +24,7 @@ namespace QinglanPatternIds
 namespace
 {
 	// Bounded cache for transient catalog assets (AUD-46): the spec id space is
-	// fixed (six archetypes + three bosses), so keying by EnemyId caps the
+	// fixed (six archetypes + four bosses), so keying by EnemyId caps the
 	// instance count at that size; repeated rooms, expeditions, and trials
 	// reuse the same assets instead of rooting a new one per encounter.
 	// Entries stay rooted while cached because several holders (wave queues,
@@ -320,6 +321,42 @@ namespace
 			FName(TEXT("cue.boss.broken.roots.mark")), FName(TEXT("cue.boss.broken.roots.erupt"))));
 		return S;
 	}
+
+	FQinglanArchetypeSpec MakeEliteConstruct()
+	{
+		FQinglanArchetypeSpec S;
+		// AUD-20: the Foundation trial's final elite construct (CH03_S02).
+		// docs/story/CH03.md S02 authorizes the required kill but gives no stat
+		// block; every number is authored between stone_sentinel and
+		// bamboo_guardian so a tier-1 player can finish the kill on the 60 m
+		// storm platform (both pattern telegraphs stay >= 0.9 s like every
+		// other trial hazard).
+		S.EnemyId = FName(TEXT("elite_construct"));
+		S.Health = 620.f;
+		S.Defense = 12.f;
+		S.MoveSpeed = 260.f;
+		S.AttackRange = 420.f;     // sweeping-blade reach (pattern range below)
+		S.AttackDamage = 24.f;
+		S.AttackCoefficient = 0.5f;
+		S.AttackWindup = 1.0f;     // authored default; per-pattern telegraphs override
+		S.AttackActive = 0.3f;
+		S.AttackRecover = 1.2f;    // authored punish window
+		S.TelegraphDuration = 1.0f;
+		S.TelegraphCueId = FName(TEXT("cue.boss.elite_construct.default")); // authored cue id
+		S.AggroRadius = 6000.f;    // authored: whole-platform boss aggro
+		S.AttackShape = EQinglanAttackShape::MeleeCone;
+		S.bBoss = true;
+		S.PhaseTwoAtHealthFraction = 0.5f; // authored: same enrage-lite rule as the other bosses
+		S.ArenaDiameter = 6000.f;          // the 60 m storm platform, docs/dev/level-layout.md
+		S.GroundRingRadius = 550.f;        // strike outline radius = delayed-strike pattern range
+		S.Patterns.Add(MakePattern(QinglanPatternIds::SweepingBlade(), /*Weight*/ 2.f, /*Telegraph*/ 1.1f,
+			/*Damage*/ 24.f, /*Range*/ 420.f, /*bGroundMarker*/ false,
+			FName(TEXT("cue.boss.elite_construct.sweep.charge")), FName(TEXT("cue.boss.elite_construct.sweep.release"))));
+		S.Patterns.Add(MakePattern(QinglanPatternIds::DelayedRoots(), 3.f, 1.0f,
+			20.f, 550.f, true,
+			FName(TEXT("cue.boss.elite_construct.strike.mark")), FName(TEXT("cue.boss.elite_construct.strike.erupt"))));
+		return S;
+	}
 } // namespace
 
 namespace QinglanEnemyCatalog
@@ -340,11 +377,15 @@ namespace QinglanEnemyCatalog
 
 	const TArray<FQinglanArchetypeSpec>& GetAllBosses()
 	{
+		// Order matters: BuildRoomWave falls back to Bosses[0] and
+		// GetBossIdForRealm scans by id, so the expedition bosses keep their
+		// authored slots and the trial-only construct appends last (AUD-20).
 		static const TArray<FQinglanArchetypeSpec> Bosses =
 		{
 			MakeBambooGuardian(),
 			MakeAshenGuardian(),
-			MakeBrokenGuardian()
+			MakeBrokenGuardian(),
+			MakeEliteConstruct()
 		};
 		return Bosses;
 	}
@@ -437,6 +478,7 @@ namespace QinglanEnemyCatalog
 			{ FName(TEXT("bamboo_guardian")),     { TEXT("Knight/SK_Knight"),     TEXT("Knight/SK_KnightHumanArmature_Idle") } },
 			{ FName(TEXT("ashen_guardian")),      { TEXT("Knight/SK_Knight"),     TEXT("Knight/SK_KnightHumanArmature_Idle") } },
 			{ FName(TEXT("broken_guardian")),     { TEXT("Monsters/SK_Dragon"),   TEXT("Monsters/SK_DragonDragonArmature_Dragon_Flying") } },
+			{ FName(TEXT("elite_construct")),     { TEXT("Knight/SK_Knight"),     TEXT("Knight/SK_KnightHumanArmature_Idle") } },
 		};
 		if (const FPresent* Group = MeshGroups.Find(Spec.EnemyId))
 		{

@@ -75,12 +75,15 @@ namespace QinglanInteraction
 	 * anchor id (main scenes use the exact id "hub.courtyard" style; side-quest
 	 * stages use the "realm/place" form mapped from "sq.realm.place" anchors).
 	 * Uncompleted scenes go first; with bAllowRevisit completed ones replay
-	 * their brief revisit branch (docs/story/narrative-implementation.md 3.3).
+	 * their brief revisit branch (docs/story/narrative-implementation.md 3.3),
+	 * except completed protocol stages, which replay as agreement revisions
+	 * with live choices. Player, when given, receives the pending-agreement
+	 * status line before such a revision begins.
 	 * Returns false when the registry is absent or nothing matched;
 	 * prerequisites are validated by UQinglanStorySubsystem::BeginScene itself
 	 * (failure is an unmet chain, logged Verbose - never an error).
 	 */
-	bool BeginSceneAtAnchor(UQinglanStorySubsystem* Story, FName AnchorId, bool bAllowRevisit = true);
+	bool BeginSceneAtAnchor(UQinglanStorySubsystem* Story, FName AnchorId, bool bAllowRevisit = true, AQinglanCharacter* Player = nullptr);
 
 	// --- Gameplay-proof dispatcher (blueprint section 1.9) ------------------
 	// Choice-free scenes commit only through NotifyObjectiveCompleted ("the

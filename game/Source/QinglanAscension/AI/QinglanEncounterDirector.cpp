@@ -352,7 +352,9 @@ void AQinglanEncounterDirector::Tick(float DeltaTime)
 		bActive = false;
 		ReleaseAttackSlots();
 		OnEncounterCompleted.Broadcast();
-		UE_LOG(LogQinglanAI, Log, TEXT("Encounter completed in room %d"), CurrentRoomIndex);
+		UE_LOG(LogQinglanAI, Log, TEXT("Encounter completed in room %d (living=%d livingAlive=%d pending=%d queued=%d bossRoom=%d)"),
+			CurrentRoomIndex, LivingEnemies.Num(), GetLivingEnemyCount(), PendingSpawns.Num(),
+			Extra.WaveQueue.Num(), bBossRoom ? 1 : 0);
 
 		// Back to the exploration loop after a cleared room (docs/04 audio pass).
 		if (UQinglanAudioSubsystem* Audio = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQinglanAudioSubsystem>() : nullptr)
@@ -493,6 +495,28 @@ void AQinglanEncounterDirector::SpawnThroughPortal(UQinglanEnemyDataAsset* Data,
 	}
 
 	AQinglanAIController* Controller = ControllerOf(Enemy);
+	if (!Controller)
+	{
+		// The pawn's automatic SpawnDefaultController can come up empty in
+		// worlds without a full spawn context (bare automation fixtures).
+		// The director owns enemy controller provisioning anyway, so supply
+		// one explicitly instead of dropping the enemy. No Owner: a controller
+		// owned by its pawn makes GetNetConnection() recurse forever
+		// (pawn -> controller -> owner pawn -> ...).
+		FActorSpawnParameters ControllerParams;
+		ControllerParams.Instigator = Enemy->GetInstigator();
+		ControllerParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		ControllerParams.ObjectFlags |= RF_Transient;
+		AQinglanAIController* Provisioned = GetWorld()->SpawnActor<AQinglanAIController>(ControllerParams);
+		UE_LOG(LogQinglanAI, Warning, TEXT("Auto controller missing (begunPlay=%d); explicit provisioning %s"),
+			GetWorld() ? (GetWorld()->HasBegunPlay() ? 1 : 0) : -1,
+			Provisioned ? TEXT("succeeded") : TEXT("failed"));
+		if (Provisioned != nullptr)
+		{
+			Provisioned->Possess(Enemy);
+			Controller = Provisioned;
+		}
+	}
 	if (!Controller)
 	{
 		UE_LOG(LogQinglanAI, Error, TEXT("Spawned enemy without an AQinglanAIController"));

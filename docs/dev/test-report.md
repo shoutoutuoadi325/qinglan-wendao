@@ -12,6 +12,7 @@ Environment: Linux (container, 64 physical cores), UE 5.8.3 source build, headle
 | Planning validators | ✅ pass | `python3 tools/validate_repository.py`, `tools/validate_story.py` |
 | Linux Shipping package (UAT BuildCookRun) | ✅ rc=0; all four maps, DT_Localization, ST_Game, registry, widgets, montages, meshes, audio, materials in the IoStore inventory | `packaging/evidence/linux-shipping-2026-10-19.txt`, `docs/dev/evidence/package-linux-2026-10-19.log` |
 | Rendered packaged boot (`Xvfb` + NVIDIA Vulkan ICD, software/remote GPU) | ✅ hub renders; HUD text, skill slots, talisman charges, and vitals resolve; third-person camera and character scale correct | `docs/dev/evidence/rendered/hub-packaged-shipping-2026-10-19.png` |
+| Rendered packaged boot after audio/animation/anchor repairs | ✅ same clean HUD and camera from the final package | `docs/dev/evidence/rendered/hub-packaged-shipping-final-2026-10-19.png` |
 
 Test suite composition: 27 cases from the pre-audit baseline + 34 repair cases
 across the audit waves (`Qinglan.Narrative.*` courier/guard/skip cases,
@@ -27,6 +28,14 @@ listed in `docs/dev/completion-audit-todo.md`; no passage here closes them
 without the acceptance evidence that document requires.
 
 
+
+
+**Interactive play attempt:** driving WASD/E through xdotool was attempted on the
+packaged client. The client renders and accepts input, but the cluster's
+`gpu_keeper` process intermittently re-claims the GPUs, causing a SIGSEGV at
+startup or during play (Vulkan device loss). This is an environment limitation,
+not a game defect; the complete playthrough acceptance still requires a
+stable display machine.
 
 **Defects found and fixed only by rendering the package:**
 

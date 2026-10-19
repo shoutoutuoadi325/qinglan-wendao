@@ -10,6 +10,7 @@ Environment: Linux (container, 64 physical cores), UE 5.8.3 source build, headle
 | Editor target build (Linux, Development, UHT + editor modules) | ✅ Succeeded | `docs/dev/evidence/build-2026-10-19-wave6.log` |
 | Automation suite `RunTests Qinglan` | ✅ 53 started / 53 Success / 0 Fail | `docs/dev/evidence/automation-2026-10-19-wave6-53tests.log` |
 | Planning validators | ✅ pass | `python3 tools/validate_repository.py`, `tools/validate_story.py` |
+| Linux Shipping package (UAT BuildCookRun) | ✅ rc=0; all four maps, DT_Localization, ST_Game, registry, widgets, montages, meshes, audio, materials in the IoStore inventory | `packaging/evidence/linux-shipping-2026-10-19.txt`, `docs/dev/evidence/package-linux-2026-10-19.log` |
 
 Test suite composition: 27 cases from the pre-audit baseline + 26 repair cases
 across the audit waves (`Qinglan.Narrative.*` courier/guard/skip cases,
@@ -23,6 +24,12 @@ exercised by the specs. They do **not** prove a playable campaign, rendered
 output, packaging, or target-platform acceptance. Unresolved audit IDs remain
 listed in `docs/dev/completion-audit-todo.md`; no passage here closes them
 without the acceptance evidence that document requires.
+
+
+**Packaged headless boot:** launching the Shipping client with `-nullrhi` in
+this container aborts/wedges in platform audio/display initialization (no
+sound card, no display); it is not evidence of a packaged-game defect. Offline
+packaged launch acceptance still requires a display-capable machine.
 
 Build entry: `bash tools/build/build-game.sh` (portable; `QINGLAN_ENGINE_ROOT`
 parameterizes the engine checkout). Content regeneration:

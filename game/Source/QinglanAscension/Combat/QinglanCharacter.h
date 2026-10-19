@@ -183,6 +183,13 @@ public:
 	UFUNCTION(BlueprintCallable) void QuitToSanctuary();
 	UFUNCTION(BlueprintPure) bool IsMenuInputActive() const { return bMenuOpen; }
 	/**
+	 * AUD-01: cold-start slot selection. Opens the Profile screen without a
+	 * profile session; the game does not auto-load or auto-create a save.
+	 * No-op when a profile session is already active (ordinary hub travel).
+	 */
+	UFUNCTION(BlueprintCallable) void OpenProfileFrontendIfNeeded();
+	UFUNCTION(BlueprintPure) bool IsProfileFrontendOpen() const { return bProfileFrontendOpen; }
+	/**
 	 * True when SceneId began, delivered at least one line, is choice-free,
 	 * and its playback has ended: the script played out, so a follow-up
 	 * interaction is the gameplay proof that commits the scene (blueprint
@@ -313,6 +320,8 @@ protected:
 	bool bDefeatHandled = false;
 	/** AUD-51 gameplay input gate; mirrors any open menu/journal overlay. */
 	bool bMenuOpen = false;
+	/** AUD-01: the menu currently on screen is the cold-start slot selector. */
+	bool bProfileFrontendOpen = false;
 
 	/** AUD-26 focus cache; the prompt is shown only when the selection changes. */
 	TWeakObjectPtr<AQinglanInteractable> FocusedInteractable;

@@ -196,5 +196,6 @@
   "talisman.protective_talisman.name": "护身符",
   "talisman.focus_talisman.name": "聚灵符",
   "talisman.shock_talisman.name": "震雷符",
-  "talisman.recall_talisman.name": "归途符"
+  "talisman.recall_talisman.name": "归途符",
+  "menu.notice.profile_required": "请选择存档位开始。"
 }

@@ -761,6 +761,11 @@ void AQinglanCharacter::BeginPlay()
 	{
 		TechniqueComponent->SyncLoadoutFromProfile();
 	}
+
+	// AUD-01: cold start opens the slot selector instead of silently importing
+	// slot 0 over the session. The hub game mode defers its arrival work until
+	// a slot is chosen (HandleMenuClosed resumes it).
+	OpenProfileFrontendIfNeeded();
 }
 
 void AQinglanCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -791,6 +796,10 @@ void AQinglanCharacter::PossessedBy(AController* NewController)
 	{
 		TechniqueComponent->SyncLoadoutFromProfile();
 	}
+
+	// AUD-01: BeginPlay may run before possession on some travel flows; retry
+	// the cold-start selector here so it is never skipped for lack of a PC.
+	OpenProfileFrontendIfNeeded();
 
 	APlayerController* const PC = Cast<APlayerController>(NewController);
 	if (!PC || !PC->GetLocalPlayer())
@@ -1953,6 +1962,45 @@ void AQinglanCharacter::OpenGameMenu()
 	RefreshMenuInputState();
 }
 
+void AQinglanCharacter::OpenProfileFrontendIfNeeded()
+{
+	if (bProfileFrontendOpen)
+	{
+		return;
+	}
+	UGameInstance* Instance = GetGameInstance();
+	UQinglanSaveSubsystem* Save = Instance ? Instance->GetSubsystem<UQinglanSaveSubsystem>() : nullptr;
+	if (!Save || Save->IsProfileSessionActive())
+	{
+		return; // ordinary travel keeps the in-memory profile; no selector
+	}
+	// Widgets can only be owned by a local player controller. Headless test
+	// worlds and server-side controllers have no UI: they continue without a
+	// profile session rather than logging a widget-assignment error.
+	const APlayerController* const PC = Cast<APlayerController>(Controller);
+	if (!PC || !PC->IsLocalController())
+	{
+		UE_LOG(LogQinglan, Verbose,
+			TEXT("Profile frontend skipped: no local player controller (headless world)"));
+		return;
+	}
+	UQinglanMenuWidget* Menu = EnsureMenuWidget();
+	if (!Menu)
+	{
+		UE_LOG(LogQinglan, Warning, TEXT("Profile frontend unavailable (no menu widget); boot continues without a profile"));
+		return;
+	}
+	bProfileFrontendOpen = true;
+	bMenuOpen = true;
+	Menu->ShowScreen(EQinglanMenuScreen::Profile);
+	if (!Menu->IsInViewport())
+	{
+		Menu->AddToViewport(60);
+	}
+	RefreshMenuInputState();
+	UE_LOG(LogQinglan, Log, TEXT("Profile frontend open: select a slot to begin (AUD-01)"));
+}
+
 void AQinglanCharacter::CloseGameMenu()
 {
 	if (UQinglanMenuWidget* Menu = MenuWidget.Get())
@@ -2068,6 +2116,30 @@ void AQinglanCharacter::RefreshMenuInputState()
 void AQinglanCharacter::HandleMenuClosed()
 {
 	bMenuOpen = JournalWidget.IsValid() && JournalWidget->IsInViewport();
+
+	// AUD-01: leaving the cold-start selector is what starts the session. If a
+	// slot was chosen, run the hub arrival work that BeginPlay deferred;
+	// otherwise keep the selector up rather than entering a session-less hub.
+	if (bProfileFrontendOpen)
+	{
+		UGameInstance* Instance = GetGameInstance();
+		UQinglanSaveSubsystem* Save = Instance ? Instance->GetSubsystem<UQinglanSaveSubsystem>() : nullptr;
+		if (Save && Save->IsProfileSessionActive())
+		{
+			bProfileFrontendOpen = false;
+			if (AQinglanHubGameMode* Hub = GetWorld()
+					? Cast<AQinglanHubGameMode>(GetWorld()->GetAuthGameMode()) : nullptr)
+			{
+				Hub->CompleteHubArrivalAfterProfileSelection();
+			}
+		}
+		else
+		{
+			bProfileFrontendOpen = false;
+			OpenProfileFrontendIfNeeded();
+			return; // stay in UI-only input mode
+		}
+	}
 	UpdateMenuInputMode();
 }
 

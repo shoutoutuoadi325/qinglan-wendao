@@ -196,5 +196,6 @@
   "talisman.protective_talisman.name": "Protective Talisman",
   "talisman.focus_talisman.name": "Focus Talisman",
   "talisman.shock_talisman.name": "Shock Talisman",
-  "talisman.recall_talisman.name": "Recall Talisman"
+  "talisman.recall_talisman.name": "Recall Talisman",
+  "menu.notice.profile_required": "Select a profile to begin."
 }

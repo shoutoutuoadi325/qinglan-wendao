@@ -1053,6 +1053,19 @@ bool UQinglanMenuWidget::Back()
 	{
 		return false;
 	}
+	// AUD-01: the cold-start slot selector cannot be backed out of; there is
+	// no session to return to (BeginPlay deferred all hub arrival work).
+	if (MenuState.Screen == EQinglanMenuScreen::Profile)
+	{
+		UGameInstance* Instance = GetGameInstance();
+		UQinglanSaveSubsystem* Save = Instance ? Instance->GetSubsystem<UQinglanSaveSubsystem>() : nullptr;
+		if (Save && !Save->IsProfileSessionActive())
+		{
+			SetNotice(UQinglanHUDStatics::GameText(FName(TEXT("menu.notice.profile_required"))));
+			RefreshPresentation();
+			return false;
+		}
+	}
 	if (MenuState.Screen == EQinglanMenuScreen::Offer)
 	{
 		if (AQinglanCharacter* Character = GetQinglanCharacter())
@@ -1670,6 +1683,12 @@ void UQinglanMenuWidget::ActivateRow(int32 RowIndex)
 		SetNotice(Result);
 		RebuildRows();
 		RefreshPresentation();
+		// AUD-01: a successful cold-start selection starts the session; close
+		// the selector so the deferred hub arrival work runs (HandleMenuClosed).
+		if (bOk && Character && Character->IsProfileFrontendOpen())
+		{
+			CloseMenu();
+		}
 		return;
 	}
 	if (Action == FName(TEXT("settings.lowflash")))

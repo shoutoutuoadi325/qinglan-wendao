@@ -17,6 +17,16 @@ class AQinglanHubGameMode : public AGameModeBase
 public:
 	AQinglanHubGameMode();
 	virtual void BeginPlay() override;
+	/**
+	 * AUD-01: arrival work (checkpoint resume, talisman refill, autosave,
+	 * epilogue entry) that requires an active profile. Cold start defers it
+	 * until the player has selected a slot in the profile frontend; ordinary
+	 * hub travel calls it directly from BeginPlay.
+	 */
+	void CompleteHubArrivalAfterProfileSelection();
+
+private:
+	bool bHubArrivalCompleted = false;
 };
 
 UCLASS()

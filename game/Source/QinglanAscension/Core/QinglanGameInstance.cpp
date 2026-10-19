@@ -217,17 +217,16 @@ void UQinglanGameInstance::Init()
 	Extra.bFirstLaunch = IsFirstLaunch(this);
 	ApplyStartupLocale(Extra.bFirstLaunch);
 
-	// First launch creates profile slot 0 here rather than in StartFirstMap:
-	// the GameDefaultMap path (L_Hub) loads the map directly and never routes
-	// through StartFirstMap, and without an active slot the hub autosave has
-	// nothing to commit to. The benchmark frontend (docs/06 section 4) is not
-	// authored; when it exists this creation moves behind it.
-	if (UQinglanSaveSubsystem* Save = Extra.Save.Get())
+	// AUD-01: first launch no longer creates slot 0 behind the player's back.
+	// The hub boots with no profile session and AQinglanCharacter opens the
+	// slot selector; the chosen slot's CreateNewProfile/LoadProfile starts the
+	// session and then runs the deferred hub arrival work. bFirstLaunch was
+	// already sampled above, before any profile could exist, so locale
+	// detection keeps its ordering guarantee.
+	if (Extra.bFirstLaunch)
 	{
-		if (Extra.bFirstLaunch)
-		{
-			Save->CreateNewProfile(0);
-		}
+		UE_LOG(LogQinglan, Log,
+			TEXT("First launch: awaiting slot selection at the profile frontend (AUD-01)"));
 	}
 
 	// Early graphics: conservative detected preset (or the persisted preset the

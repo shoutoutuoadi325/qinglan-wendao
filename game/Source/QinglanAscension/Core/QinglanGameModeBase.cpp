@@ -178,39 +178,41 @@ void AQinglanHubGameMode::BeginPlay()
 		Audio->SetMusicState(EQinglanMusicState::Hub);
 	}
 
-	// First arrival with no profile in any slot creates profile 0. This runs
-	// here rather than in the game instance Init because subsystem creation
-	// may not be complete during Init on the GameDefaultMap boot path; without
-	// an active slot the safe-boundary autosave below has nothing to commit.
+	// AUD-01: cold start never auto-loads or auto-creates a profile. The slot
+	// is chosen once in the profile frontend (opened by AQinglanCharacter);
+	// until then the arrival work below must not run, because there is no
+	// active slot to autosave or resume into.
 	if (Instance)
 	{
 		if (UQinglanSaveSubsystem* Save = Instance->GetSubsystem<UQinglanSaveSubsystem>())
 		{
-			// AUD-01: ordinary hub travel must retain the active in-memory profile.
-			// TODO(AUD-01/AUD-51): move cold-start slot selection to the profile
-			// frontend; this guard only prevents arrival from reloading slot 0.
 			if (!Save->IsProfileSessionActive())
 			{
-				int32 FirstExistingSlot = INDEX_NONE;
-				for (int32 Slot = 0; Slot < UQinglanSaveSubsystem::ProfileSlotCount; ++Slot)
-				{
-					if (Save->HasProfile(Slot)) { FirstExistingSlot = Slot; break; }
-				}
-				if (FirstExistingSlot == INDEX_NONE)
-				{
-					Save->CreateNewProfile(0);
-				}
-				else
-				{
-					FText Notice;
-					if (!Save->LoadProfile(FirstExistingSlot, Notice))
-					{
-						UE_LOG(LogQinglan, Warning, TEXT("Initial profile load failed: %s"), *Notice.ToString());
-					}
-				}
+				UE_LOG(LogQinglan, Log,
+					TEXT("Hub cold start: awaiting profile selection at the frontend (AUD-01)"));
+				return;
 			}
 		}
 	}
+
+	CompleteHubArrivalAfterProfileSelection();
+}
+
+void AQinglanHubGameMode::CompleteHubArrivalAfterProfileSelection()
+{
+	if (bHubArrivalCompleted)
+	{
+		return;
+	}
+	UGameInstance* Instance = GetGameInstance();
+	UQinglanSaveSubsystem* Save = Instance ? Instance->GetSubsystem<UQinglanSaveSubsystem>() : nullptr;
+	if (!Save || !Save->IsProfileSessionActive())
+	{
+		UE_LOG(LogQinglan, Warning,
+			TEXT("Hub arrival work skipped: no active profile session"));
+		return;
+	}
+	bHubArrivalCompleted = true;
 
 	// Resume loaded expeditions before hub refills/autosave can change their
 	// entrance state. Failed save-before-travel leaves the request pending;
@@ -255,7 +257,6 @@ void AQinglanHubGameMode::BeginPlay()
 	// "Safe checkpoints: entrance, completed-room reward screen, exit, hub,
 	// trial prep only"): commit the profile now through the save subsystem's
 	// durable write path.
-	if (UQinglanSaveSubsystem* Save = Instance ? Instance->GetSubsystem<UQinglanSaveSubsystem>() : nullptr)
 	{
 		FText Notice;
 		if (!Save->SaveNow(Notice))

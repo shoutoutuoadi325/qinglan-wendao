@@ -3,7 +3,7 @@
 ## 0. Current evidence (2026-10-19) — supersedes the historical section below
 
 Environment: Linux (container, 64 physical cores), UE 5.8.3 source build, headless
-(`-nullrhi`), branch `fix/audit-repairs` at `73d9882` (wave 36).
+(`-nullrhi`), branch `fix/audit-repairs` at `6861276` (wave 37).
 
 | Item | Result | Evidence |
 |---|---|---|
@@ -15,6 +15,7 @@ Environment: Linux (container, 64 physical cores), UE 5.8.3 source build, headle
 | Rendered packaged boot (`Xvfb` + NVIDIA Vulkan ICD, software/remote GPU) | ✅ hub renders; HUD text, skill slots, talisman charges, vitals, third-person camera and character scale correct | `docs/dev/evidence/rendered/hub-packaged-shipping-wave36-2026-10-19.png` |
 | Rendered packaged boot, Simplified Chinese | ✅ every HUD string resolves in `zh-Hans` and CJK glyphs render (no tofu) in the Shipping build | `docs/dev/evidence/rendered/hub-packaged-shipping-zh-Hans-2026-10-19.png` |
 | Rendered packaged boot, Low preset + low-flash + `zh-Hans` | ✅ the reduced-effects configuration boots and renders the same readable HUD | `docs/dev/evidence/rendered/hub-packaged-shipping-low-lowflash-zh-2026-10-19.png` |
+| Cold-start profile frontend (packaged, keyboard-driven) | ✅ first launch shows the 3-slot Profile screen instead of auto-creating slot 0; Return creates slot 1 and enters the hub; Down+Return creates slot 2; both saves are written | `docs/dev/evidence/rendered/profile-frontend-cold-start-2026-10-19.png`, `profile-frontend-selected-slot1-2026-10-19.png`, `profile-frontend-slot-navigation-2026-10-19.png` |
 | Functional new-profile campaign journey (`QINGLAN_RUN_CAMPAIGN=1`) | ✅ **30/30 main scenes**, both timed trials, Foundation + Golden Core breakthroughs, ending confirmation, 0 blocked (run against the regenerated content) | `docs/dev/evidence/automation-2026-10-19-campaign-30of30-regen.log` |
 | Functional new-profile side-quest journey (`QINGLAN_RUN_CAMPAIGN=1`) | ✅ **24/24 side stages**, 8 quest completion flags, courier 18 h/12 h round trips, 0 blocked (run against the regenerated content) | `docs/dev/evidence/automation-2026-10-19-sidequests-24of24-regen.log` |
 | Sky atmosphere and hero skin material | ✅ blue sky/horizon renders in the packaged build; `MIC_HumanCharacter` binds the imported Quaternius palette texture (visual palette/UV art pass still open) | `docs/dev/evidence/rendered/hub-sky-atmosphere-2026-10-19.png` |

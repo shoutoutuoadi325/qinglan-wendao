@@ -2820,6 +2820,8 @@ bool FQinglanAuditStringTableRuntimeKeys::RunTest(const FString& Parameters)
 		TEXT("hud.health"), TEXT("hud.objective"), TEXT("hud.objective.none"),
 		TEXT("hud.skill_slot"), TEXT("hud.talisman"), TEXT("trial.spawn_failed"),
 		TEXT("technique.jade_sword_arc.name"), TEXT("interact.hub.rest_station"),
+		// AUD-01 cold-start frontend notice.
+		TEXT("menu.notice.profile_required"),
 	};
 	for (const TCHAR* Key : Keys)
 	{

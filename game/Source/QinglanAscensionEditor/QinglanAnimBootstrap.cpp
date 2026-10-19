@@ -10,20 +10,33 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetToolsModule.h"
 #include "Combat/QinglanAnimNotifies.h"
+#include "Combat/QinglanCharacterAnimInstance.h"
 #include "EditorFramework/AssetImportData.h"
 #include "Engine/AssetManager.h"
+#include "Misc/FileHelper.h"
 #include "Misc/PackageName.h"
 #include "Modules/ModuleManager.h"
 #include "UObject/Package.h"
 #include "UObject/SavePackage.h"
+#include "UObject/UnrealType.h"
 
+#include "Animation/AnimBlueprint.h"
+#include "Animation/AnimBlueprintGeneratedClass.h"
 #include "Animation/AnimData/IAnimationDataController.h"
 #include "Animation/AnimData/IAnimationDataModel.h"
 #include "Animation/AnimMontage.h"
 #include "Animation/AnimSequence.h"
 #include "Animation/Skeleton.h"
 #include "Abilities/QinglanTechniqueTypes.h"
+#include "EdGraph/EdGraph.h"
+#include "EdGraph/EdGraphNode.h"
+#include "EdGraph/EdGraphPin.h"
+#include "EdGraph/EdGraphSchema.h"
 #include "Engine/SkeletalMesh.h"
+#include "Factories/AnimBlueprintFactory.h"
+#include "Kismet2/BlueprintEditorUtils.h"
+#include "Kismet2/CompilerResultsLog.h"
+#include "Kismet2/KismetEditorUtilities.h"
 
 /**
  * AUD-45 path contract. Each montage is its own package and its top-level
@@ -557,6 +570,277 @@ namespace
 			Loaded->GetDataModel() ? Loaded->GetDataModel()->GetNumBoneTracks() : 0);
 		return true;
 	}
+
+	// -----------------------------------------------------------------------
+	// AUD-44: minimal AnimBlueprint (Root + DefaultSlot).
+	//
+	// The native anim instance drives locomotion/action state, but slot
+	// montages (sword cuts, casts, hits, locomotion clips) only produce pose
+	// when the compiled graph contains a Slot node. This authors:
+	//
+	//   [Slot 'DefaultSlot' Pose] --> [Root Result]
+	//
+	// The graph is created through FBlueprintEditorUtils with the AnimGraph
+	// classes resolved by path. This keeps the editor module's Build.cs
+	// unchanged (no AnimGraph include or link dependency) while still using the
+	// engine's real UAnimationGraphSchema (which creates the Root node) and
+	// UAnimGraphNode_Slot class. The slot name is written through reflection
+	// on the node's FAnimNode_Slot property.
+	// -----------------------------------------------------------------------
+	const TCHAR* const HumanAnimBlueprintName = TEXT("ABP_Human");
+	const TCHAR* const HumanAnimBlueprintPackagePath = TEXT("/Game/Qinglan/Characters/Human/ABP_Human");
+	const TCHAR* const HumanAnimBlueprintObjectPath = TEXT("/Game/Qinglan/Characters/Human/ABP_Human.ABP_Human");
+	const TCHAR* const HumanAnimBlueprintClassPath = TEXT("/Game/Qinglan/Characters/Human/ABP_Human.ABP_Human_C");
+
+	UAnimBlueprint* GenerateHumanAnimBlueprint(USkeleton* Skeleton)
+	{
+		if (!Skeleton)
+		{
+			UE_LOG(LogTemp, Error, TEXT("AUD-44 ABP: no skeleton; cannot generate %s"), HumanAnimBlueprintName);
+			return nullptr;
+		}
+
+		// Never overwrite an authored/previous blueprint.
+		if (FPackageName::DoesPackageExist(HumanAnimBlueprintPackagePath))
+		{
+			if (UAnimBlueprint* Existing = LoadObject<UAnimBlueprint>(nullptr, HumanAnimBlueprintObjectPath))
+			{
+				UE_LOG(LogTemp, Log, TEXT("AUD-44 ABP: %s already exists; leaving it untouched"), HumanAnimBlueprintName);
+				return Existing;
+			}
+			UE_LOG(LogTemp, Error, TEXT("AUD-44 ABP: %s exists but failed to load; not overwriting"), HumanAnimBlueprintName);
+			return nullptr;
+		}
+
+		// The AnimGraph module registers the AnimBlueprint compiler and node
+		// classes; load it before resolving classes by path.
+		FModuleManager::Get().LoadModule(TEXT("AnimGraph"));
+		UClass* const AnimationGraphClass = FindObject<UClass>(nullptr, TEXT("/Script/AnimGraph.AnimationGraph"));
+		UClass* const AnimationGraphSchemaClass = FindObject<UClass>(nullptr, TEXT("/Script/AnimGraph.AnimationGraphSchema"));
+		UClass* const RootNodeClass = FindObject<UClass>(nullptr, TEXT("/Script/AnimGraph.AnimGraphNode_Root"));
+		UClass* const SlotNodeClass = FindObject<UClass>(nullptr, TEXT("/Script/AnimGraph.AnimGraphNode_Slot"));
+		if (!AnimationGraphClass || !AnimationGraphSchemaClass || !RootNodeClass || !SlotNodeClass)
+		{
+			UE_LOG(LogTemp, Error,
+				TEXT("AUD-44 ABP: AnimGraph classes unavailable (graph=%s schema=%s root=%s slot=%s); abandoning"),
+				*GetNameSafe(AnimationGraphClass), *GetNameSafe(AnimationGraphSchemaClass),
+				*GetNameSafe(RootNodeClass), *GetNameSafe(SlotNodeClass));
+			return nullptr;
+		}
+
+		UPackage* const Package = CreatePackage(HumanAnimBlueprintPackagePath);
+		if (!Package)
+		{
+			UE_LOG(LogTemp, Error, TEXT("AUD-44 ABP: could not create package %s"), HumanAnimBlueprintPackagePath);
+			return nullptr;
+		}
+
+		UAnimBlueprintFactory* const Factory = NewObject<UAnimBlueprintFactory>();
+		if (!Factory)
+		{
+			return nullptr;
+		}
+		Factory->ParentClass = UQinglanCharacterAnimInstance::StaticClass();
+		Factory->TargetSkeleton = Skeleton;
+
+		// Call through the exported UFactory base so MinimalAPI on the concrete
+		// factory does not require a derived-method import.
+		UObject* const CreatedAsset = static_cast<UFactory*>(Factory)->FactoryCreateNew(
+			UAnimBlueprint::StaticClass(), Package, FName(HumanAnimBlueprintName),
+			RF_Public | RF_Standalone, nullptr, GWarn);
+		UAnimBlueprint* const AnimBlueprint = Cast<UAnimBlueprint>(CreatedAsset);
+		if (!AnimBlueprint)
+		{
+			UE_LOG(LogTemp, Error, TEXT("AUD-44 ABP: factory failed to create %s"), HumanAnimBlueprintName);
+			return nullptr;
+		}
+		// Factory sets this too; keep it explicit because the compiler needs it.
+		AnimBlueprint->TargetSkeleton = Skeleton;
+		AnimBlueprint->bIsTemplate = false;
+
+		// Default AnimGraph. The schema implementation creates the Root node.
+		UEdGraph* AnimGraph = FindObject<UEdGraph>(AnimBlueprint, TEXT("AnimGraph"));
+		if (!AnimGraph)
+		{
+			AnimGraph = FBlueprintEditorUtils::CreateNewGraph(
+				AnimBlueprint, FName(TEXT("AnimGraph")), AnimationGraphClass, AnimationGraphSchemaClass);
+			if (!AnimGraph)
+			{
+				UE_LOG(LogTemp, Error, TEXT("AUD-44 ABP: could not create AnimGraph"));
+				return nullptr;
+			}
+			FBlueprintEditorUtils::AddDomainSpecificGraph(AnimBlueprint, AnimGraph);
+		}
+
+		UEdGraphNode* RootNode = nullptr;
+		for (UEdGraphNode* const Node : AnimGraph->Nodes)
+		{
+			if (Node && Node->IsA(RootNodeClass))
+			{
+				RootNode = Node;
+				break;
+			}
+		}
+		if (!RootNode)
+		{
+			UE_LOG(LogTemp, Error, TEXT("AUD-44 ABP: AnimGraph has no Root node; abandoning"));
+			return nullptr;
+		}
+
+		// UEdGraph::CreateNode is protected; FGraphNodeCreator (EdGraph.h) does
+		// exactly this sequence and then AddNode. The node class is resolved by
+		// reflection, so create it directly instead of the templated creator.
+		UEdGraphNode* const SlotNode = NewObject<UEdGraphNode>(AnimGraph, SlotNodeClass);
+		if (!SlotNode)
+		{
+			UE_LOG(LogTemp, Error, TEXT("AUD-44 ABP: could not create Slot node"));
+			return nullptr;
+		}
+		SlotNode->NodePosX = 320;
+		SlotNode->NodePosY = 0;
+		SlotNode->CreateNewGuid();
+		SlotNode->PostPlacedNewNode();
+		SlotNode->SetFlags(RF_Transactional);
+		if (SlotNode->Pins.Num() == 0)
+		{
+			SlotNode->AllocateDefaultPins();
+		}
+		AnimGraph->AddNode(SlotNode, /*bUserAction=*/false, /*bSelectNewNode=*/false);
+
+		// Write SlotName through the FAnimNode_Slot struct property without
+		// including AnimGraphRuntime headers in this module.
+		FStructProperty* const NodeProperty =
+			FindFProperty<FStructProperty>(SlotNodeClass, TEXT("Node"));
+		FNameProperty* const SlotNameProperty = NodeProperty
+			? FindFProperty<FNameProperty>(NodeProperty->Struct, TEXT("SlotName"))
+			: nullptr;
+		if (!NodeProperty || !SlotNameProperty)
+		{
+			UE_LOG(LogTemp, Error, TEXT("AUD-44 ABP: Slot node reflection lookup failed; abandoning"));
+			return nullptr;
+		}
+		void* const NodeValue = NodeProperty->ContainerPtrToValuePtr<void>(SlotNode);
+		SlotNameProperty->SetPropertyValue_InContainer(NodeValue, FName(TEXT("DefaultSlot")));
+
+		UEdGraphPin* const PosePin = SlotNode->FindPin(TEXT("Pose"), EGPD_Output);
+		UEdGraphPin* const ResultPin = RootNode->FindPin(TEXT("Result"), EGPD_Input);
+		if (!PosePin || !ResultPin)
+		{
+			UE_LOG(LogTemp, Error,
+				TEXT("AUD-44 ABP: pin lookup failed (slot Pose=%s, root Result=%s); abandoning"),
+				PosePin ? TEXT("found") : TEXT("missing"),
+				ResultPin ? TEXT("found") : TEXT("missing"));
+			return nullptr;
+		}
+		if (!AnimGraph->GetSchema()->TryCreateConnection(PosePin, ResultPin))
+		{
+			UE_LOG(LogTemp, Error, TEXT("AUD-44 ABP: could not connect Slot.Pose -> Root.Result; abandoning"));
+			return nullptr;
+		}
+
+		FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(AnimBlueprint);
+
+		FCompilerResultsLog Results;
+		FKismetEditorUtilities::CompileBlueprint(AnimBlueprint, EBlueprintCompileOptions::None, &Results);
+		UE_LOG(LogTemp, Log,
+			TEXT("AUD-44 ABP: compile finished with %d error(s), %d warning(s); parent=%s generated=%s"),
+			Results.NumErrors, Results.NumWarnings,
+			*GetNameSafe(AnimBlueprint->ParentClass.Get()), *GetNameSafe(AnimBlueprint->GeneratedClass));
+		if (Results.NumErrors > 0
+			|| AnimBlueprint->ParentClass.Get() != UQinglanCharacterAnimInstance::StaticClass()
+			|| !AnimBlueprint->GeneratedClass
+			|| !AnimBlueprint->GeneratedClass->IsChildOf(UQinglanCharacterAnimInstance::StaticClass())
+			|| AnimBlueprint->TargetSkeleton.Get() != Skeleton)
+		{
+			UE_LOG(LogTemp, Error, TEXT("AUD-44 ABP: compile validation failed; asset not saved"));
+			return nullptr;
+		}
+
+		UPackage* const OutermostPackage = AnimBlueprint->GetOutermost();
+		const FString FileName = FPackageName::LongPackageNameToFilename(
+			OutermostPackage->GetName(), FPackageName::GetAssetPackageExtension());
+		FSavePackageArgs SaveArgs;
+		SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+		if (!UPackage::SavePackage(OutermostPackage, AnimBlueprint, *FileName, SaveArgs))
+		{
+			UE_LOG(LogTemp, Error, TEXT("AUD-44 ABP: failed to save %s"), *FileName);
+			return nullptr;
+		}
+		FAssetRegistryModule::AssetCreated(AnimBlueprint);
+
+		// Disk proof: the generated class and slot name must be in the package.
+		TArray<uint8> PackageBytes;
+		if (!FFileHelper::LoadFileToArray(PackageBytes, *FileName))
+		{
+			UE_LOG(LogTemp, Error, TEXT("AUD-44 ABP: could not read back %s"), *FileName);
+			return nullptr;
+		}
+		auto ContainsToken = [&PackageBytes](const char* Token)
+		{
+			const SIZE_T TokenLen = FPlatformString::Strlen(Token);
+			for (int32 Offset = 0; Offset + static_cast<SIZE_T>(TokenLen) <= static_cast<SIZE_T>(PackageBytes.Num()); ++Offset)
+			{
+				if (FMemory::Memcmp(PackageBytes.GetData() + Offset, Token, TokenLen) == 0)
+				{
+					return true;
+				}
+			}
+			return false;
+		};
+		const FTCHARToUTF8 GeneratedNameANSI(*(FString(HumanAnimBlueprintName) + TEXT("_C")));
+		const FTCHARToUTF8 GeneratedTypeANSI(TEXT("AnimBlueprintGeneratedClass"));
+		const FTCHARToUTF8 SlotNameANSI(TEXT("DefaultSlot"));
+		if (!ContainsToken(GeneratedNameANSI.Get()) || !ContainsToken(GeneratedTypeANSI.Get()) || !ContainsToken(SlotNameANSI.Get()))
+		{
+			UE_LOG(LogTemp, Error,
+				TEXT("AUD-44 ABP: disk verification failed for %s (class=%d type=%d slot=%d)"),
+				*FileName, ContainsToken(GeneratedNameANSI.Get()) ? 1 : 0,
+				ContainsToken(GeneratedTypeANSI.Get()) ? 1 : 0, ContainsToken(SlotNameANSI.Get()) ? 1 : 0);
+			return nullptr;
+		}
+
+		UE_LOG(LogTemp, Log, TEXT("AUD-44 ABP: %s generated, compiled, saved to %s"), HumanAnimBlueprintName, *FileName);
+		return AnimBlueprint;
+	}
+
+	/** Post-save contract check for ABP_Human. */
+	bool VerifyHumanAnimBlueprint(const USkeleton* ExpectedSkeleton)
+	{
+		UAnimBlueprint* const Loaded = LoadObject<UAnimBlueprint>(nullptr, HumanAnimBlueprintObjectPath);
+		if (!Loaded)
+		{
+			UE_LOG(LogTemp, Error, TEXT("AUD-44 ABP verify: could not load %s"), HumanAnimBlueprintObjectPath);
+			return false;
+		}
+		if (Loaded->ParentClass.Get() != UQinglanCharacterAnimInstance::StaticClass())
+		{
+			UE_LOG(LogTemp, Error, TEXT("AUD-44 ABP verify: parent class is %s, expected UQinglanCharacterAnimInstance"),
+				*GetNameSafe(Loaded->ParentClass.Get()));
+			return false;
+		}
+		if (!Loaded->GeneratedClass || !Loaded->GeneratedClass->IsChildOf(UQinglanCharacterAnimInstance::StaticClass()))
+		{
+			UE_LOG(LogTemp, Error, TEXT("AUD-44 ABP verify: missing/invalid GeneratedClass"));
+			return false;
+		}
+		const UAnimBlueprintGeneratedClass* const GeneratedClass =
+			Cast<UAnimBlueprintGeneratedClass>(Loaded->GeneratedClass);
+		if (!GeneratedClass || GeneratedClass->GetTargetSkeleton() != ExpectedSkeleton)
+		{
+			UE_LOG(LogTemp, Error, TEXT("AUD-44 ABP verify: target skeleton mismatch (%s)"),
+				*GetNameSafe(GeneratedClass ? GeneratedClass->GetTargetSkeleton() : nullptr));
+			return false;
+		}
+		if (!LoadClass<UQinglanCharacterAnimInstance>(nullptr, HumanAnimBlueprintClassPath))
+		{
+			UE_LOG(LogTemp, Error, TEXT("AUD-44 ABP verify: runtime class path does not load: %s"),
+				HumanAnimBlueprintClassPath);
+			return false;
+		}
+		UE_LOG(LogTemp, Log, TEXT("AUD-44 ABP verify: %s ok (generated class %s)"),
+			HumanAnimBlueprintObjectPath, *GetNameSafe(Loaded->GeneratedClass));
+		return true;
+	}
 } // namespace
 
 UQinglanAnimBootstrapCommandlet::UQinglanAnimBootstrapCommandlet()
@@ -653,13 +937,9 @@ int32 UQinglanAnimBootstrapCommandlet::Main(const FString& Params)
 	// a future art pass can replace them. Pass -no-procedural-locomotion to
 	// skip generation (e.g. for an art-only regeneration).
 	const bool bAuthorProceduralLocomotion = !FParse::Param(*Params, TEXT("no-procedural-locomotion"));
-	if (bAuthorProceduralLocomotion && LoadHumanSkeleton())
+	USkeleton* const HumanSkeleton = LoadHumanSkeleton();
+	if (bAuthorProceduralLocomotion && HumanSkeleton)
 	{
-		USkeleton* const HumanSkeleton = LoadHumanSkeleton();
-		if (HumanSkeleton == nullptr)
-		{
-			UE_LOG(LogTemp, Warning, TEXT("AUD-44: Human skeleton unavailable; procedural Walk/Run generation skipped"));
-		}
 		const TCHAR* const WalkName = TEXT("SK_HumanHuman_Armature_Walk");
 		const TCHAR* const RunName = TEXT("SK_HumanHuman_Armature_Run");
 		UAnimSequence* const WalkSequence =
@@ -684,6 +964,26 @@ int32 UQinglanAnimBootstrapCommandlet::Main(const FString& Params)
 	else if (!bAuthorProceduralLocomotion)
 	{
 		UE_LOG(LogTemp, Log, TEXT("AUD-44: procedural Walk/Run authoring skipped (opt-in -procedural-locomotion)"));
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("AUD-44: Human skeleton unavailable; procedural Walk/Run generation skipped"));
+	}
+
+	// --- AUD-44: minimal Root + DefaultSlot AnimBlueprint. ---
+	// This is independent of the locomotion placeholder flag: without a slot
+	// node in a compiled graph, every action montage stays invisible.
+	if (HumanSkeleton)
+	{
+		UAnimBlueprint* const AnimBlueprint = GenerateHumanAnimBlueprint(HumanSkeleton);
+		if (!AnimBlueprint || !VerifyHumanAnimBlueprint(HumanSkeleton))
+		{
+			bOk = false;
+		}
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("AUD-44 ABP: Human skeleton unavailable; ABP_Human generation skipped"));
 	}
 
 	// --- Discover imported anim sequences by character group. ---

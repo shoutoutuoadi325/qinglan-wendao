@@ -45,6 +45,11 @@ without the acceptance evidence that document requires.
   and the bootstrap now generates 1.0 s Walk / 0.6 s Run clips by default
   (existing assets are left untouched for a future art pass).
 
+- A compiled `ABP_Human` (Root ← Slot "DefaultSlot", parent class =
+  `UQinglanCharacterAnimInstance`) is generated next to the Walk/Run clips, so
+  combo/cast montages now have a slot pose graph; the player and Human-skeleton
+  enemies select it at spawn.
+
 **Interactive play attempt:** driving WASD/E through xdotool was attempted on the
 packaged client. The client renders and accepts input, but the cluster's
 `gpu_keeper` process intermittently re-claims the GPUs, causing a SIGSEGV at

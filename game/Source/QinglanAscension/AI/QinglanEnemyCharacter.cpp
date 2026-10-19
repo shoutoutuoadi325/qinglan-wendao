@@ -39,8 +39,10 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
+#include "Animation/AnimBlueprintGeneratedClass.h"
 #include "Animation/AnimSequence.h"
 #include "Engine/SkeletalMesh.h"
+#include "Misc/PackageName.h"
 #include "QinglanAscension.h" // LogQinglanCombat / LogQinglan
 #include "VFX/QinglanVFXCueComponent.h"
 
@@ -165,6 +167,32 @@ namespace
 				}
 			}
 		}
+	}
+
+	// AUD-44: use ABP_Human only for meshes on its target skeleton. Enemy
+	// archetypes span several rigs (Human/Knight/Monsters); the compiled graph
+	// is skeleton-specific, so incompatible meshes keep the native class.
+	const TCHAR* const HumanAnimBlueprintPackage = TEXT("/Game/Qinglan/Characters/Human/ABP_Human");
+	const TCHAR* const HumanAnimBlueprintClassPath =
+		TEXT("/Game/Qinglan/Characters/Human/ABP_Human.ABP_Human_C");
+
+	UClass* ResolveHumanoidAnimInstanceClass(const USkeletalMesh* Mesh)
+	{
+		const USkeleton* const MeshSkeleton = Mesh ? Mesh->GetSkeleton() : nullptr;
+		if (MeshSkeleton && FPackageName::DoesPackageExist(HumanAnimBlueprintPackage))
+		{
+			if (UClass* const AnimBlueprintClass =
+					LoadClass<UQinglanCharacterAnimInstance>(nullptr, HumanAnimBlueprintClassPath))
+			{
+				const UAnimBlueprintGeneratedClass* const GeneratedClass =
+					Cast<UAnimBlueprintGeneratedClass>(AnimBlueprintClass);
+				if (GeneratedClass && GeneratedClass->GetTargetSkeleton() == MeshSkeleton)
+				{
+					return AnimBlueprintClass;
+				}
+			}
+		}
+		return UQinglanCharacterAnimInstance::StaticClass();
 	}
 }
 
@@ -488,7 +516,7 @@ void AQinglanEnemyCharacter::InitializeFromData(UQinglanEnemyDataAsset* InData)
 			// (e.g. an unregistered pooled mesh during tests), keep the old
 			// single-node idle path as the visible fallback.
 			UAnimSequence* const Idle = InData->IdleAnimation.LoadSynchronous();
-			MeshComp->SetAnimInstanceClass(UQinglanCharacterAnimInstance::StaticClass());
+			MeshComp->SetAnimInstanceClass(ResolveHumanoidAnimInstanceClass(Mesh));
 			if (UQinglanCharacterAnimInstance* const AnimInstance =
 					Cast<UQinglanCharacterAnimInstance>(MeshComp->GetAnimInstance()))
 			{

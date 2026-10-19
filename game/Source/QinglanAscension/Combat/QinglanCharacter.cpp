@@ -27,12 +27,14 @@
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Animation/AnimBlueprintGeneratedClass.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
 #include "Animation/AnimSequence.h"
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/SkeletalMesh.h"
+#include "Misc/PackageName.h"
 #include "UObject/SoftObjectPath.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -522,6 +524,32 @@ namespace
 		if (Id.StartsWith(TEXT("ashen"))) { return TEXT("ashen"); }
 		return Id;
 	}
+
+	// AUD-44: ABP_Human's parent is the native state machine; its compiled
+	// Root+DefaultSlot graph supplies the pose output that native slot montages
+	// require. Missing/incompatible assets fall back to the native class.
+	const TCHAR* const HumanAnimBlueprintPackage = TEXT("/Game/Qinglan/Characters/Human/ABP_Human");
+	const TCHAR* const HumanAnimBlueprintClassPath =
+		TEXT("/Game/Qinglan/Characters/Human/ABP_Human.ABP_Human_C");
+
+	UClass* ResolveHumanoidAnimInstanceClass(const USkeletalMesh* Mesh)
+	{
+		const USkeleton* const MeshSkeleton = Mesh ? Mesh->GetSkeleton() : nullptr;
+		if (MeshSkeleton && FPackageName::DoesPackageExist(HumanAnimBlueprintPackage))
+		{
+			if (UClass* const AnimBlueprintClass =
+					LoadClass<UQinglanCharacterAnimInstance>(nullptr, HumanAnimBlueprintClassPath))
+			{
+				const UAnimBlueprintGeneratedClass* const GeneratedClass =
+					Cast<UAnimBlueprintGeneratedClass>(AnimBlueprintClass);
+				if (GeneratedClass && GeneratedClass->GetTargetSkeleton() == MeshSkeleton)
+				{
+					return AnimBlueprintClass;
+				}
+			}
+		}
+		return UQinglanCharacterAnimInstance::StaticClass();
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -661,11 +689,13 @@ void AQinglanCharacter::BeginPlay()
 	// Montage playback stays on DefaultSlot. If creating the instance fails
 	// (unregistered mesh or class failure), fall back to the single-node idle.
 	//
-	// Walk/Run currently resolve to procedural placeholder sequences authored by
-	// QinglanAnimBootstrap (the Human rig ships Idle/Jump/Action only) and fall
-	// back to Idle until that commandlet runs. Still missing from the art side:
-	// an AnimBP editor asset with a DefaultSlot node (slot montages need a graph
-	// to produce pose) and sword_base/sword_tip/cast_source socket validation.
+	// Walk/Run and ABP_Human are authored by QinglanAnimBootstrap (the Human rig
+	// ships Idle/Jump/Action only), falling back to native/Idle until that
+	// commandlet runs. ABP_Human's parent is the native class and its graph is
+	// Root + DefaultSlot, so native state machine logic is preserved while slot
+	// montages finally produce pose. Still missing from the art side: aim
+	// offsets, a layered combat slot, richer transitions, and
+	// sword_base/sword_tip/cast_source socket validation.
 	if (USkeletalMeshComponent* const MeshComp = GetMesh())
 	{
 		if (USkeletalMesh* const Mesh = Cast<USkeletalMesh>(
@@ -693,7 +723,7 @@ void AQinglanCharacter::BeginPlay()
 				MeshComp->SetMaterial(0, Skin);
 			}
 
-			MeshComp->SetAnimInstanceClass(UQinglanCharacterAnimInstance::StaticClass());
+			MeshComp->SetAnimInstanceClass(ResolveHumanoidAnimInstanceClass(Mesh));
 			if (UQinglanCharacterAnimInstance* const AnimInstance =
 					Cast<UQinglanCharacterAnimInstance>(MeshComp->GetAnimInstance()))
 			{

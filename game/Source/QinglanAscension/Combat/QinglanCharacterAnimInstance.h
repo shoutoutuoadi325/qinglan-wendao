@@ -18,8 +18,10 @@
 //     available. Until the commandlet runs, Walk/Run fall back to Idle.
 //     (The Knight rig has Walking/Run takes, but its skeleton is a different
 //     rig and cannot be played on the Human mesh.)
-//   - No AnimBP editor asset exists yet (slot graph, aim offsets, layered
-//     combat slot, transition rules).
+//   - QinglanAnimBootstrap generates ABP_Human (parent = this native class)
+//     with a minimal Root + DefaultSlot graph so slot montages produce pose.
+//     Aim offsets, a layered combat slot and richer transition rules are still
+//     authoring work.
 //   - Socket authoring/validation is still missing: sword_base/sword_tip for
 //     the blade sweep and cast_source for technique aim.
 #pragma once

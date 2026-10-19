@@ -39,6 +39,12 @@ without the acceptance evidence that document requires.
   camera leg now allows the arm length plus the proximity reach; player
   proximity, aim cone, and visibility remain the binding checks.
 
+- Procedural Walk/Run authoring initially failed with "No Movie Scene found for
+  SequencerDataModel" and zero-length assets; the engine recipe (asset
+  controller + `SetModel(GetDataModelInterface)` + `InitializeModel`) fixed it,
+  and the bootstrap now generates 1.0 s Walk / 0.6 s Run clips by default
+  (existing assets are left untouched for a future art pass).
+
 **Interactive play attempt:** driving WASD/E through xdotool was attempted on the
 packaged client. The client renders and accepts input, but the cluster's
 `gpu_keeper` process intermittently re-claims the GPUs, causing a SIGSEGV at

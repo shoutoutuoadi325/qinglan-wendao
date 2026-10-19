@@ -443,11 +443,16 @@ namespace
 		constexpr float TwoPi = 2.f * UE_PI;
 		const float CalfPhaseLag = -0.3f * TwoPi;
 
+		// Engine recipe (Editor/SequenceRecorder AnimationRecorder.cpp): the
+		// asset-owned controller must be pointed at the sequence's data model
+		// and initialized before AddBoneCurve; the raw model controller path
+		// emits "No Movie Scene found for SequencerDataModel".
 		IAnimationDataController& Controller = Sequence->GetController();
+		Controller.SetModel(Sequence->GetDataModelInterface());
 		Controller.OpenBracket(
 			FText::FromString(FString::Printf(TEXT("Generating procedural %s locomotion"), Label)),
 			/*bShouldTransact=*/false);
-		Controller.ResetModel(/*bShouldTransact=*/false);
+		Controller.InitializeModel();
 		Controller.SetFrameRate(FFrameRate(30, 1), /*bShouldTransact=*/false);
 		Controller.SetNumberOfFrames(FFrameNumber(NumFrames), /*bShouldTransact=*/false);
 
@@ -643,13 +648,11 @@ int32 UQinglanAnimBootstrapCommandlet::Main(const FString& Params)
 	// --- AUD-44: author placeholder Human Walk/Run sequences. ---
 	// These use conventions matching the existing SK_HumanHuman_Armature_Idle
 	// asset, so UQinglanCharacterAnimInstance picks them up automatically.
-	// Opt-in: the UE 5.8 animation-data controller needs a Sequencer-backed
-	// model for AddBoneCurve (the raw UAnimSequence controller path emits
-	// "No Movie Scene found for SequencerDataModel"), so the default
-	// regeneration leaves locomotion on the Idle fallback until the asset is
-	// authored in the editor or the API path is reworked. Pass
-	// -procedural-locomotion to attempt it.
-	const bool bAuthorProceduralLocomotion = FParse::Param(*Params, TEXT("procedural-locomotion"));
+	// The engine recipe (asset controller + SetModel + InitializeModel) makes
+	// the procedural authoring path work; existing assets are left untouched so
+	// a future art pass can replace them. Pass -no-procedural-locomotion to
+	// skip generation (e.g. for an art-only regeneration).
+	const bool bAuthorProceduralLocomotion = !FParse::Param(*Params, TEXT("no-procedural-locomotion"));
 	if (bAuthorProceduralLocomotion && LoadHumanSkeleton())
 	{
 		USkeleton* const HumanSkeleton = LoadHumanSkeleton();

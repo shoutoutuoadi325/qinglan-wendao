@@ -4,7 +4,7 @@
 
 The parallel writing pass covered early main chapters, late main chapters/endings, and eight side stories. Integration reviewed canon, exact copy, paired translations, speaker/source identity, dates, quest availability, reward banking, and final-choice commitments. A separate cross-package reviewer identified reward-policy mismatch, stale ambient lines, a farewell-condition mismatch, and a dense archive-reading stretch; all were addressed in this change.
 
-This is a narrative specification review, not a claim that the game or any branch has been executed in Unreal. Static checks can establish reference coverage and explicit guards; they cannot prove that a runtime dispatcher follows them.
+This document began as a specification review. Runtime execution is now covered by the automation journeys: 30/30 main scenes and 24/24 side stages pass through the production dispatcher (headless). Static checks still guard reference coverage and explicit guards; an interactive playthrough remains an acceptance gate.
 
 ## 2. Critical branch matrix
 
@@ -69,4 +69,4 @@ The final generated inventory and static-check outcome are recorded below after 
 | Simplified Chinese characters | 22,305 |
 | Complete generated bilingual books | 18 |
 
-Static validation passed for bilingual key/placeholder parity, complete registry text references, local links, chapter/scene transitions, and ending confirmation guards. The reading editions match the source resources. Runtime playtesting remains pending implementation.
+Static validation passed for bilingual key/placeholder parity, complete registry text references, local links, chapter/scene transitions, and ending confirmation guards. The reading editions match the source resources. Runtime playback is implemented and functionally executed headless; interactive playtesting on a stable display machine remains pending.

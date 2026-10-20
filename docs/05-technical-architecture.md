@@ -6,14 +6,14 @@ Unreal Engine 5.8 release family, C++ gameplay foundations, Blueprint assembly a
 
 No mandatory paid engine license, paid-only plugin, external backend, online account, CUDA dependency, or separate renderer. Unreal's RHI selects the platform graphics backend. Keep third-party plugins minimal and require both Win64 and native Mac arm64 support.
 
-The current repository contains planning, examples, and validation tools only. Proposed Unreal paths below are implementation instructions, not existing components.
+Implementation status (2026-10-20): the Unreal project, C++ modules, content pipeline, automation suite, and Linux Shipping package now exist and run; the layouts and contracts below are the as-built reference. Remaining acceptance gaps are environment-bound (see `docs/dev/remaining-acceptance-runbook.md`).
 
 ## 2. Proposed project layout
 
 ```text
 game/QinglanAscension.uproject
 game/Source/QinglanAscension/
-  Core/ Combat/ Abilities/ AI/ Progression/ Persistence/ UI/ Platform/
+  Core/ Combat/ Abilities/ AI/ Progression/ Narrative/ Persistence/ UI/ Platform/ VFX/
 game/Config/
 game/Content/Qinglan/
   Characters/ Environments/ Maps/ VFX/ Audio/ UI/ Data/
@@ -61,7 +61,7 @@ Enemy projectiles and spawn portals are pooled with reset contracts. An actor re
 
 Use engine `Saved` locations resolved by platform APIs, not the installation directory. Windows and Mac path behavior must be verified in packaged builds, including the Store package. Provide a Show Save Folder action only through the supported desktop platform API. Keep one stable application save-directory identifier even if the display name changes.
 
-Save schema version 1 has `profile_id`, `schema_version`, `content_version`, monotonic `save_sequence`, permanent cultivation/inventory/unlocks/flags, transaction IDs, and an optional expedition checkpoint. A checkpoint includes seed, stream states, room index, acquired blessings, player attributes, loot, and committed-room IDs. Graphics settings are platform-local and never transferred with gameplay progression.
+The as-built save schema is **version 2** (v1 migrates via `MigrateV1_ToV2`): `profile_id`, `schema_version`, `content_version`, monotonic `save_sequence`, permanent cultivation/inventory/unlocks/flags, transaction IDs, an optional expedition checkpoint, and the narrative/courier delivery and hub-clock state. A checkpoint includes seed, stream states, room index, acquired blessings, player attributes, loot, and committed-room IDs. Graphics settings are platform-local and never transferred with gameplay progression.
 
 Safe checkpoint boundaries: entrance, completed room reward screen, exit, hub, and trial preparation. There is no mid-animation combat save. On crash in an active room, resume its entrance with the pre-room snapshot; do not respawn already committed rewards. Pausing offers Save and Quit only at a safe boundary; during combat offer Quit to Last Checkpoint with a clear explanation.
 
@@ -96,4 +96,4 @@ Test third-party default analytics/crash upload settings and disable unsolicited
 
 ## 10. Complete narrative integration
 
-The fully authored [narrative package](story/README.md) supplies 30 main scenes, 24 optional quest stages, records, and all bilingual story copy. Implement its [runtime contract](story/narrative-implementation.md) alongside the component architecture. Save narrative revision, completed scenes/stages, effective versus pending agreements, source records, and one confirmed ending. The example save now illustrates this section; no narrative dispatcher has been implemented.
+The fully authored [narrative package](story/README.md) supplies 30 main scenes, 24 optional quest stages, records, and all bilingual story copy. Implement its [runtime contract](story/narrative-implementation.md) alongside the component architecture. Save narrative revision, completed scenes/stages, effective versus pending agreements, source records, and one confirmed ending. The example save and runtime use schema v2, and the narrative dispatcher (`UQinglanStorySubsystem` + `UQinglanStoryRegistry`) is implemented; the functional journeys execute all 30 main scenes and 24 side stages.

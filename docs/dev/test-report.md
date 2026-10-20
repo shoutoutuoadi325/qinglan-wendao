@@ -1,246 +1,108 @@
 # Test Report — Qinglan: Path of Ascension
 
-## 0. Current evidence (2026-10-19) — supersedes the historical section below
+## 0. Current evidence (2026-10-20)
 
-Environment: Linux (container, 64 physical cores), UE 5.8.3 source build, headless
-(`-nullrhi`), branch `fix/audit-repairs` at `96a8b7d` (wave 40+; suite wave 42).
+Environment: Linux container, UE 5.8.3 source build (`tools/build/versions.lock`),
+headless `-nullrhi` for automation; rendered checks use Xvfb :1 with the NVIDIA
+Vulkan ICD. Branch `fix/audit-repairs`. Evidence files live in
+`docs/dev/evidence/` (logs are gitignored by `*.log`) and
+`packaging/evidence/`.
 
 | Item | Result | Evidence |
 |---|---|---|
 | Editor target build (Linux, Development, UHT + editor modules) | ✅ Succeeded | `docs/dev/evidence/build-2026-10-19-wave6.log` |
-| Automation suite `RunTests Qinglan` | ✅ 70 performed / 70 Success / 0 Fail | `docs/dev/evidence/automation-2026-10-20-wave44-70tests.log` |
-| Clean content regeneration (`tools/build/regenerate-content.sh`) | ✅ rc_all=0 from a deleted `Data`/`UI`/montage state; Niagara systems, per-rig ABPs, hit-react montages, maps, tables, audio, textures all present | `docs/dev/evidence/content-regeneration-2026-10-19-niagara-abp.log` |
+| Automation suite `RunTests Qinglan` | ✅ **70/70** Success, 0 Fail | `docs/dev/evidence/automation-2026-10-20-wave44-70tests.log` |
+| Clean content regeneration (`tools/build/regenerate-content.sh`) | ✅ `rc_all=0` from a deleted `Data`/`UI`/montage state; Niagara systems, per-rig ABPs, hit-react montages, maps, 966-key string table, 199-key bilingual JSON parity, audio, textures present | `docs/dev/evidence/content-regeneration-2026-10-19-niagara-abp.log` |
+| Content bootstrap (Niagara + Human sockets) | ✅ `NS_Impact/NS_Telegraph/NS_Cast` saved with one emitter each; `sword_base`/`sword_tip`/`cast_source` verified | `docs/dev/evidence/content-bootstrap-2026-10-19-niagara-sockets.log` |
+| Functional new-profile campaign journey (`QINGLAN_RUN_CAMPAIGN=1`) | ✅ **30/30 main scenes**, both trials, breakthroughs, ending confirmation, 0 blocked | `docs/dev/evidence/automation-2026-10-19-campaign-30of30-wave37.log` |
+| Functional new-profile side-quest journey (`QINGLAN_RUN_CAMPAIGN=1`) | ✅ **24/24 side stages**, courier round trips, 0 blocked | `docs/dev/evidence/automation-2026-10-19-sidequests-24of24-wave37.log` |
+| Linux Shipping package (UAT BuildCookRun) | ✅ `rc=0`; all four maps, localization tables, registry, widgets, montages, meshes, audio, `NS_*` cue systems, `ABP_*` slot graphs in the IoStore inventory | `packaging/evidence/linux-shipping-2026-10-20-wave44.txt`, `docs/dev/evidence/package-linux-2026-10-20-wave44.log` |
+| Rendered packaged boot, English | ✅ hub renders; HUD text, skill slots, talisman charges, vitals, camera and character scale correct | `docs/dev/evidence/rendered/hub-packaged-shipping-wave36-2026-10-19.png` |
+| Rendered packaged boot, Simplified Chinese | ✅ every HUD string resolves in `zh-Hans`; CJK glyphs render (no tofu) | `docs/dev/evidence/rendered/hub-packaged-shipping-zh-Hans-2026-10-19.png` |
+| Rendered packaged boot, Low + low-flash + `zh-Hans` | ✅ reduced-effects configuration boots and renders a readable HUD | `docs/dev/evidence/rendered/hub-packaged-shipping-low-lowflash-zh-2026-10-19.png` |
+| Sky atmosphere and hero skin material | ✅ lit sky/horizon; `MIC_HumanCharacter.BaseColor` resolves to `T_Human_Clothed` (`Qinglan.Content.HeroSkinBinding`); hand UV/palette art pass still open | `docs/dev/evidence/rendered/hub-sky-atmosphere-2026-10-19.png` |
+| Cold-start profile frontend (packaged, keyboard) | ✅ 3-slot Profile screen; Return creates slot 1 and enters the hub; Down+Return creates slot 2; both saves written | `docs/dev/evidence/rendered/profile-frontend-{cold-start,selected-slot1,slot-navigation}-2026-10-19.png` |
+| Packaged input smoke (keyboard + mouse) | ✅ WASD moves, relative mouse motion rotates the camera, menu/slot navigation works; `J` is a keyboard attack key | `docs/dev/evidence/rendered/interactive-hub-{spawn-keyboard,walk-approach,camera-look}-2026-10-19.png` |
+| Packaged `SIGKILL` at the hub boundary | ✅ save hash byte-identical before/after `kill -9`; relaunch → slot load → hub renders and writes a new autosave | `docs/dev/evidence/rendered/kill-restart-hub-{before-sigkill,after-restart}-2026-10-19.png` |
+| Trial hazards under Low + low-flash (`-QinglanTrial=90` QA flag) | ✅ arena trial runs; wave-2 strike ground outlines render around the player and a spawned enemy renders with its mesh | `docs/dev/evidence/rendered/trial-lowflash-telegraph-wave2-dense-2026-10-19.png`, `trial-arena-enemy-visible-2026-10-19.png` |
+| Cast cue and skill-slot cooldown | ✅ technique cast renders a cue with the slot entering cooldown | `docs/dev/evidence/rendered/trial-cast-cue-2026-10-20.png` |
+| Cross-build probes (AUD-59) | ❌ UBT rejects Win64 and Mac: “Platform ... is not a valid platform to build. SDK validation failed” | `docs/dev/evidence/cross-build-win64-2026-10-20.log`, `cross-build-mac-2026-10-20.log` |
 | Planning validators | ✅ pass | `python3 tools/validate_repository.py`, `tools/validate_story.py` |
-| Linux Shipping package (UAT BuildCookRun) | ✅ rc=0; all four maps, DT_Localization, ST_Game, registry, widgets, montages, meshes, audio, materials, `NS_*` cue systems and `ABP_*` slot graphs in the IoStore inventory | `packaging/evidence/linux-shipping-2026-10-20-wave44.txt`, `docs/dev/evidence/package-linux-2026-10-20-wave44.log` |
-| Rendered packaged boot (`Xvfb` + NVIDIA Vulkan ICD, software/remote GPU) | ✅ hub renders; HUD text, skill slots, talisman charges, vitals, third-person camera and character scale correct | `docs/dev/evidence/rendered/hub-packaged-shipping-wave36-2026-10-19.png` |
-| Rendered packaged boot, Simplified Chinese | ✅ every HUD string resolves in `zh-Hans` and CJK glyphs render (no tofu) in the Shipping build | `docs/dev/evidence/rendered/hub-packaged-shipping-zh-Hans-2026-10-19.png` |
-| Rendered packaged boot, Low preset + low-flash + `zh-Hans` | ✅ the reduced-effects configuration boots and renders the same readable HUD | `docs/dev/evidence/rendered/hub-packaged-shipping-low-lowflash-zh-2026-10-19.png` |
-| Cold-start profile frontend (packaged, keyboard-driven) | ✅ first launch shows the 3-slot Profile screen instead of auto-creating slot 0; Return creates slot 1 and enters the hub; Down+Return creates slot 2; both saves are written | `docs/dev/evidence/rendered/profile-frontend-cold-start-2026-10-19.png`, `profile-frontend-selected-slot1-2026-10-19.png`, `profile-frontend-slot-navigation-2026-10-19.png` |
-| Packaged input smoke (keyboard + mouse) | ✅ WASD moves the character, relative mouse motion rotates the third-person camera, menu/slot navigation works | `docs/dev/evidence/rendered/interactive-hub-spawn-keyboard-2026-10-19.png`, `interactive-hub-walk-approach-2026-10-19.png`, `interactive-hub-camera-look-2026-10-19.png` |
-| Packaged `SIGKILL` at the hub boundary | ✅ save hash byte-identical before/after `kill -9`; relaunch → slot load → hub renders and writes a new hub autosave | `docs/dev/evidence/rendered/kill-restart-hub-before-sigkill-2026-10-19.png`, `kill-restart-hub-after-restart-2026-10-19.png` |
-| Trial hazards under Low preset + low-flash (`-QinglanTrial=90` QA flag) | ✅ arena trial runs; wave-2 strike ground outlines render around the player and a spawned enemy renders with its mesh | `docs/dev/evidence/rendered/trial-lowflash-telegraph-wave2-dense-2026-10-19.png`, `trial-arena-enemy-visible-2026-10-19.png` |
-| Functional new-profile campaign journey (`QINGLAN_RUN_CAMPAIGN=1`) | ✅ **30/30 main scenes**, both timed trials, Foundation + Golden Core breakthroughs, ending confirmation, 0 blocked (run against the regenerated content) | `docs/dev/evidence/automation-2026-10-19-campaign-30of30-wave37.log` |
-| Functional new-profile side-quest journey (`QINGLAN_RUN_CAMPAIGN=1`) | ✅ **24/24 side stages**, 8 quest completion flags, courier 18 h/12 h round trips, 0 blocked (run against the regenerated content) | `docs/dev/evidence/automation-2026-10-19-sidequests-24of24-wave37.log` |
-| Sky atmosphere and hero skin material | ✅ blue sky/horizon renders in the packaged build; `MIC_HumanCharacter` binds the imported Quaternius palette texture (visual palette/UV art pass still open) | `docs/dev/evidence/rendered/hub-sky-atmosphere-2026-10-19.png` |
 
-Test suite composition: 27 cases from the pre-audit baseline + 43 repair cases
-across the audit waves (`Qinglan.Narrative.*` courier/guard/skip cases,
-`Qinglan.Persistence.*` delivery/migration/rotation cases, `Qinglan.Trial.*`
-phase-machine/hazard cases, `Qinglan.Combat.*` gate/immunity/status cases,
-`Qinglan.Progression.*` exit/tier cases, `Qinglan.Anim.*`/`Qinglan.VFX.*`
-contract cases, and `Qinglan.Localization.*`).
+Suite composition (70 cases): 27 pre-audit baseline cases plus 43 repair cases
+covering narrative (courier/guard/skip), persistence (delivery/migration/
+rotation/fault injection/process restart), trials (phase machine/hazards/
+admission), combat (damage/status/gates/immunity), progression, animation and
+VFX contracts, content/input/map-collision contracts, UI, and localization.
 
-**Scope:** these results prove compilation and the scripted subsystem behavior
-exercised by the specs. They do **not** prove a playable campaign, rendered
-output, packaging, or target-platform acceptance. Unresolved audit IDs remain
-listed in `docs/dev/completion-audit-todo.md`; no passage here closes them
-without the acceptance evidence that document requires.
+Scope: these results prove compilation, scripted subsystem behavior, content
+generation, packaging, and the rendered checks listed. They do **not** prove a
+complete interactive playthrough or target-platform acceptance. Current
+dispositions for all 60 audit IDs are in
+`docs/dev/completion-audit-todo.md`; owner steps for the remaining gates are in
+`docs/dev/remaining-acceptance-runbook.md`.
 
+## 1. Reproduce
 
-
-
-- Camera-relative interaction focus capped the camera leg at the 300 cm
-  proximity range, but the spring arm is 350 cm, so nearby stations were never
-  focusable (found while driving the packaged client with real input). The
-  camera leg now allows the arm length plus the proximity reach; player
-  proximity, aim cone, and visibility remain the binding checks.
-
-- Procedural Walk/Run authoring initially failed with "No Movie Scene found for
-  SequencerDataModel" and zero-length assets; the engine recipe (asset
-  controller + `SetModel(GetDataModelInterface)` + `InitializeModel`) fixed it,
-  and the bootstrap now generates 1.0 s Walk / 0.6 s Run clips by default
-  (existing assets are left untouched for a future art pass).
-
-- A compiled `ABP_Human` (Root ← Slot "DefaultSlot", parent class =
-  `UQinglanCharacterAnimInstance`) is generated next to the Walk/Run clips, so
-  combo/cast montages now have a slot pose graph; the player and Human-skeleton
-  enemies select it at spawn.
-
-**Interactive play attempt:** driving WASD/E through xdotool was attempted on the
-packaged client. The client renders and accepts input, but the cluster's
-`gpu_keeper` process intermittently re-claims the GPUs, causing a SIGSEGV at
-startup or during play (Vulkan device loss). This is an environment limitation,
-not a game defect; the complete playthrough acceptance still requires a
-stable display machine.
-
-**Defects found and fixed only by rendering the package:**
-
-- `FText::FromStringTable` was given the package path; UE registers string
-  tables under the **object** path (`/Game/.../ST_Game.ST_Game`). Every key
-  resolved to `<MISSING STRING TABLE ENTRY>` in the package until the id was
-  corrected (`Qinglan.Localization.StringTableRuntimeKeys` now guards it).
-- The imported Quaternius rigs are ~5.26 m tall against a 1.76 m capsule,
-  putting the camera inside the mesh; the player/enemy mesh scale is now
-  normalized to the capsule with feet re-seated on the capsule base.
-- The HUD barrier label substituted named placeholders incorrectly for the
-  plain-string runtime translation source; a manual named-format helper now
-  works for both table and service sources, and skill slots have readable
-  fallbacks and wider layout slots.
-- The generated `ST_Game`/`DT_Localization` could silently keep a stale key
-  set when regenerating over existing packages; the regeneration script now
-  deletes the generated `Data` tree first.
-- Bootstrap anchors spawn with an engine uniqueness suffix (`hub.bamboo_gate_0`),
-  so interaction ids and exact-key lookups missed every authored anchor; the
-  spawner now strips the numeric suffix (caught by the real-map functional
-  test `Qinglan.Content.HubMapInteractionSpawner`).
-
-**Packaged headless boot:** launching the Shipping client with `-nullrhi` in
-this container aborts/wedges in platform audio/display initialization (no
-sound card, no display); it is not evidence of a packaged-game defect. Offline
-packaged launch acceptance still requires a display-capable machine.
-
-Build entry: `bash tools/build/build-game.sh` (portable; `QINGLAN_ENGINE_ROOT`
-parameterizes the engine checkout). Content regeneration:
-`bash tools/build/regenerate-content.sh`.
-
-## 1. Historical results (2026-10-13) — retained for provenance, not current
-
-Date: 2026-10-13 · Engine: UE 5.8.3 (source build) · Platform: Linux (Ubuntu 22.04, Xeon Gold 6530, RTX 4090 x2, driver 570.195)
-
-| Target | Config | Result |
-|---|---|---|
-| QinglanAscensionEditor (Linux) | Development | ✅ compiles + links (runtime + editor modules, zero errors) |
-
-Build entry at that time: `bash /inspire/hdd/project/qianghuaxuexi/s26044/build-game.sh` (an uncommitted private script; superseded by `tools/build/build-game.sh`).
-
-Notable fixes required to reach green (recorded for posterity): ~40 UE 5.8 API
-compatibility corrections (removed/renamed engine APIs, TObjectPtr map access,
-TDereferenceWrapper sort predicates, TCheckedFormatString literals, UCommandlet
-members), duplicate-symbol and unity-collision cleanups from the parallel module
-pass, and missing module links (UMG runtime, InputCore editor).
-
-## 2. Historical automation suite — 12/12 (2026-10-13; current suite is 53 cases)
-
-Run:
-```bash
-UnrealEditor-Cmd QinglanAscension.uproject -ExecCmds="Automation RunTests Qinglan" \
-  -unattended -nullrhi -TestExit="Automation Test Queue Empty"
+```sh
+bash tools/build/build-game.sh
+bash tools/build/regenerate-content.sh
+# automation (70 cases)
+UnrealEditor-Cmd QinglanAscension.uproject \
+  -ExecCmds="Automation RunTests Qinglan" -unattended -nop4 -nosplash \
+  -nullrhi -TestExit="Automation Test Queue Empty"
+# functional journeys
+QINGLAN_RUN_CAMPAIGN=1 UnrealEditor-Cmd QinglanAscension.uproject \
+  -ExecCmds="Automation RunTests Qinglan.Campaign.NewProfileMainJourney" ...
+bash tools/build/package-game.sh
 ```
 
-| Test | Area | Covers |
-|---|---|---|
-| Qinglan.Combat.DamageMath | combat | raw→final damage formula, defense floor (docs/02 §5) |
-| Qinglan.Combat.HitKeyDedupe | combat | one damage per victim per swing/cast id |
-| Qinglan.Combat.ConductSingleApplication | elements | Conduct reaction applies once per wet window |
-| Qinglan.Combat.BurnThreeTickRefresh | elements | Burn 3-tick refresh semantics (docs/02 §7) |
-| Qinglan.Combat.BarrierReplaceAbsorb | combat | stronger barrier replaces, absorbs before health |
-| Qinglan.Economy.BankingMultipliers | economy | 100/70/50 % banking, per-stack floor |
-| Qinglan.Narrative.EndingGating | narrative | three-ending availability from narrative state |
-| Qinglan.Narrative.EndingRulesJsonDrift | narrative | hardcoded ending rules == data/story/main-late.json CH06_S04 payloads |
-| Qinglan.Persistence.SaveChecksumRoundtrip | save | checksummed container roundtrip, corrupt + future-schema rejection |
-| Qinglan.Persistence.TransactionIdempotency | save | grant/spend replay never double-applies |
-| Qinglan.Progression.RankCostsAndBreakthroughGates | progression | rank costs, boss/trial gates, breakthrough resets |
-| Qinglan.Blessings.Exclusion | run | one-stack-cap blessings never re-offered |
+Rendered recipe (Xvfb + NVIDIA Vulkan ICD, packaged Shipping client,
+`-QinglanTrial=<seconds>` for the arena, `-QinglanShot=<id>` for a single
+screenshot): see `docs/dev/build-and-run.md`.
 
-Bug found and fixed by the suite itself: the save container writer hashed only
-the body while the parser verified header+body — every verified save failed its
-own checksum (Qinglan.Persistence.SaveChecksumRoundtrip).
+## 2. Deferred or environment-blocked items
 
-## 3. Content pipeline (headless commandlets) ✅
-
-All five commandlets run clean and idempotently (`docs/dev/build-and-run.md`):
-
-1. QinglanDataImportCommandlet — 30 main scenes (CH00–CH07), 24 side stages
-   (SQ01–SQ08), 24 records, 40 barks, 8 techniques, 2 realms, ST_Game (97 keys
-   per locale).
-2. QinglanContentBootstrapCommandlet — 15 input assets, 24 materials (21
-   PolyHaven surface sets + 3 VFX cue materials), 4 maps.
-3. QinglanMeshImportCommandlet — 6 skeletal characters + ~45 static
-   meshes/weapons/nature from CC0 Quaternius packs.
-4. QinglanAnimBootstrapCommandlet — 8 combat montages with hit-window
-   notifies, paired into all 8 technique assets.
-5. QinglanUIBootstrapCommandlet — 4 widget blueprints (HUD/Dialogue/Journal/Ending).
-
-## 4. Headless gameplay smoke (-nullrhi) ✅
-
-Boot via GameDefaultMap (L_Hub):
-
-- `Hub mode active (sanctuary)` — game mode boots
-- First launch: profile slot 0 created; `SaveNow: slot 0 sequence 1 committed`
-- Relaunch: `Continuing from profile slot 0`; `sequence N+1 committed` with
-  backup rotation (.bak1/.bak2) — full save lifecycle verified on disk
-  (`game/Saved/SaveGames/`)
-- Story registry resolves (StaticLoadObject path)
-
-Functional story-branch/save coverage additionally comes from the automation
-suite (ending gating + JSON drift guard + save roundtrip); interactive
-playthrough needs a display, see §6.
-
-## 5. Bilingual check ✅
-
-- `localization/en-US.json` / `zh-Hans.json`: 97/97 key parity; all story
-  chapter/side-quest/lore/bark files verified key-identical across locales
-  (audit 2026-10-13), first-launch locale auto-pick implemented
-  (zh-Hans when OS language matches).
-
-## 6. GPU rendering on this container (2026-10-14 status)
-
-Achieved from inside the container: installed the Vulkan loader, ran a
-headless Xorg on the idle 4090 (NVIDIA screen up at 1280x720), enumerated the
-GPU through the proprietary Vulkan driver (vulkaninfo full pass), and brought
-the game up on the Vulkan RHI — UE created a live swapchain on the 4090
-(AcquireNextImage cycle in the editor -game log). Fixes that came out of this
-and ship in the repo: `r.WarnOfBadDrivers=0` (the denylisted-driver modal
-dialog blocks forever under no window manager), XDG_RUNTIME_DIR ownership
-rule, zen-store recovery steps (docs/dev/build-and-run.md).
-
-Blocked at host level, not fixable in-container: mid-session the cluster
-re-assigned the GPUs and re-injected driver 570.124.06 userspace, zeroing the
-nvidia X driver files (`nvidia_drv.so` 0 bytes everywhere; Ubuntu archives
-ship doc-only stubs for NVIDIA blobs, and downloads.download.nvidia.com
-returns 403 through the cluster proxy). A full gameplay session with frame
-capture therefore needs either a host driver re-injection with a consistent
-userspace (rerun the steps in build-and-run.md — everything else is in place)
-or a display machine.
-
-Still pending on target machines:
-
-- **GPU frame-time pass** (docs/06 §5 budgets: 16.6 ms @ Medium) — the
-  swapchain ran; sustained frame stats need the stable-display session above.
-- **Windows DX12 / Apple Silicon Metal** builds compile-configured
-  (DefaultEngine.ini sets D3D12/Metal/Vulkan per platform) but are **not built
-  or validated** on this machine — pending target-platform verification per
-  docs/09.
-- Interactive controller/keyboard play (Enhanced Input mappings authored and
-  assets generated; not drivable headless).
-
-## 7. Known deferred items
-
-- Benchmark frontend map (docs/06 §4) and a boot-time slot-select frontend are
-  not authored; first launch auto-creates/loads a profile (the pause menu's
-  Profile screen can switch slots). This is the remaining AUD-01/02
-  acceptance gap.
-- Equipped-talisman selection UI — slots seed from charged talismans in
-  catalog order (documented in QinglanTalismanComponent).
-- Niagara cue systems are now authored (`NS_Impact`/`NS_Telegraph`/`NS_Cast`,
-  AUD-42) and the cue component prefers them with placeholder fallbacks; the
-  stock emitter templates expose no `User.Color`/`User.SpriteSize`, so element
-  tinting and size scaling stay at template defaults.
-- Enemy presentation paths, per-rig slot graphs, and hit-react montages landed
-  in the 2026-10-19 wave; rendered QA on target graphics backends is still
-  pending (GPU environment).
-- Herbal Knowledge healing percent folds into talisman heals and regen; the
+- **Full interactive playthrough** (CH00–CH07, both realms/trials, every ending
+  branch, defeat/retreat/retry, both input devices): functional journeys pass
+  in automation, but a complete human-driven run on a stable display machine is
+  still required (AUD-01/02/58).
+- **Controller**: the kernel exposes uinput, but opening `/dev/uinput` returns
+  `EPERM` (container device cgroup) and there is no `/dev/input`. The mapping
+  contract is asserted by `Qinglan.Input.BothDeviceMappingContract`; a physical
+  controller run is still needed (AUD-58).
+- **Process kills at every promised boundary**: the hub boundary is exercised
+  with a real `SIGKILL`; the realm/reward/exit/trial-prep boundaries are covered
+  by `ProcessRestartResume` and fault-injection tests but not yet interactively.
+- **Target graphics backends**: only the Linux Vulkan backend has rendered
+  evidence; DX12/Metal captures require target builds/devices (AUD-42/AUD-59).
+- **Hand art/UV pass** for the Quaternius palette skin (binding is verified; the
+  visual art remains open, AUD-55).
+- **Target-hardware performance capture**: `-csvprofile`/`-fpschart` packaged
+  runs abort in the cluster GPU-contention `MallocCrash`; editor `-game` aborts
+  with `TextLocalizationManager.cpp:629`. Needs a stable display machine
+  (AUD-55).
+- **Benchmark frontend map** (docs/06 §4) not authored.
+- **Equipped-talisman selection UI** — slots seed from charged talismans in
+  catalog order (`QinglanTalismanComponent`).
+- **Niagara user parameters**: stock emitter templates expose no
+  `User.Color`/`User.SpriteSize`, so element tinting/size stay at template
+  defaults.
+- **Herbal Knowledge** healing percent folds into talisman heals/regen; the
   projectile heal-tick keeps its FIXME-CONTRACT note.
-- Audio pass (2026-10-14): 4 music loops (Hub/Explore/Combat/Boss, crossfade
-  state machine) + 4 combat SFX imported and wired; mix polish pending real
-  speakers.
+- **Audio mix polish** pending listening QA on real speakers (4 project-original
+  loops + 4 SFX are imported and wired).
 
-### Playable-loop layer (2026-10-14)
+## 3. Historical provenance
 
-The "is it actually complete" audit found the systems all present and tested,
-but the glue that lets a player reach them was missing (interact stub, no HUD
-creation, no scene/travel/room/death callers, no Wet source, no boss proof
-banking, no objective completion callers). All landed and verified
-(12/12 suite, hub spawns 25 interactables, realm 11 + director):
-
-- interaction dispatch at every bootstrap anchor; synthesized gates and room
-  doors; blessing draft at doors; cultivation shrine purchases/breakthroughs;
-  workbench relic/passive shop; defeat banking + hub return
-- objective-proof dispatcher (14 choice-free scenes previously never
-  completed: the campaign stalled at CH00_S02)
-- remaining presentation gaps: WBP_HUD/WBP_Dialogue widget *assets* are
-  bootstrapped shells, so text currently renders through on-screen messages
-  (C++ setters + relay are in place for authored UMG fronts); trial
-  waves/timers (CH03_S02/CH06_S02) stand in as anchor re-press proofs until
-  the trial-storm system exists; five scaffold notices use NSLOCTEXT pending
-  string-table keys.
+- 2026-10-13: first green Linux editor build and a 12-case automation suite.
+- 2026-10-14: playable-loop layer landed (interaction dispatch at every anchor,
+  HUD creation, scene/travel/room/death callers, objective-proof dispatcher,
+  defeat banking). That work is included in the current 70-case suite.
+- 2026-10-14: completion audit opened `docs/dev/completion-audit-todo.md`.
+- 2026-10-19/20: repair waves (build/content repairs, narrative/persistence/
+  trials/combat/UI, content regeneration, Niagara/ABP/sockets, cold-start
+  frontend, rendered QA and packaging). Per-wave commits are in `git log`
+  (`1c7e3a0`, `ed02e88`, `16b1a7b`, `f481f03`, `f438ee1`, `40213bd`,
+  `36e16c5`, `73d9882`, `1c61a3c`, `b0088cf`, `96a8b7d`, `7aea4d8`,
+  `8a0f72d`, `885da66`).

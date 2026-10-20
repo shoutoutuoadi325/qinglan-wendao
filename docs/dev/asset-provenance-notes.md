@@ -12,7 +12,7 @@ Rows were derived from what the content pipeline actually consumes:
 
 - `QinglanMeshImport.cpp` — five Quaternius packs (raw root
   `assets-raw/quaternius/extracted`) imported to `/Game/Qinglan/{Characters,Weapons,Environments}`.
-- `QinglanContentBootstrap.cpp` — 20 PolyHaven surface sets imported to
+- `QinglanContentBootstrap.cpp` — 21 PolyHaven surface sets imported to
   `/Game/Qinglan/Materials` (MIC) + `/Game/Qinglan/Textures` (import target).
 - `assets-raw/polyhaven/hdris` — 8 HDRIs acquired by the fetch script but not
   wired to any commandlet yet; recorded anyway so the acquisition is tracked.
@@ -102,12 +102,13 @@ runtime paths in `QinglanAudioSubsystem.cpp` need no change.
 
 The previous files under `assets-raw/audio/music/` and `assets-raw/audio/sfx/`
 (including the two `.ogg` variants) are **retained on disk as audit evidence
-but are no longer imported or shipped**. The committed `SW_*` uassets still
-contain the pre-replacement audio until the next regeneration; the bootstrap
-now compares the stored `AssetImportData` source path and re-imports when it
-differs, instead of reusing a stale import. After regeneration, remaining
-acceptance is human listening QA (loop seams, relative mix, SFX transients);
-no provenance gate remains.
+but are no longer imported or shipped**. The committed `SW_*` uassets were
+re-imported from the project-original sources in the 2026-10-19 regeneration
+(`QinglanAudioBootstrap`; see
+`docs/dev/evidence/content-regeneration-2026-10-19-niagara-abp.log`), and the
+bootstrap compares the stored `AssetImportData` source path to re-import when
+it differs. Remaining acceptance is human listening QA (loop seams, relative
+mix, SFX transients); no provenance gate remains.
 
 ## Non-rows (for future auditors)
 

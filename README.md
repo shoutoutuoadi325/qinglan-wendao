@@ -2,7 +2,7 @@
 
 A completely free, offline, single-player **3D xianxia action game** for Windows and Apple Silicon macOS. Explore mountain sanctuaries, master the Five Elements, and survive Heavenly Tribulations with grounded materials and cinematic, scalable spell effects.
 
-**Project status (2026-10-19):** in active development on Linux (UE 5.8 source build). The `game/` Unreal project contains C++ implementations for combat, abilities, AI, progression, persistence, narrative, trials, UI, and a headless content pipeline (maps, materials, characters, montages, string tables). The last recorded Linux Development editor build succeeded and the automation suite ran 64/64 green (evidence: `docs/dev/evidence/`). **These results establish compilation and scripted subsystem behavior only**; they do not establish a complete playable campaign. Windows DX12 and Apple Silicon Metal builds, on-device play, rendering, and packaging acceptance remain unverified here. See [docs/dev/build-and-run.md](docs/dev/build-and-run.md) and [docs/dev/test-report.md](docs/dev/test-report.md) for commands and the latest recorded evidence.
+**Project status (2026-10-20):** in active development on Linux (UE 5.8 source build). The `game/` Unreal project contains C++ implementations for combat, abilities, AI, progression, persistence, narrative, trials, UI, and a headless content pipeline (maps, materials, characters, montages, string tables, Niagara cue systems). Current recorded results: editor build green; automation **70/70**; functional new-profile journeys **30/30 main scenes** and **24/24 side stages**; clean content regeneration `rc_all=0`; Linux Shipping package `rc=0` with a verified IoStore inventory; rendered packaged boots in English, Simplified Chinese, and Low + low-flash; packaged keyboard/mouse movement, cold-start slot selection, and a real `kill -9`/relaunch at the hub boundary. **These results establish compilation, scripted subsystem behavior, packaging, and targeted rendered evidence; they do not establish a complete interactive playthrough.** Windows DX12 and Apple Silicon Metal builds/devices, a full keyboard/gamepad playthrough, and target-hardware performance captures remain open. See [docs/dev/build-and-run.md](docs/dev/build-and-run.md), [docs/dev/test-report.md](docs/dev/test-report.md), and the [owner runbook](docs/dev/remaining-acceptance-runbook.md).
 
 **Completion audit (2026-10-14):** development is not complete. See the [reviewed repair TODO and acceptance gates](docs/dev/completion-audit-todo.md) for confirmed integration defects, unfinished player flows, and required verification; the earlier build/test report does not establish campaign or release readiness.
 
@@ -49,7 +49,7 @@ A completely free, offline, single-player **3D xianxia action game** for Windows
 
 ## Complete narrative package
 
-Read the [narrative index](docs/story/README.md) for the complete chapter scripts, side stories, three endings, bilingual reading editions, and implementation/QA contracts. The [story bible](docs/story-bible.md) defines characters, chronology, world rules, and the central mystery. The story registry and scene playback code exist and are imported from these sources, but the full campaign journey has not been acceptance-tested end to end; treat every gameplay completion claim as requiring the evidence gates in the audit TODO.
+Read the [narrative index](docs/story/README.md) for the complete chapter scripts, side stories, three endings, bilingual reading editions, and implementation/QA contracts. The [story bible](docs/story-bible.md) defines characters, chronology, world rules, and the central mystery. The story registry and scene playback code are imported from these sources; functional new-profile journeys now pass all 30 main scenes and 24 side stages in automation. A complete interactive/rendered playthrough on a stable display machine is still required by the audit gates.
 
 ## Repository usage
 
@@ -61,7 +61,7 @@ python3 tools/validate_repository.py
 
 [Example data](data/examples/README.md) illustrates the intended runtime contracts. It is not a complete production database. The validator checks local Markdown links, development-language policy, bilingual key parity, examples, cross-references, and forbidden Xbox identity fields in the Windows packaging template.
 
-Gameplay source is under active repair (see the audit TODO). Windows/macOS feasibility, rendered acceptance, and release evidence remain open. See [the development guide](CONTRIBUTING.md) for setup, branching, asset handling, and review requirements.
+Gameplay source has completed the repair waves recorded in the audit TODO. Remaining acceptance work is environment-bound (full interactive playthrough, controller, DX12/Metal, hand art, target-hardware performance, Win64/macOS builds); see the [owner runbook](docs/dev/remaining-acceptance-runbook.md). See [the development guide](CONTRIBUTING.md) for setup, branching, asset handling, and review requirements.
 
 ## Rights and release status
 

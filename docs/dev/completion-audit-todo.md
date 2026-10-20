@@ -4,6 +4,13 @@ Audit date: 2026-10-14 (Asia/Shanghai). Reviewed branch: `develop`.
 Reviewed revision: `e94be12ee39826a6fba73f57534b06bbf0c73db8`, matching
 `origin/develop` after fetch. The working tree was clean before this review.
 
+> **Reading this document (2026-10-20):** the repair log, the 2026-10-15
+> handoff, and the per-item finding text below describe the state *before* the
+> repair waves and are retained as provenance. The authoritative current
+> disposition for all 60 IDs is the **Repair dispositions** table near the end
+> of this file; read that first. Environment-blocked acceptance steps are in
+> `docs/dev/remaining-acceptance-runbook.md`.
+
 ## Repair progress log
 
 - 2026-10-15: Repair work started on branch `fix/audit-repairs` (off `develop`
@@ -201,7 +208,7 @@ The current implementation does not meet the version 1.0 acceptance contract in
 
 This document is a repair backlog for the development agent. The original audit
 changed no game code; subsequent source work is recorded in the handoff above. Every finding below needs a recorded disposition and its acceptance checks;
-compiling modules or passing the existing 12 tests does not close these items.
+compiling modules or passing the automation suite does not close these items.
 
 ## Review scope and evidence limits
 
@@ -1184,9 +1191,10 @@ meshes are not used for a finished environment pass. No project Texture2D source
 assets are present under `game/Content`, although the master at 233–242 uses
 texture parameters and the surface importer at 531–548 intends to create them.
 The committed small material instances alone do not deliver the intended
-PolyHaven texture sets. No Niagara systems are committed, and the cue wiring is
-also missing (AUD-42). This does not satisfy the promised realistic 3D surfaces
-and scalable hero-effect presentation.
+PolyHaven texture sets. No Niagara systems were committed at audit time
+(pre-repair finding; `NS_Impact`/`NS_Telegraph`/`NS_Cast` are now authored — see
+the AUD-42 disposition). This did not satisfy the promised realistic 3D
+surfaces and scalable hero-effect presentation.
 
 **Acceptance:** fresh-process shader/material validation with no missing texture
 or default-error materials; rendered walkthroughs of the hub, both realms,
@@ -1354,16 +1362,16 @@ Auxiliary: `ac56e83` (AUD-56 ledger), `368445d` (packaging evidence). Later
 waves: `f438ee1` (player menus/journal, textured surfaces, scene dressing,
 53 tests), `40213bd` (authored Niagara cue systems, Human weapon/cast sockets,
 66 tests), `36e16c5` (enemy presentation object paths, per-rig ABPs, hit-react
-montages, 67 tests). Final wave 36 verification: clean content regeneration
-`rc_all=0`, 67/67 automation, main journey 30/30, side quests 24/24, and a
-Linux Shipping package with `NS_*`/`ABP_*` inventory verified. Wave 37 added
-the cold-start profile frontend (no silent slot-0 creation), verified with
-real keyboard input in the packaged build, and rebuilt the regenerated
-967-key string table. Packaging evidence:
-`docs/dev/evidence/package-linux-2026-10-19-wave37.log` and
-`packaging/evidence/linux-shipping-2026-10-20-wave44.txt` (earlier:
-`package-linux-2026-10-19-wave36.log`, `linux-shipping-2026-10-19-wave36.txt`,
-`linux-shipping-2026-10-19.txt`).
+montages, 67 tests), `73d9882` (clean regeneration + Shipping inventory),
+`1c61a3c` (cold-start profile frontend), `b0088cf` (trial hazard presenter +
+QA capture flags), `96a8b7d` (impact SFX, hero-skin binding test), `7aea4d8`
+(map collision contract), `8a0f72d` (keyboard attack J), `885da66`
+(AUD-44 fixed). Final verification: clean content regeneration `rc_all=0`,
+**70/70** automation, main journey 30/30, side quests 24/24, and a Linux
+Shipping package with `NS_*`/`ABP_*` inventory verified. The regenerated
+string table carries 966 keys (199 bilingual JSON keys). Packaging evidence:
+`docs/dev/evidence/package-linux-2026-10-20-wave44.log` and
+`packaging/evidence/linux-shipping-2026-10-20-wave44.txt`.
 
 | AUD | Disposition | Implementation and coverage | Remaining acceptance |
 | --- | --- | --- | --- |
@@ -1419,13 +1427,13 @@ real keyboard input in the packaged build, and rebuilt the regenerated
 | AUD-50 | Fixed | `ST_Game` regenerated and asserted at import time (966 keys written; failure if the table truncates); the object-path table id bug that made every packaged lookup return the missing marker is fixed and covered by `Qinglan.Localization.StringTableRuntimeKeys`. | Fresh-process asset-load QA (now covered by the rendered packaged boot). |
 | AUD-51 | Fixed (source+tests) | Native pause, profile-slot, settings/accessibility, equipment/talisman, journal, shop/offer, and outcome screens with keyboard/controller/mouse navigation; HUD shows objective, talisman charges, trial time, barks. Tests: `JournalOpenCloseReopen`, `MenuStateMachine`, `OfferPersistence`. Rendered hub HUD confirmed in the packaged Shipping build (`docs/dev/evidence/rendered/`). | Full menu interaction QA on a display machine; outcome summary is limited to returned loot until Run exposes a settlement summary. |
 | AUD-52 | Fixed (source+tests) | Responsive native dialogue/record widgets with real font-size settings (not render scale), wrapping, scrolling, source-kind labels, record close/reopen. Test: `JournalOpenCloseReopen`. First rendered HUD pass shows correctly spaced skill slots and resolved labels. | Text-scale/720p/Retina/CJK visual QA remains a rendered acceptance step. |
-| AUD-53 | Fixed (Linux) | Packaging settings corrected to the config=Game section: all runtime-string content directories and all four maps cook. Package inventory verified in the IoStore table of contents (maps, DT_Localization, ST_Game, registry, widgets, montages, character/monster meshes, audio, materials); `package-game.sh` rc=0 and mandatory-output checks fixed. Evidence: `packaging/evidence/linux-shipping-2026-10-19.txt`. | Offline launch on a display machine; Windows/macOS cook inventory. |
+| AUD-53 | Fixed (Linux) | Packaging settings corrected to the config=Game section: all runtime-string content directories and all four maps cook. Package inventory verified in the IoStore table of contents (maps, DT_Localization, ST_Game, registry, widgets, montages, character/monster meshes, audio, materials); `package-game.sh` rc=0 and mandatory-output checks fixed. Evidence: `packaging/evidence/linux-shipping-2026-10-20-wave44.txt`. | Offline launch on a display machine; Windows/macOS cook inventory. |
 | AUD-54 | Fixed (source) | Correct dynamic-resolution CVar/user setting; GI/reflection/Nanite policy applied per preset; capability reasons. | Measured rendering on supported backends. |
 | AUD-55 | Partially fixed | 81 Poly Haven Texture2D assets imported with correct sRGB/compression; textured + solid MICs per surface set; master material with tiling/samplers; hub/trial surfaces textured; deterministic collision-free Quaternius nature dressing on all four maps; sky atmosphere + atmosphere-driven sun added to every map; hero skin texture imported and bound through `MIC_HumanCharacter` (the `BaseColor` parameter resolves to `T_Human_Clothed`; `Qinglan.Content.HeroSkinBinding`). Test: `TextureSetContract`. Rendered packaged screenshots show the textured world and a lit blue sky (`docs/dev/evidence/rendered/`), including a Low-preset + low-flash + `zh-Hans` boot (`hub-packaged-shipping-low-lowflash-zh-2026-10-19.png`). Hero cue effects now use the authored Niagara systems. | Hand art/UV mapping for the palette skin and target-hardware performance captures remain open (performance numbers need a stable display machine). |
 | AUD-56 | Fixed (source+ledger) | Ledger populated with 42 records. The eight untraceable audio sources were replaced 2026-10-19 with project-original WAVs (generator script in `assets-raw/audio/original/`), the bootstrap imports the new `original/` sources under unchanged `SW_*` paths, `regenerate-content.sh` validates the eight sources and imported assets, and `Qinglan.Content.AudioSourceContract` pins the contract. No unknown or pending ledger rows remain. | Regeneration/cook re-imports the new audio into the committed `SW_*` uassets; human listening QA (loop seams, mix, SFX transients). |
 | AUD-57 | Fixed | Portable build/regenerate scripts, engine revision lock, nonzero on missing inputs, mandatory-output validation, regeneration rc_all=0. | Second-machine reproduction. |
 | AUD-58 | Partially fixed | 70 automation cases plus three real-file save fault-injection specs (`SaveBackupRecoveryChain`, `SaveRotationFaultInjection`, `SaveTruncatedTempRejected`) cover the repaired persistence/narrative/trial/combat/localization/UI/content paths. Packaged interactive evidence now includes keyboard menu/slot selection, WASD movement, mouse-look camera rotation, a real SIGKILL + relaunch at the hub boundary, Chinese/CJK and Low/low-flash boots, and Low/low-flash trial strike outlines (`docs/dev/evidence/rendered/interactive-*`, `kill-restart-*`, `profile-frontend-*`, `trial-*`). Both device classes are asserted at the mapping-asset level by `Qinglan.Input.BothDeviceMappingContract` (keyboard/mouse + gamepad sticks, face/shoulder buttons, triggers, d-pad). | Complete keyboard playthrough of the campaign; controller playthrough (the kernel has uinput, but `/dev/uinput` cannot be opened even by root — EPERM from the container device cgroup — and there is no `/dev/input`); process-kill at every boundary. |
-| AUD-59 | Blocked | Linux Shipping package rebuilt after the repair waves (rc=0) with a verified IoStore inventory (including the Niagara cue systems and per-rig slot graphs) and artifact hashes: `packaging/evidence/linux-shipping-2026-10-20-wave44.txt` (supersedes `linux-shipping-2026-10-19.txt`). Direct cross-build probes both fail in UBT with "Platform Win64/Mac is not a valid platform to build. SDK validation failed" (`docs/dev/evidence/cross-build-win64-2026-10-20.log`, `cross-build-mac-2026-10-20.log`). | Windows DX12 and Apple Silicon Metal builds/devices are unavailable in this environment; owner action required. |
+| AUD-59 | Blocked | Linux Shipping package rebuilt after the repair waves (rc=0) with a verified IoStore inventory (including the Niagara cue systems and per-rig slot graphs) and artifact hashes: `packaging/evidence/linux-shipping-2026-10-20-wave44.txt`. Direct cross-build probes both fail in UBT with "Platform Win64/Mac is not a valid platform to build. SDK validation failed" (`docs/dev/evidence/cross-build-win64-2026-10-20.log`, `cross-build-mac-2026-10-20.log`). | Windows DX12 and Apple Silicon Metal builds/devices are unavailable in this environment; owner action required. |
 | AUD-60 | Fixed | README/CONTRIBUTING/test-report/build guide rewritten around recorded evidence with historical results labeled. | — |
 
 ### Remaining acceptance gates (not satisfied by this repair work)

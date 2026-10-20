@@ -1475,6 +1475,9 @@ reproduce or waive them:
   client abort in the cluster's GPU contention failure (SIGSEGV →
   `MallocCrash`, often within 30–65 s), so no stable frame-time capture can be
   produced here. Short rendered runs (boot, frontend, trial wave 2) do succeed.
+  The editor `-game` fallback (for `stat unit`) crashes at startup with
+  `Assertion failed: !InLocalizationTargetPath.IsEmpty()`
+  (TextLocalizationManager.cpp:629) in this environment
 - **Interactive scope actually verified**: keyboard/mouse movement and camera,
   menu/slot selection, hub-boundary `kill -9` + relaunch, arena trial start
   with Low + low-flash strike outlines. A complete CH00–CH07 keyboard/controller

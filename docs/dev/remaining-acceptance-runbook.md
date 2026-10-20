@@ -6,6 +6,24 @@ action, and the evidence to record. Update
 `docs/dev/completion-audit-todo.md` only after the evidence exists — the
 document's closure rule forbids ticking an item without it.
 
+## Before you start (display machine)
+
+1. Check out **`fix/audit-repairs`** (all repairs live there; it is not merged
+   into `main` yet) and confirm `git status` is clean.
+2. Set up the engine beside the repo and build/test with
+   [build-and-run.md](build-and-run.md): `bash tools/build/build-game.sh`,
+   then `bash tools/build/regenerate-content.sh`.
+3. Re-run the baseline before changing anything: the 70-case suite, both
+   campaign journeys (`QINGLAN_RUN_CAMPAIGN=1`), and
+   `bash tools/build/package-game.sh`. Expected results and evidence paths are
+   in [test-report.md](test-report.md) §0.
+4. Then work through sections 1–5 below. Each closes specific AUD IDs in the
+   disposition table of
+   [completion-audit-todo.md](completion-audit-todo.md).
+
+A physical gamepad is required for the controller half of AUD-58; a Windows
+machine/SDK for DX12 + Win64, and a Mac with Xcode/Metal for Apple Silicon.
+
 Environment blockers already measured in the container (2026-10-20):
 
 - Controller: `/dev/uinput` exists but opening it returns `EPERM` (container

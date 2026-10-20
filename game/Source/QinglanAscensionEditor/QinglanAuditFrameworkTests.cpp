@@ -7,6 +7,10 @@
 #include "Engine/Texture2D.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "InputMappingContext.h"
+#include "FileHelpers.h"
+#include "CollisionQueryParams.h"
+#include "GameFramework/PlayerStart.h"
+#include "Engine/StaticMeshActor.h"
 #include "NiagaraSystem.h"
 #include "Internationalization/StringTable.h"
 #include "Internationalization/StringTableCore.h"
@@ -2743,6 +2747,61 @@ bool FQinglanAuditHeroSkinBinding::RunTest(const FString& Parameters)
 		FHashedMaterialParameterInfo(FName(TEXT("BaseColor"))), BaseColor);
 	TestTrue(TEXT("MIC binds a BaseColor texture"), bFound);
 	TestEqual(TEXT("BaseColor is the imported clothed-skin palette"), BaseColor, static_cast<UTexture*>(Skin));
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// Rendered-gate support: every regenerated map must load, carry a reachable
+// player start with floor collision under it, and be dressed with static
+// meshes. (The AI is direct-movement by design, so there is no recast navmesh
+// to assert; walkable floor collision is the navigation surface.)
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditMapCollisionContract,
+	"Qinglan.Content.MapCollisionContract", AuditFrameworkTestFlags)
+
+bool FQinglanAuditMapCollisionContract::RunTest(const FString& Parameters)
+{
+	const TCHAR* Maps[] = {
+		TEXT("/Game/Qinglan/Maps/L_Hub"),
+		TEXT("/Game/Qinglan/Maps/L_BambooHollow"),
+		TEXT("/Game/Qinglan/Maps/L_AshenVerge"),
+		TEXT("/Game/Qinglan/Maps/L_TribulationArena"),
+	};
+	for (const TCHAR* MapPath : Maps)
+	{
+		UWorld* MapWorld = UEditorLoadingAndSavingUtils::LoadMap(MapPath);
+		const FString Label = FPackageName::GetShortName(MapPath);
+		if (!TestNotNull(*FString::Printf(TEXT("%s loads"), *Label), MapWorld))
+		{
+			continue;
+		}
+
+		int32 StaticMeshes = 0;
+		for (TActorIterator<AStaticMeshActor> It(MapWorld); It; ++It)
+		{
+			++StaticMeshes;
+		}
+		TestTrue(*FString::Printf(TEXT("%s is dressed with static meshes"), *Label), StaticMeshes > 0);
+
+		int32 Starts = 0;
+		int32 WalkableFloors = 0;
+		for (TActorIterator<APlayerStart> It(MapWorld); It; ++It)
+		{
+			++Starts;
+			const FVector From = It->GetActorLocation() + FVector(0.f, 0.f, 80.f);
+			const FVector To = From - FVector(0.f, 0.f, 2000.f);
+			FHitResult Hit;
+			FCollisionQueryParams Params(SCENE_QUERY_STAT(QinglanMapCollisionTest), /*bTraceComplex=*/false, *It);
+			if (MapWorld->LineTraceSingleByChannel(Hit, From, To, ECC_Visibility, Params)
+				&& Hit.ImpactNormal.Z >= 0.5f)
+			{
+				++WalkableFloors;
+			}
+		}
+		TestTrue(*FString::Printf(TEXT("%s has a player start"), *Label), Starts > 0);
+		TestEqual(*FString::Printf(TEXT("%s every player start stands on walkable floor"), *Label),
+			WalkableFloors, Starts);
+	}
 	return true;
 }
 

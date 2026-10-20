@@ -6,6 +6,7 @@
 #include "Engine/SkeletalMeshSocket.h"
 #include "Engine/Texture2D.h"
 #include "Materials/MaterialInstanceConstant.h"
+#include "InputMappingContext.h"
 #include "NiagaraSystem.h"
 #include "Internationalization/StringTable.h"
 #include "Internationalization/StringTableCore.h"
@@ -2742,6 +2743,60 @@ bool FQinglanAuditHeroSkinBinding::RunTest(const FString& Parameters)
 		FHashedMaterialParameterInfo(FName(TEXT("BaseColor"))), BaseColor);
 	TestTrue(TEXT("MIC binds a BaseColor texture"), bFound);
 	TestEqual(TEXT("BaseColor is the imported clothed-skin palette"), BaseColor, static_cast<UTexture*>(Skin));
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// AUD-58: both device classes are authored in the same mapping context. The
+// container cannot expose an input device (no /dev/input; uinput open is
+// denied by its device cgroup), so this asserts the mapping contract that the
+// packaged input smoke test exercises for keyboard/mouse and that a physical
+// controller would consume.
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditBothDeviceMappingContract,
+	"Qinglan.Input.BothDeviceMappingContract", AuditFrameworkTestFlags)
+
+bool FQinglanAuditBothDeviceMappingContract::RunTest(const FString& Parameters)
+{
+	UInputMappingContext* IMC = LoadObject<UInputMappingContext>(nullptr,
+		TEXT("/Game/Qinglan/Input/IMC_Default"));
+	if (!TestNotNull(TEXT("IMC_Default loads"), IMC))
+	{
+		return false;
+	}
+	TSet<FKey> MappedKeys;
+	int32 MappingCount = 0;
+	IMC->ForEachKeyMapping([&MappedKeys, &MappingCount](const FEnhancedActionKeyMapping& Mapping)
+	{
+		MappedKeys.Add(Mapping.Key);
+		++MappingCount;
+	});
+	TestTrue(TEXT("mapping context is populated"), MappingCount > 20);
+
+	const FKey* KeyboardAndMouse[] = {
+		&EKeys::W, &EKeys::S, &EKeys::A, &EKeys::D,
+		&EKeys::E, &EKeys::SpaceBar, &EKeys::Escape,
+		&EKeys::LeftMouseButton, &EKeys::Mouse2D,
+	};
+	for (const FKey* Key : KeyboardAndMouse)
+	{
+		TestTrue(*FString::Printf(TEXT("keyboard/mouse key mapped: %s"), *Key->ToString()),
+			MappedKeys.Contains(*Key));
+	}
+
+	const FKey* GamepadKeys[] = {
+		&EKeys::Gamepad_Left2D, &EKeys::Gamepad_Right2D,
+		&EKeys::Gamepad_FaceButton_Bottom, &EKeys::Gamepad_FaceButton_Top,
+		&EKeys::Gamepad_FaceButton_Left, &EKeys::Gamepad_FaceButton_Right,
+		&EKeys::Gamepad_LeftShoulder, &EKeys::Gamepad_RightShoulder,
+		&EKeys::Gamepad_LeftTrigger, &EKeys::Gamepad_RightTrigger,
+		&EKeys::Gamepad_DPad_Up, &EKeys::Gamepad_DPad_Down,
+	};
+	for (const FKey* Key : GamepadKeys)
+	{
+		TestTrue(*FString::Printf(TEXT("gamepad key mapped: %s"), *Key->ToString()),
+			MappedKeys.Contains(*Key));
+	}
 	return true;
 }
 

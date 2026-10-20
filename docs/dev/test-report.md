@@ -3,12 +3,12 @@
 ## 0. Current evidence (2026-10-19) — supersedes the historical section below
 
 Environment: Linux (container, 64 physical cores), UE 5.8.3 source build, headless
-(`-nullrhi`), branch `fix/audit-repairs` at `6861276` (wave 37).
+(`-nullrhi`), branch `fix/audit-repairs` at `96a8b7d` (wave 40+; suite wave 42).
 
 | Item | Result | Evidence |
 |---|---|---|
 | Editor target build (Linux, Development, UHT + editor modules) | ✅ Succeeded | `docs/dev/evidence/build-2026-10-19-wave6.log` |
-| Automation suite `RunTests Qinglan` | ✅ 68 performed / 68 Success / 0 Fail | `docs/dev/evidence/automation-2026-10-19-wave41-68tests.log` |
+| Automation suite `RunTests Qinglan` | ✅ 69 performed / 69 Success / 0 Fail | `docs/dev/evidence/automation-2026-10-20-wave42-69tests.log` |
 | Clean content regeneration (`tools/build/regenerate-content.sh`) | ✅ rc_all=0 from a deleted `Data`/`UI`/montage state; Niagara systems, per-rig ABPs, hit-react montages, maps, tables, audio, textures all present | `docs/dev/evidence/content-regeneration-2026-10-19-niagara-abp.log` |
 | Planning validators | ✅ pass | `python3 tools/validate_repository.py`, `tools/validate_story.py` |
 | Linux Shipping package (UAT BuildCookRun) | ✅ rc=0; all four maps, DT_Localization, ST_Game, registry, widgets, montages, meshes, audio, materials, `NS_*` cue systems and `ABP_*` slot graphs in the IoStore inventory | `packaging/evidence/linux-shipping-2026-10-19-wave40.txt`, `docs/dev/evidence/package-linux-2026-10-19-wave40.log` |
@@ -23,7 +23,7 @@ Environment: Linux (container, 64 physical cores), UE 5.8.3 source build, headle
 | Functional new-profile side-quest journey (`QINGLAN_RUN_CAMPAIGN=1`) | ✅ **24/24 side stages**, 8 quest completion flags, courier 18 h/12 h round trips, 0 blocked (run against the regenerated content) | `docs/dev/evidence/automation-2026-10-19-sidequests-24of24-wave37.log` |
 | Sky atmosphere and hero skin material | ✅ blue sky/horizon renders in the packaged build; `MIC_HumanCharacter` binds the imported Quaternius palette texture (visual palette/UV art pass still open) | `docs/dev/evidence/rendered/hub-sky-atmosphere-2026-10-19.png` |
 
-Test suite composition: 27 cases from the pre-audit baseline + 41 repair cases
+Test suite composition: 27 cases from the pre-audit baseline + 42 repair cases
 across the audit waves (`Qinglan.Narrative.*` courier/guard/skip cases,
 `Qinglan.Persistence.*` delivery/migration/rotation cases, `Qinglan.Trial.*`
 phase-machine/hazard cases, `Qinglan.Combat.*` gate/immunity/status cases,

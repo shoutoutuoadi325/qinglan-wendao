@@ -1454,3 +1454,24 @@ real keyboard input in the packaged build, and rebuilt the regenerated
 
 No checkboxes above are ticked: per the closure rule, ticking requires the
 in-engine/platform evidence listed in each item's acceptance section.
+
+### Environment evidence for the blocked gates (2026-10-20)
+
+Concrete probes run while attempting the remaining items, so the owner can
+reproduce or waive them:
+
+- **Controller**: the kernel has uinput (`/proc/misc` 10:223, `/sys/class/misc/
+  uinput` present), but opening `/dev/uinput` fails with `EPERM` even as root
+  (container device cgroup), and there is no `/dev/input`. A virtual gamepad
+  therefore cannot be created; only the mapping-asset contract
+  (`Qinglan.Input.BothDeviceMappingContract`) is verifiable here.
+- **Metal / Windows / macOS**: no Apple GPU or Metal runtime, and no Windows
+  SDK / cross toolchain in the container; those builds require the owner.
+- **Performance captures**: `-csvprofile` and `-fpschart` runs of the packaged
+  client abort in the cluster's GPU contention failure (SIGSEGV →
+  `MallocCrash`, often within 30–65 s), so no stable frame-time capture can be
+  produced here. Short rendered runs (boot, frontend, trial wave 2) do succeed.
+- **Interactive scope actually verified**: keyboard/mouse movement and camera,
+  menu/slot selection, hub-boundary `kill -9` + relaunch, arena trial start
+  with Low + low-flash strike outlines. A complete CH00–CH07 keyboard/controller
+  playthrough needs a stable display machine.

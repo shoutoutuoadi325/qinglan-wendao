@@ -1457,6 +1457,8 @@ in-engine/platform evidence listed in each item's acceptance section.
 
 ### Environment evidence for the blocked gates (2026-10-20)
 
+Owner steps for the remaining items: `docs/dev/remaining-acceptance-runbook.md`.
+
 Concrete probes run while attempting the remaining items, so the owner can
 reproduce or waive them:
 

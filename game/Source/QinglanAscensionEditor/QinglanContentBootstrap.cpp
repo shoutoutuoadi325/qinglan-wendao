@@ -291,6 +291,10 @@ bool UQinglanContentBootstrapCommandlet::BootstrapInput()
 		M.Modifiers.Add(NegateY);
 	}
 	IMC->MapKey(IA_Attack, EKeys::LeftMouseButton).Triggers.Add(PressedTrigger(IMC));
+	// Keyboard-only fallback for the basic attack: every other combat action
+	// already has a keyboard key, so a keyboard playthrough must not require
+	// the mouse for the primary swing.
+	IMC->MapKey(IA_Attack, EKeys::J).Triggers.Add(PressedTrigger(IMC));
 	IMC->MapKey(IA_Dodge, EKeys::SpaceBar).Triggers.Add(PressedTrigger(IMC));
 	IMC->MapKey(IA_Lock, EKeys::MiddleMouseButton).Triggers.Add(PressedTrigger(IMC));
 	IMC->MapKey(IA_Cycle, EKeys::MouseWheelAxis).Triggers.Add(PressedTrigger(IMC));

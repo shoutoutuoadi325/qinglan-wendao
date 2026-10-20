@@ -2834,7 +2834,7 @@ bool FQinglanAuditBothDeviceMappingContract::RunTest(const FString& Parameters)
 
 	const FKey* KeyboardAndMouse[] = {
 		&EKeys::W, &EKeys::S, &EKeys::A, &EKeys::D,
-		&EKeys::E, &EKeys::SpaceBar, &EKeys::Escape,
+		&EKeys::E, &EKeys::J, &EKeys::SpaceBar, &EKeys::Escape,
 		&EKeys::LeftMouseButton, &EKeys::Mouse2D,
 	};
 	for (const FKey* Key : KeyboardAndMouse)

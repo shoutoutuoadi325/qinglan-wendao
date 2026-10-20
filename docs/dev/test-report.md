@@ -8,10 +8,10 @@ Environment: Linux (container, 64 physical cores), UE 5.8.3 source build, headle
 | Item | Result | Evidence |
 |---|---|---|
 | Editor target build (Linux, Development, UHT + editor modules) | ✅ Succeeded | `docs/dev/evidence/build-2026-10-19-wave6.log` |
-| Automation suite `RunTests Qinglan` | ✅ 70 performed / 70 Success / 0 Fail | `docs/dev/evidence/automation-2026-10-20-wave43-70tests.log` |
+| Automation suite `RunTests Qinglan` | ✅ 70 performed / 70 Success / 0 Fail | `docs/dev/evidence/automation-2026-10-20-wave44-70tests.log` |
 | Clean content regeneration (`tools/build/regenerate-content.sh`) | ✅ rc_all=0 from a deleted `Data`/`UI`/montage state; Niagara systems, per-rig ABPs, hit-react montages, maps, tables, audio, textures all present | `docs/dev/evidence/content-regeneration-2026-10-19-niagara-abp.log` |
 | Planning validators | ✅ pass | `python3 tools/validate_repository.py`, `tools/validate_story.py` |
-| Linux Shipping package (UAT BuildCookRun) | ✅ rc=0; all four maps, DT_Localization, ST_Game, registry, widgets, montages, meshes, audio, materials, `NS_*` cue systems and `ABP_*` slot graphs in the IoStore inventory | `packaging/evidence/linux-shipping-2026-10-19-wave40.txt`, `docs/dev/evidence/package-linux-2026-10-19-wave40.log` |
+| Linux Shipping package (UAT BuildCookRun) | ✅ rc=0; all four maps, DT_Localization, ST_Game, registry, widgets, montages, meshes, audio, materials, `NS_*` cue systems and `ABP_*` slot graphs in the IoStore inventory | `packaging/evidence/linux-shipping-2026-10-20-wave44.txt`, `docs/dev/evidence/package-linux-2026-10-20-wave44.log` |
 | Rendered packaged boot (`Xvfb` + NVIDIA Vulkan ICD, software/remote GPU) | ✅ hub renders; HUD text, skill slots, talisman charges, vitals, third-person camera and character scale correct | `docs/dev/evidence/rendered/hub-packaged-shipping-wave36-2026-10-19.png` |
 | Rendered packaged boot, Simplified Chinese | ✅ every HUD string resolves in `zh-Hans` and CJK glyphs render (no tofu) in the Shipping build | `docs/dev/evidence/rendered/hub-packaged-shipping-zh-Hans-2026-10-19.png` |
 | Rendered packaged boot, Low preset + low-flash + `zh-Hans` | ✅ the reduced-effects configuration boots and renders the same readable HUD | `docs/dev/evidence/rendered/hub-packaged-shipping-low-lowflash-zh-2026-10-19.png` |

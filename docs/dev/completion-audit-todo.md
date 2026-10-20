@@ -1425,7 +1425,7 @@ real keyboard input in the packaged build, and rebuilt the regenerated
 | AUD-56 | Fixed (source+ledger) | Ledger populated with 42 records. The eight untraceable audio sources were replaced 2026-10-19 with project-original WAVs (generator script in `assets-raw/audio/original/`), the bootstrap imports the new `original/` sources under unchanged `SW_*` paths, `regenerate-content.sh` validates the eight sources and imported assets, and `Qinglan.Content.AudioSourceContract` pins the contract. No unknown or pending ledger rows remain. | Regeneration/cook re-imports the new audio into the committed `SW_*` uassets; human listening QA (loop seams, mix, SFX transients). |
 | AUD-57 | Fixed | Portable build/regenerate scripts, engine revision lock, nonzero on missing inputs, mandatory-output validation, regeneration rc_all=0. | Second-machine reproduction. |
 | AUD-58 | Partially fixed | 70 automation cases plus three real-file save fault-injection specs (`SaveBackupRecoveryChain`, `SaveRotationFaultInjection`, `SaveTruncatedTempRejected`) cover the repaired persistence/narrative/trial/combat/localization/UI/content paths. Packaged interactive evidence now includes keyboard menu/slot selection, WASD movement, mouse-look camera rotation, a real SIGKILL + relaunch at the hub boundary, Chinese/CJK and Low/low-flash boots, and Low/low-flash trial strike outlines (`docs/dev/evidence/rendered/interactive-*`, `kill-restart-*`, `profile-frontend-*`, `trial-*`). Both device classes are asserted at the mapping-asset level by `Qinglan.Input.BothDeviceMappingContract` (keyboard/mouse + gamepad sticks, face/shoulder buttons, triggers, d-pad). | Complete keyboard playthrough of the campaign; controller playthrough (the kernel has uinput, but `/dev/uinput` cannot be opened even by root — EPERM from the container device cgroup — and there is no `/dev/input`); process-kill at every boundary. |
-| AUD-59 | Blocked | Linux Shipping package rebuilt after the repair waves (rc=0) with a verified IoStore inventory (including the Niagara cue systems and per-rig slot graphs) and artifact hashes: `packaging/evidence/linux-shipping-2026-10-19-wave40.txt` (supersedes `linux-shipping-2026-10-19.txt`). | Windows DX12 and Apple Silicon Metal builds/devices are unavailable in this environment; owner action required. |
+| AUD-59 | Blocked | Linux Shipping package rebuilt after the repair waves (rc=0) with a verified IoStore inventory (including the Niagara cue systems and per-rig slot graphs) and artifact hashes: `packaging/evidence/linux-shipping-2026-10-19-wave40.txt` (supersedes `linux-shipping-2026-10-19.txt`). Direct cross-build probes both fail in UBT with "Platform Win64/Mac is not a valid platform to build. SDK validation failed" (`docs/dev/evidence/cross-build-win64-2026-10-20.log`, `cross-build-mac-2026-10-20.log`). | Windows DX12 and Apple Silicon Metal builds/devices are unavailable in this environment; owner action required. |
 | AUD-60 | Fixed | README/CONTRIBUTING/test-report/build guide rewritten around recorded evidence with historical results labeled. | — |
 
 ### Remaining acceptance gates (not satisfied by this repair work)
@@ -1466,7 +1466,11 @@ reproduce or waive them:
   therefore cannot be created; only the mapping-asset contract
   (`Qinglan.Input.BothDeviceMappingContract`) is verifiable here.
 - **Metal / Windows / macOS**: no Apple GPU or Metal runtime, and no Windows
-  SDK / cross toolchain in the container; those builds require the owner.
+  SDK / cross toolchain in the container. Probed directly: UBT rejects both
+  `Build.sh QinglanAscension Win64 Shipping` and `... Mac Shipping` with
+  "Platform Win64/Mac is not a valid platform to build. SDK validation
+  failed" (logs: `cross-build-win64-2026-10-20.log`,
+  `cross-build-mac-2026-10-20.log`). Those builds require the owner.
 - **Performance captures**: `-csvprofile` and `-fpschart` runs of the packaged
   client abort in the cluster's GPU contention failure (SIGSEGV →
   `MallocCrash`, often within 30–65 s), so no stable frame-time capture can be

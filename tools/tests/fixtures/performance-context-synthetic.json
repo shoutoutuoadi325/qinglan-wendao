@@ -1,0 +1,12 @@
+{
+  "synthetic": true,
+  "configuration": "Development",
+  "hardware": "Synthetic fixture; no real device measured",
+  "rhi": "Metal (synthetic schema example)",
+  "resolution": [1280, 720],
+  "quality": "Synthetic fixture",
+  "route": "synthetic arithmetic check",
+  "capture_seconds": 0.1,
+  "engine_revision": "synthetic fixture",
+  "project_revision": "synthetic fixture"
+}

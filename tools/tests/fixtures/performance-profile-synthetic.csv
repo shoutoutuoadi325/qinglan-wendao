@@ -1,0 +1,8 @@
+EVENTS,FrameTime,PhysicalUsedMB
+,10,500
+,10,550
+,20,600,12
+,30,650,13
+,30,700,14
+EVENTS,FrameTime,PhysicalUsedMB,Other/AddedLate
+[HasHeaderRowAtEnd],1,[EventTimestamps],1,[platform],Mac,[commandline],"synthetic fixture, never a real performance capture"

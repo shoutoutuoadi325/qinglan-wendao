@@ -26,6 +26,9 @@
 #include "Animation/AnimMontage.h"
 #include "Engine/OverlapResult.h" // FOverlapResult full type (UE 5.8 split from EngineTypes)
 #include "Engine/World.h"
+#include "Engine/GameInstance.h"
+#include "Narrative/QinglanStoryRuntime.h"
+#include "Narrative/QinglanStorySubsystem.h"
 #include "Progression/QinglanEconomyLibrary.h"
 
 namespace
@@ -608,7 +611,24 @@ void UQinglanSwordComponent::ApplyHit(AActor* Victim)
 		* (1.f + SwingSwordDamagePercent / 100.f);
 	Event.Timestamp = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f; // paused-game-time timestamp
 
-	VictimCombat->ApplyDamage(Event);
+	if (!VictimCombat->ApplyDamage(Event))
+	{
+		return; // rejected/invulnerable damage grants neither proof nor energy
+	}
+	// The resolved-damage delegate belongs to the victim's Combat component;
+	// the player's own component therefore cannot observe outgoing sword
+	// hits. Publish proof here, after an accepted real sword collision, rather
+	// than from a dummy target or a test-only event injection.
+	if (const AQinglanCharacter* Player = Cast<AQinglanCharacter>(GetOwner()))
+	{
+		if (UGameInstance* Instance = Player->GetGameInstance())
+		{
+			if (UQinglanStorySubsystem* Story = Instance->GetSubsystem<UQinglanStorySubsystem>())
+			{
+				QinglanStoryRuntime::NotifyGameplayEvent(Story, FName(TEXT("combat.sword_hit")), {});
+			}
+		}
+	}
 
 	// Energy restore hook (docs/02 §4): 4 energy per unique target, capped 8 per swing;
 	// training targets cannot generate campaign resources. The cap bookkeeping lives in

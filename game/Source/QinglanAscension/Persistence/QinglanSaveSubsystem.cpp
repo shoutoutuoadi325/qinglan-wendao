@@ -552,8 +552,10 @@ namespace
 	/** Timestamp + progress preview for backup fallback notices (docs/05 §6). */
 	FText MakeProgressPreview(const UQinglanSaveGame* Save)
 	{
-		return FText::Format(QinglanSave::Loc(TEXT("save.progress_preview")),
-			LocalizedStageName(Save->CultivationStage), Save->CultivationRank);
+		FFormatNamedArguments Args;
+		Args.Add(TEXT("stage"), LocalizedStageName(Save->CultivationStage));
+		Args.Add(TEXT("rank"), Save->CultivationRank);
+		return FText::Format(QinglanSave::Loc(TEXT("save.progress_preview")), Args);
 	}
 
 	FQinglanProfileSnapshot SnapshotFromSave(const UQinglanSaveGame* Save)
@@ -772,8 +774,10 @@ bool UQinglanSaveSubsystem::LoadProfile(int32 Slot, FText& OutNotice)
 			return false;
 		}
 		// Timestamp + progress preview notice (docs/05 §6).
-		OutNotice = FText::Format(QinglanSave::Loc(TEXT("save.backup_restored")),
-			FText::AsDate(ChosenStamp, EDateTimeStyle::Short), MakeProgressPreview(ChosenSave));
+		FFormatNamedArguments Args;
+		Args.Add(TEXT("date"), FText::AsDate(ChosenStamp, EDateTimeStyle::Short));
+		Args.Add(TEXT("progress"), MakeProgressPreview(ChosenSave));
+		OutNotice = FText::Format(QinglanSave::Loc(TEXT("save.backup_restored")), Args);
 		UE_LOG(LogQinglanSave, Warning, TEXT("LoadProfile: slot %d fell back to a valid backup"), Slot);
 	}
 

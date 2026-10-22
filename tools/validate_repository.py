@@ -4,6 +4,7 @@
 from pathlib import Path
 import csv
 import json
+import os
 import re
 import sys
 import xml.etree.ElementTree as ET
@@ -30,9 +31,15 @@ def read_json(relative):
 
 
 def validate_text_and_links():
-    ignored = {".git", "__pycache__", "private", "build", "dist", "output"}
+    ignored = {".git", ".local", "__pycache__", "private", "build", "dist", "output"}
     count = 0
-    for path in ROOT.rglob("*"):
+    # Prune dependency trees before descending: a local engine checkout can
+    # contain millions of files, including non-UTF-8 third-party sources.
+    paths = []
+    for directory, subdirs, filenames in os.walk(ROOT):
+        subdirs[:] = sorted(name for name in subdirs if name not in ignored)
+        paths.extend(Path(directory) / name for name in sorted(filenames))
+    for path in paths:
         relative = path.relative_to(ROOT)
         if not path.is_file() or ignored.intersection(relative.parts):
             continue

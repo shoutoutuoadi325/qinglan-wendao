@@ -25,6 +25,7 @@ class UQinglanGameplayProofRelay;
 
 /**
  * Action classes covered by the unified priority gate (AUD-32). Priority:
+ * Action classes covered by the unified priority gate (AUD-32). Priority:
  * Dead > forced HitReaction > menu/scene-choice freeze > permitted dodge
  * cancel > committed action > buffered input.
  */
@@ -194,12 +195,14 @@ public:
 	 * True when SceneId began, delivered at least one line, is choice-free,
 	 * and its playback has ended: the script played out, so a follow-up
 	 * interaction is the gameplay proof that commits the scene (blueprint
-	 * section 1.9 dispatcher; choice-free scenes commit only through
 	 * UQinglanStorySubsystem::NotifyObjectiveCompleted).
 	 */
 	bool WasSceneScriptExhausted(FName SceneId) const;
+	/** Inspection follows the complete exchange, including choice responses. */
+	bool HasSceneScriptExhaustedForInspection(FName SceneId) const;
 
 	UPROPERTY(VisibleAnywhere) USpringArmComponent* CameraBoom = nullptr;
+	UPROPERTY(VisibleAnywhere) UCameraComponent* FollowCamera = nullptr;
 	UPROPERTY(VisibleAnywhere) UCameraComponent* FollowCamera = nullptr;
 
 	// Tunables (defaults from docs/02-combat-and-camera.md; data-driven overrides at runtime)
@@ -314,12 +317,14 @@ protected:
 	TWeakObjectPtr<UUserWidget> DialogueWidget;
 	TWeakObjectPtr<UQinglanEndingWidget> EndingWidget;
 	TWeakObjectPtr<UQinglanMenuWidget> MenuWidget;
-	TWeakObjectPtr<UQinglanJournalWidget> JournalWidget;
 	int32 MenuSelectionIndex = 0;
 	bool bHudCreated = false;
 	bool bStoryDelegatesBound = false;
 	/** Owned by this actor; a process-wide strong root would retain its entire world. */
 	UPROPERTY(Transient) TObjectPtr<UQinglanGameplayProofRelay> GameplayProofRelay;
+	bool bDefeatHandled = false;
+	/** AUD-51 gameplay input gate; mirrors any open menu/journal overlay. */
+	bool bMenuOpen = false;
 	bool bDefeatHandled = false;
 	/** AUD-51 gameplay input gate; mirrors any open menu/journal overlay. */
 	bool bMenuOpen = false;

@@ -257,6 +257,9 @@ namespace
 			const FVector CameraDelta = TargetLocation - AimOrigin;
 			if (CameraDelta.Size() > QinglanInteractCameraReach)
 			{
+			const FVector CameraDelta = TargetLocation - AimOrigin;
+			if (CameraDelta.Size() > QinglanInteractCameraReach)
+			{
 				continue;
 			}
 			const float Dot = FVector::DotProduct(AimDirection, CameraDelta.GetSafeNormal());
@@ -439,9 +442,6 @@ namespace
 			}
 		}
 		const FVector Normalized = Direction.GetSafeNormal2D();
-		return Normalized.IsNearlyZero() ? FVector::ForwardVector : Normalized;
-	}
-
 	// --- Gameplay-proof event producers (AUD-11) ---
 
 	/**
@@ -463,6 +463,9 @@ namespace
 		}
 		UQinglanGameplayProofRelay* Relay = RelaySlot.Get();
 		Relay->StorySubsystem = Story;
+		{
+			return;
+		}
 		UQinglanGameplayProofRelay* Relay = RelaySlot.Get();
 		}
 	}
@@ -472,9 +475,6 @@ namespace
 	{
 		if (Character == nullptr)
 		{
-			return;
-		}
-		UQinglanGameplayProofRelay* Relay = RelaySlot.Get();
 		}
 	}
 
@@ -488,18 +488,6 @@ namespace
 		UQinglanGameplayProofRelay* Relay = RelaySlot.Get();
 		if (Relay == nullptr)
 		{
-		Relay->OwnerActor.Reset();
-		RelaySlot = nullptr;
-	}
-
-	/** Authored room-clear realm token ("tutorial_guided" -> "tutorial"). */
-	const TCHAR* const HumanAnimBlueprintPackage = TEXT("/Game/Qinglan/Characters/Human/ABP_Human");
-	const TCHAR* const HumanAnimBlueprintClassPath =
-		TEXT("/Game/Qinglan/Characters/Human/ABP_Human.ABP_Human_C");
-
-	UClass* ResolveHumanoidAnimInstanceClass(const USkeletalMesh* Mesh)
-	{
-		{
 			Techniques->OnCastReleased.RemoveDynamic(Relay, &UQinglanGameplayProofRelay::HandleCastReleased);
 		}
 		Relay->StorySubsystem.Reset();
@@ -511,12 +499,15 @@ namespace
 				const UAnimBlueprintGeneratedClass* const GeneratedClass =
 					Cast<UAnimBlueprintGeneratedClass>(AnimBlueprintClass);
 				if (GeneratedClass && GeneratedClass->GetTargetSkeleton() == MeshSkeleton)
-				{
-					return AnimBlueprintClass;
-				}
-			}
+		{
+			Techniques->OnCastReleased.RemoveDynamic(Relay, &UQinglanGameplayProofRelay::HandleCastReleased);
 		}
-		return UQinglanCharacterAnimInstance::StaticClass();
+		Relay->StorySubsystem.Reset();
+		Relay->OwnerActor.Reset();
+		RelaySlot = nullptr;
+	}
+
+	/** Authored room-clear realm token ("tutorial_guided" -> "tutorial"). */
 	}
 }
 
@@ -728,13 +719,13 @@ void AQinglanCharacter::BeginPlay()
 				// instance could be created, rather than showing the ref pose.
 	{
 		TechniqueComponent->SyncLoadoutFromProfile();
-	}
-
-	// AUD-01: cold start opens the slot selector instead of silently importing
-	// slot 0 over the session. The hub game mode defers its arrival work until
-	// a slot is chosen (HandleMenuClosed resumes it).
-	OpenProfileFrontendIfNeeded();
-}
+				AnimInstance->SetActionState(EQinglanAnimActionState::Idle);
+			}
+			else if (UAnimSequence* const Idle = Cast<UAnimSequence>(
+					FSoftObjectPath(TEXT("/Game/Qinglan/Characters/Human/SK_HumanHuman_Armature_Idle.SK_HumanHuman_Armature_Idle")).TryLoad()))
+			{
+				// AUD-44 fallback: retain the old visible idle when no anim
+				// instance could be created, rather than showing the ref pose.
 
 void AQinglanCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
@@ -1788,13 +1779,13 @@ void AQinglanCharacter::PlayHitReactionMontage()
 	if (AnimInstance && Montage)
 	const UQinglanDodgeComponent* const Dodge = QinglanFindComponent<UQinglanDodgeComponent>(this);
 	const UQinglanSwordComponent* const Sword = QinglanFindComponent<UQinglanSwordComponent>(this);
-	if (bDefeatHandled || (CombatComponent && !CombatComponent->IsAlive()))
-	{
-		DesiredState = EQinglanAnimActionState::Death;
-	}
-	else if (bInHitReaction)
-	{
-		DesiredState = EQinglanAnimActionState::Hit;
+	// Convention path authored by QinglanAnimBootstrap when available. Missing
+	// animation is non-fatal: the gate above still disables every action.
+	UAnimMontage* const Montage = Cast<UAnimMontage>(
+		FSoftObjectPath(TEXT("/Game/Qinglan/Characters/Human/Montages/AM_Human_HitReact.AM_Human_HitReact")).TryLoad());
+	USkeletalMeshComponent* const MeshComp = GetMesh();
+	UAnimInstance* const AnimInstance = MeshComp ? MeshComp->GetAnimInstance() : nullptr;
+	if (AnimInstance && Montage)
 	}
 	else if (Dodge && Dodge->IsDodging())
 	{
@@ -2470,12 +2461,21 @@ void AQinglanCharacter::HandleRoomCompleted(int32 RoomIndex, int64 ShardsAwarded
 	// chapter scene (late chapters deliberately reuse local objective IDs).
 	// AUD-11: emit the authored boss-defeat proof event first; the guard-based
 	// auto-completion then proves the exact objective, and the direct notify
-	// below stays idempotent.
-	if (Realm->RealmId == FName(UQinglanEconomyLibrary::BambooRealmIdText))
-	{
-		QinglanStoryRuntime::NotifyGameplayEvent(Story, FName(TEXT("encounter.boss_defeated.bamboo")), {});
-		Story->NotifySceneObjectiveCompleted(FName(TEXT("CH02_S02")), FName(TEXT("CH02_S02_OBJECTIVE")));
-	}
+	return Story == nullptr || !Story->IsScenePlaying();
+}
+
+bool AQinglanCharacter::HasSceneScriptExhaustedForInspection(FName SceneId) const
+{
+	const UGameInstance* Instance = GetGameInstance();
+	const UQinglanStorySubsystem* Story = Instance ? Instance->GetSubsystem<UQinglanStorySubsystem>() : nullptr;
+	if (!Story || SceneId.IsNone()) { return false; }
+	if (Story->IsSceneCompleted(SceneId)) { return true; }
+	return SceneId == LastEnteredSceneId && bSawLineForEnteredScene && !Story->IsScenePlaying();
+}
+
+void AQinglanCharacter::HandleRoomCompleted(int32 RoomIndex, int64 ShardsAwarded)
+{
+	// Boss-room clear is the combat proof for the realm's current choice-free
 	else if (Realm->RealmId == FName(UQinglanEconomyLibrary::AshenRealmIdText))
 	{
 		QinglanStoryRuntime::NotifyGameplayEvent(Story, FName(TEXT("encounter.boss_defeated.ashen")), {});
@@ -2737,8 +2737,17 @@ void AQinglanCharacter::UnbindStoryDelegates()
 }
 
 			Delegates.OnDeliveryArrived.RemoveDynamic(this, &AQinglanCharacter::HandleDeliveryArrived);
+		Save->OnSaveFailed.AddDynamic(this, &AQinglanCharacter::HandleSaveFailed);
+	}
+	// AUD-11: bind the dynamic combat/dodge/technique delegates through the
+	// actor-owned proof relay, which shares the character's GC lifetime.
+	QinglanBindGameplayProofEvents(this, Story, GameplayProofRelay);
+	bStoryDelegatesBound = true;
+}
+
+		if (UQinglanStorySubsystem* const Story = Instance->GetSubsystem<UQinglanStorySubsystem>())
 		}
-		if (UQinglanSaveSubsystem* Save = Instance->GetSubsystem<UQinglanSaveSubsystem>())
+	}
 	{
 		return;
 	}
@@ -2746,15 +2755,6 @@ void AQinglanCharacter::UnbindStoryDelegates()
 	if (UGameInstance* const Instance = GetGameInstance())
 	{
 		if (UQinglanStorySubsystem* const Story = Instance->GetSubsystem<UQinglanStorySubsystem>())
-		}
-	}
-	bStoryDelegatesBound = false;
-}
-
-void AQinglanCharacter::PresentBlessingOffer(const TArray<FQinglanBlessing>& Offers)
-{
-	PendingBlessingChoices = Offers;
-	TArray<FQinglanOfferChoice> MenuOffers;
 	TArray<FString> Lines;
 	for (int32 Index = 0; Index < Offers.Num(); ++Index)
 	{

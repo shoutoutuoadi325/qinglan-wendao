@@ -1,4 +1,11 @@
-# Build & Run (Linux dev environment)
+# Build & Run
+
+For the current removable Apple Silicon setup, start with
+[local-mac-setup.md](local-mac-setup.md). Source `tools/build/local-env.sh`
+to select the workspace engine, assets, Xcode and caches. Build, content and
+package wrappers now select native host tools and default the target to the
+host; set `QINGLAN_PLATFORM` explicitly for a different target. The evidence
+and manual command examples below describe the earlier Linux environment.
 
 Environment used for development:
 
@@ -76,7 +83,8 @@ All tests live under the `Qinglan.` prefix: `Qinglan.Combat.*`,
 `Qinglan.Narrative.*`, `Qinglan.Persistence.*`, `Qinglan.Trial.*`,
 `Qinglan.Progression.*`, `Qinglan.Anim.*`, `Qinglan.VFX.*`, `Qinglan.Content.*`,
 `Qinglan.UI.*`, `Qinglan.Input.*`, `Qinglan.Abilities.*`, and
-`Qinglan.Localization.*` (70 cases). The two opt-in campaign journeys require
+`Qinglan.Localization.*` (90 cases on the 2026-10-21 native Mac baseline; the
+historical Linux run had 70). The two opt-in campaign journeys require
 `QINGLAN_RUN_CAMPAIGN=1` and are named `Qinglan.Campaign.NewProfileMainJourney`
 and `Qinglan.Campaign.NewProfileSideQuestJourney`.
 
@@ -103,8 +111,16 @@ Maps: `L_Hub` (sanctuary), `L_BambooHollow`, `L_AshenVerge` (expedition realms),
   `DISPLAY=:1 XDG_RUNTIME_DIR=/tmp/xdg VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json`
   and the packaged Shipping client (precompiled shaders). Capture with
   `import -window root shot.png`.
-- Sustained performance capture remains blocked: packaged `-csvprofile` /
-  `-fpschart` runs abort in the cluster GPU-contention `MallocCrash`, and
+- Sustained performance capture remains unverified: old attempts passed bare
+  `-csvprofile` / `-fpschart` and aborted in the cluster GPU-contention
+  `MallocCrash`. Those tokens do not prove profiling started; the default
+  Shipping target disables the CSV profiler and command-line `ExecCmds`
+  processing. Use a packaged **Development** client and the supported
+  `startfpschart` / `stopfpschart` plus `t.FPSChart.DoCsvProfile 1` procedure in
+  [performance-capture.md](performance-capture.md). It records raw frame/GPU
+  timings and synchronized process-memory counters for the hub, ordinary
+  combat and a normally admitted trial; Development results must retain their
+  configuration label and cannot be called Shipping performance. Separately,
   editor `-game` aborts at startup with
   `Assertion failed: !InLocalizationTargetPath.IsEmpty()`
   (`TextLocalizationManager.cpp:629`). Short rendered runs (boot, frontend,
@@ -134,8 +150,21 @@ Caveats found on this machine:
   (`!InLocalizationTargetPath.IsEmpty()`). Use the packaged Shipping build for
   rendered runs; it ships precompiled shaders.
 - QA capture flags (harmless without them): `-QinglanShot=<id>` takes one
-  screenshot and quits; `-QinglanTrial=<seconds>` travels from the hub to
-  `L_TribulationArena` and starts the foundation trial (capture-only admission
-  bypass) so hazards/enemies can be rendered without a full run.
+  screenshot and quits; `-QinglanShotDelay=<seconds>` defers that capture so a
+  timed route can be recorded (the hub's timer dies with the map travel, so
+  the arena's own delayed capture is the one that fires);
+  `-QinglanTrial=<seconds>` travels from the hub to `L_TribulationArena` and
+  starts the foundation trial (capture-only admission bypass) so
+  hazards/enemies can be rendered without a full run. Screenshots are written
+  to `<Saved>/Screenshots/qinglan_shot_<id>.png`; the old `/tmp` path was
+  denied by the sandboxed Mac package, and a `-UserDir` outside the sandbox
+  container is not writable either.
+- `-QinglanHandShot=<id>` renders a QA close-up of the hero's sword hand at
+  near (35 cm) and normal (150 cm) distances into the same `Screenshots`
+  directory, for the AUD-55 hand UV/palette check. It needs no player input;
+  `-QinglanHandShotDelay=<seconds>` defaults to 3.
+- `-QinglanAutoSlot=<0-2>` confirms a profile slot through the real menu rows
+  after a 2 s settle, letting an unattended capture reach the hub. It does not
+  bypass save validation; interactive slot selection still needs real input.
 - Driver-killed processes leak GPU memory until the host reaps them
   (~600 MB per kill; harmless on 48 GB cards, visible via nvidia-smi).

@@ -245,12 +245,15 @@ namespace
 		for (TActorIterator<AQinglanInteractable> It(World); It; ++It)
 		{
 			AQinglanInteractable* const Candidate = *It;
-			const FVector TargetLocation = Candidate->GetActorLocation();
-			const float PlayerDistance = FVector::Dist(PlayerLocation, TargetLocation);
+			const FVector AnchorLocation = Candidate->GetActorLocation();
+			const float PlayerDistance = FVector::Dist(PlayerLocation, AnchorLocation);
 			if (PlayerDistance > QinglanInteractRange)
 			{
 				continue;
 			}
+			// Authored anchors sit on the walking surface. Aim/visibility use a
+			// point above that surface so the floor cannot occlude the E prompt.
+			const FVector TargetLocation = AnchorLocation + FVector(0.f, 0.f, 80.f);
 			const FVector CameraDelta = TargetLocation - AimOrigin;
 			if (CameraDelta.Size() > QinglanInteractCameraReach)
 			{
@@ -460,7 +463,7 @@ namespace
 		}
 		UQinglanGameplayProofRelay* Relay = RelaySlot.Get();
 		Relay->StorySubsystem = Story;
-			Techniques->OnCastReleased.AddUniqueDynamic(Relay, &UQinglanGameplayProofRelay::HandleCastReleased);
+		UQinglanGameplayProofRelay* Relay = RelaySlot.Get();
 		}
 	}
 
@@ -490,12 +493,12 @@ namespace
 	}
 
 	/** Authored room-clear realm token ("tutorial_guided" -> "tutorial"). */
-	FString QinglanRoomClearRealmToken(FName RealmId)
+	const TCHAR* const HumanAnimBlueprintPackage = TEXT("/Game/Qinglan/Characters/Human/ABP_Human");
+	const TCHAR* const HumanAnimBlueprintClassPath =
+		TEXT("/Game/Qinglan/Characters/Human/ABP_Human.ABP_Human_C");
+
+	UClass* ResolveHumanoidAnimInstanceClass(const USkeletalMesh* Mesh)
 	{
-		const FString Id = RealmId.ToString();
-		if (Id.StartsWith(TEXT("tutorial"))) { return TEXT("tutorial"); }
-		if (Id.StartsWith(TEXT("bamboo"))) { return TEXT("bamboo"); }
-		if (Id.StartsWith(TEXT("ashen"))) { return TEXT("ashen"); }
 		{
 			Techniques->OnCastReleased.RemoveDynamic(Relay, &UQinglanGameplayProofRelay::HandleCastReleased);
 		}
@@ -505,18 +508,6 @@ namespace
 	}
 
 	/** Authored room-clear realm token ("tutorial_guided" -> "tutorial"). */
-	const TCHAR* const HumanAnimBlueprintPackage = TEXT("/Game/Qinglan/Characters/Human/ABP_Human");
-	const TCHAR* const HumanAnimBlueprintClassPath =
-		TEXT("/Game/Qinglan/Characters/Human/ABP_Human.ABP_Human_C");
-
-	UClass* ResolveHumanoidAnimInstanceClass(const USkeletalMesh* Mesh)
-	{
-		const USkeleton* const MeshSkeleton = Mesh ? Mesh->GetSkeleton() : nullptr;
-		if (MeshSkeleton && FPackageName::DoesPackageExist(HumanAnimBlueprintPackage))
-		{
-			if (UClass* const AnimBlueprintClass =
-					LoadClass<UQinglanCharacterAnimInstance>(nullptr, HumanAnimBlueprintClassPath))
-			{
 				const UAnimBlueprintGeneratedClass* const GeneratedClass =
 					Cast<UAnimBlueprintGeneratedClass>(AnimBlueprintClass);
 				if (GeneratedClass && GeneratedClass->GetTargetSkeleton() == MeshSkeleton)
@@ -728,13 +719,13 @@ void AQinglanCharacter::BeginPlay()
 	{
 		CombatComponent->OnHealthChanged.AddDynamic(this, &AQinglanCharacter::HandleHealthChanged);
 		// AUD-32: accepted hits force an invulnerable-to-input hit reaction.
-		CombatComponent->OnDamageResolved.AddUniqueDynamic(this, &AQinglanCharacter::HandleDamageResolved);
-	}
-	BindStoryDelegates();
-	// AUD-27: a freshly spawned pawn (including every map travel) re-imports
-	// the profile's equipped techniques, then keeps tracking profile commits.
-	BindProfileDelegates();
-	if (TechniqueComponent)
+				AnimInstance->SetActionState(EQinglanAnimActionState::Idle);
+			}
+			else if (UAnimSequence* const Idle = Cast<UAnimSequence>(
+					FSoftObjectPath(TEXT("/Game/Qinglan/Characters/Human/SK_HumanHuman_Armature_Idle.SK_HumanHuman_Armature_Idle")).TryLoad()))
+			{
+				// AUD-44 fallback: retain the old visible idle when no anim
+				// instance could be created, rather than showing the ref pose.
 	{
 		TechniqueComponent->SyncLoadoutFromProfile();
 	}
@@ -1788,13 +1779,13 @@ void AQinglanCharacter::PlayHitReactionMontage()
 	// rig is absent this is a no-op (headless/automation worlds).
 	USkeletalMeshComponent* const MeshComp = GetMesh();
 	UQinglanCharacterAnimInstance* const AnimInstance =
-		MeshComp ? Cast<UQinglanCharacterAnimInstance>(MeshComp->GetAnimInstance()) : nullptr;
-	if (!AnimInstance)
-	{
-		return;
-	}
-
-	EQinglanAnimActionState DesiredState = EQinglanAnimActionState::Idle;
+	// Convention path authored by QinglanAnimBootstrap when available. Missing
+	// animation is non-fatal: the gate above still disables every action.
+	UAnimMontage* const Montage = Cast<UAnimMontage>(
+		FSoftObjectPath(TEXT("/Game/Qinglan/Characters/Human/Montages/AM_Human_HitReact.AM_Human_HitReact")).TryLoad());
+	USkeletalMeshComponent* const MeshComp = GetMesh();
+	UAnimInstance* const AnimInstance = MeshComp ? MeshComp->GetAnimInstance() : nullptr;
+	if (AnimInstance && Montage)
 	const UQinglanDodgeComponent* const Dodge = QinglanFindComponent<UQinglanDodgeComponent>(this);
 	const UQinglanSwordComponent* const Sword = QinglanFindComponent<UQinglanSwordComponent>(this);
 	if (bDefeatHandled || (CombatComponent && !CombatComponent->IsAlive()))
@@ -2737,24 +2728,24 @@ void AQinglanCharacter::UnbindStoryDelegates()
 			Story->OnSceneEntered.RemoveDynamic(this, &AQinglanCharacter::HandleSceneEntered);
 			Story->OnSceneCompleted.RemoveDynamic(this, &AQinglanCharacter::HandleSceneCompleted);
 	{
+		Save->OnSaveFailed.AddDynamic(this, &AQinglanCharacter::HandleSaveFailed);
+	}
+	// AUD-11: bind the dynamic combat/dodge/technique delegates through the
+	// actor-owned proof relay, which shares the character's GC lifetime.
+	QinglanBindGameplayProofEvents(this, Story, GameplayProofRelay);
+	bStoryDelegatesBound = true;
+}
+
+			Delegates.OnDeliveryArrived.RemoveDynamic(this, &AQinglanCharacter::HandleDeliveryArrived);
+		}
+		if (UQinglanSaveSubsystem* Save = Instance->GetSubsystem<UQinglanSaveSubsystem>())
+	{
 		return;
 	}
 	QinglanUnbindGameplayProofEvents(this, GameplayProofRelay);
 	if (UGameInstance* const Instance = GetGameInstance())
 	{
 		if (UQinglanStorySubsystem* const Story = Instance->GetSubsystem<UQinglanStorySubsystem>())
-			Delegates.OnReturnToHub.RemoveDynamic(this, &AQinglanCharacter::HandleReturnToHub);
-			Delegates.OnCompleteCampaign.RemoveDynamic(this, &AQinglanCharacter::HandleCampaignComplete);
-			Delegates.OnDeliveryArrived.RemoveDynamic(this, &AQinglanCharacter::HandleDeliveryArrived);
-		}
-		if (UQinglanSaveSubsystem* Save = Instance->GetSubsystem<UQinglanSaveSubsystem>())
-		{
-			Save->OnSaveFailed.RemoveDynamic(this, &AQinglanCharacter::HandleSaveFailed);
-		}
-		if (UQinglanRunSubsystem* const Run = Instance->GetSubsystem<UQinglanRunSubsystem>())
-		{
-			Run->OnRoomCompleted.RemoveDynamic(this, &AQinglanCharacter::HandleRoomCompleted);
-			Run->OnBankingFailed.RemoveDynamic(this, &AQinglanCharacter::HandleBankingFailed);
 		}
 	}
 	bStoryDelegatesBound = false;

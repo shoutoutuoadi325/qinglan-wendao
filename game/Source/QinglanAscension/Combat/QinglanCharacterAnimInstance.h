@@ -142,9 +142,8 @@ public:
 	// --- Presentation tunables ---
 
 	/**
-	 * Convention paths authored by the mesh import. The Human pack has Idle and
-	 * Jump; the Walk/Run paths deliberately point at takes that do not exist
-	 * yet, so the resolver falls back to Idle until the art pass lands.
+	 * Complete object paths supplied by the mesh import and animation bootstrap.
+	 * Walk/Run use the generated locomotion takes until an authored art pass.
 	 */
 	UPROPERTY(EditDefaultsOnly, Category = "Qinglan|Animation")
 	TSoftObjectPtr<UAnimSequence> DefaultIdleAnimationPath;

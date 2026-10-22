@@ -24,19 +24,18 @@ namespace
 	 */
 	constexpr int32 LocomotionMontageLoops = 1000000;
 
-	const TCHAR* const HumanIdlePath = TEXT("/Game/Qinglan/Characters/Human/SK_HumanHuman_Armature_Idle");
-	const TCHAR* const HumanWalkPath = TEXT("/Game/Qinglan/Characters/Human/SK_HumanHuman_Armature_Walk");
-	const TCHAR* const HumanRunPath = TEXT("/Game/Qinglan/Characters/Human/SK_HumanHuman_Armature_Run");
-	const TCHAR* const HumanAirbornePath = TEXT("/Game/Qinglan/Characters/Human/SK_HumanHuman_Armature_Jump");
+	const TCHAR* const HumanIdlePath = TEXT("/Game/Qinglan/Characters/Human/SK_HumanHuman_Armature_Idle.SK_HumanHuman_Armature_Idle");
+	const TCHAR* const HumanWalkPath = TEXT("/Game/Qinglan/Characters/Human/SK_HumanHuman_Armature_Walk.SK_HumanHuman_Armature_Walk");
+	const TCHAR* const HumanRunPath = TEXT("/Game/Qinglan/Characters/Human/SK_HumanHuman_Armature_Run.SK_HumanHuman_Armature_Run");
+	const TCHAR* const HumanAirbornePath = TEXT("/Game/Qinglan/Characters/Human/SK_HumanHuman_Armature_Jump.SK_HumanHuman_Armature_Jump");
 }
 
 UQinglanCharacterAnimInstance::UQinglanCharacterAnimInstance()
 {
 	LocomotionSlotName = FName(TEXT("DefaultSlot"));
 
-	// Convention paths authored by the mesh import. The Human pack has Idle
-	// and Jump; Walk/Run currently resolve to nothing (no authored take), and
-	// ResolveLocomotionAnimation falls back to Idle in that case.
+	// Mesh import provides Idle/Jump; the animation bootstrap supplies Walk/Run.
+	// Soft references need complete object paths to resolve the shipped takes.
 	DefaultIdleAnimationPath = TSoftObjectPtr<UAnimSequence>(FSoftObjectPath(HumanIdlePath));
 	DefaultWalkAnimationPath = TSoftObjectPtr<UAnimSequence>(FSoftObjectPath(HumanWalkPath));
 	DefaultRunAnimationPath = TSoftObjectPtr<UAnimSequence>(FSoftObjectPath(HumanRunPath));

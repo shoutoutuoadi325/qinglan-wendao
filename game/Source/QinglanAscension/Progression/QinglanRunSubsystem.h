@@ -43,19 +43,21 @@ public:
 	/**
 	 * Exit-shrine banking; multiplier from outcome type (1.0 / 0.7 / 0.5).
 	 * A victory is authoritative only when CanClaimVictory() passes (the run is
-	 * standing in the realm's last room and the boss room was completed); any
-	 * other victory request is rejected with OnBankingFailed.
+	 * standing in the full realm's last room with its boss completed, or the
+	 * guided tutorial's two combats and blessing are completed at shrine 3).
+	 * Other victory requests are rejected with OnBankingFailed.
 	 */
 	UFUNCTION(BlueprintCallable) void EndExpedition(bool bVictory, bool bVoluntaryRetreat);
 
-	/** Index of the realm's Boss room; INDEX_NONE when no realm is loaded (AUD-22). */
+	/** Boss room index; INDEX_NONE for the short tutorial or no loaded realm (AUD-22). */
 	UFUNCTION(BlueprintPure) int32 GetBossRoomIndex() const;
 	/** True when this expedition committed its realm's boss room (AUD-22). */
 	UFUNCTION(BlueprintPure) bool IsBossRoomCompleted() const;
 	/**
-	 * The authoritative victory gate (AUD-22): current room is the last room
-	 * (the safe exit) AND the boss room is committed. Victory banking, first-
-	 * clear rewards, and boss proof are all keyed off this.
+	 * The authoritative victory gate (AUD-22): full realms require the safe
+	 * exit and committed boss. The four-room guided tutorial requires both
+	 * combat commits, selected blessing, and shrine 3; it never grants boss
+	 * proof or a boss first-clear bonus.
 	 */
 	UFUNCTION(BlueprintPure) bool CanClaimVictory() const;
 	/**

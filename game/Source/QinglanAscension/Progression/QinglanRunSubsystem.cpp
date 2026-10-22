@@ -31,6 +31,7 @@
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
+#include "Misc/PackageName.h"
 #include "Narrative/QinglanStoryDataTypes.h"
 #include "Narrative/QinglanStoryRuntime.h"
 #include "Narrative/QinglanStorySubsystem.h"
@@ -47,8 +48,10 @@
 
 namespace
 {
-	// --- 7-room contract (blueprint section 1.4; data/examples/realm.json) ---
+	// --- Full realms use seven rooms; CH01 guided training returns at shrine 3. ---
 	constexpr int32 RealmRoomCount = QinglanRoomLayout::RoomCount;
+	constexpr int32 TutorialRoomCount = 4;
+	constexpr int32 TutorialReturnRoom = TutorialRoomCount - 1;
 
 	/** Rooms 2 and 4 (0-based) end with a blessing draft (blueprint 1.4 "blessing #1/#2"). */
 	bool IsBlessingDraftRoom(int32 RoomIndex)
@@ -67,7 +70,7 @@ namespace
 	 */
 	struct FRoomSpec { EQinglanRoomKind Kind; int32 SpiritShards; };
 
-	void FillRoomSpecs(FName RealmId, FRoomSpec (&OutRooms)[RealmRoomCount])
+	int32 FillRoomSpecs(FName RealmId, FRoomSpec (&OutRooms)[RealmRoomCount])
 	{
 		static const FRoomSpec Bamboo[RealmRoomCount] =
 		{
@@ -81,13 +84,15 @@ namespace
 			{ EQinglanRoomKind::Shrine, 0 }, { EQinglanRoomKind::Elite, 80 },
 			{ EQinglanRoomKind::Boss, 100 }, { EQinglanRoomKind::Exit, 0 }
 		};
-		static const FRoomSpec Tutorial[RealmRoomCount] =
+		static const FRoomSpec Tutorial[TutorialRoomCount] =
 		{
-			{ EQinglanRoomKind::Entrance, 0 }, { EQinglanRoomKind::Combat, 20 }, { EQinglanRoomKind::Combat, 20 },
-			{ EQinglanRoomKind::Shrine, 0 }, { EQinglanRoomKind::Elite, 20 },
-			{ EQinglanRoomKind::Boss, 20 }, { EQinglanRoomKind::Exit, 0 }
+			{ EQinglanRoomKind::Entrance, 0 },
+			{ EQinglanRoomKind::Combat, UQinglanEconomyLibrary::TutorialPayoutShards / 2 },
+			{ EQinglanRoomKind::Combat, UQinglanEconomyLibrary::TutorialPayoutShards - UQinglanEconomyLibrary::TutorialPayoutShards / 2 },
+			{ EQinglanRoomKind::Shrine, 0 }
 		};
 		const FRoomSpec* Selected = Bamboo;
+		int32 RoomCount = RealmRoomCount;
 		if (RealmId == FName(UQinglanEconomyLibrary::AshenRealmIdText))
 		{
 			Selected = Ashen;
@@ -95,11 +100,13 @@ namespace
 		else if (RealmId == FName(UQinglanEconomyLibrary::TutorialRealmIdText))
 		{
 			Selected = Tutorial;
+			RoomCount = TutorialRoomCount;
 		}
-		for (int32 Index = 0; Index < RealmRoomCount; ++Index)
+		for (int32 Index = 0; Index < RoomCount; ++Index)
 		{
 			OutRooms[Index] = Selected[Index];
 		}
+		return RoomCount;
 	}
 
 	/** Per-instance expedition state (see file-header FIXME-CONTRACT). */
@@ -166,19 +173,25 @@ namespace
 	/** Resolves the realm template: imported asset first, synthesis otherwise. */
 	const UQinglanRealmDataAsset* ResolveRealmTemplate(const UQinglanRunSubsystem* Subsystem, FName RealmId)
 	{
-		// FIXME-CONTRACT(data): the imported realm asset path is a convention
-		// (/Game/Qinglan/Data/DA_Realm_<id>) until the editor importer authors
-		// the realm data assets; synthesis keeps headless runs identical.
-		const FString AssetPath = FString::Printf(TEXT("/Game/Qinglan/Data/DA_Realm_%s"), *RealmId.ToString());
-		// TCHAR* constructor: the FString overload is explicit in some engine versions.
-		if (UQinglanRealmDataAsset* Imported = Cast<UQinglanRealmDataAsset>(FSoftObjectPath(*AssetPath).TryLoad()))
-		{
-			return Imported;
-		}
 		FQinglanRunState& State = StateFor(const_cast<UQinglanRunSubsystem*>(Subsystem));
 		if (State.SynthesizedRealm.IsValid() && State.SynthesizedRealm->RealmId == RealmId)
 		{
 			return State.SynthesizedRealm.Get();
+		}
+		// CH01 always uses its authored four-room guided route, never a stale
+		// seven-room tutorial asset. DataImport currently authors only bamboo;
+		// Ashen uses the catalog fallback, so a missing optional
+		// package is expected and must not trigger a failed UObject load on
+		// every room query. Logical ids are independent of map asset names:
+		// persisted ashen_peak resumes on L_AshenVerge.
+		const FString PackagePath = FString::Printf(TEXT("/Game/Qinglan/Data/DA_Realm_%s"), *RealmId.ToString());
+		if (RealmId != FName(UQinglanEconomyLibrary::TutorialRealmIdText) && FPackageName::DoesPackageExist(PackagePath))
+		{
+			const FString ObjectPath = PackagePath + TEXT(".") + FPackageName::GetShortName(PackagePath);
+			if (UQinglanRealmDataAsset* Imported = Cast<UQinglanRealmDataAsset>(FSoftObjectPath(*ObjectPath).TryLoad()))
+			{
+				return Imported;
+			}
 		}
 		UQinglanRealmDataAsset* Realm = NewObject<UQinglanRealmDataAsset>(GetTransientPackage());
 		if (!Realm)
@@ -190,9 +203,9 @@ namespace
 		Realm->DefaultSeed = State.RealmSeed;
 		Realm->MaxConcurrentEnemies = 8; // docs/01 section 6 cap
 		FRoomSpec Specs[RealmRoomCount];
-		FillRoomSpecs(RealmId, Specs);
-		Realm->Rooms.SetNum(RealmRoomCount);
-		for (int32 Index = 0; Index < RealmRoomCount; ++Index)
+		const int32 RoomCount = FillRoomSpecs(RealmId, Specs);
+		Realm->Rooms.SetNum(RoomCount);
+		for (int32 Index = 0; Index < RoomCount; ++Index)
 		{
 			Realm->Rooms[Index].Kind = Specs[Index].Kind;
 			Realm->Rooms[Index].SpiritShards = Specs[Index].SpiritShards;
@@ -399,7 +412,7 @@ namespace
 		FQinglanInventory Repeat;
 		if (!UQinglanEconomyLibrary::GetExpeditionPayout(State.RealmId, /*bFirstClear*/ false, Repeat))
 		{
-			return true; // tutorial: room rewards + elite drop already match the authored payout
+			return true; // tutorial: its two combat rewards + guaranteed herb already match the authored payout
 		}
 		int32 CommittedEliteRooms = 0;
 		for (const int32 RoomId : State.CommittedRoomIds)
@@ -608,6 +621,15 @@ void UQinglanRunSubsystem::CompleteCurrentRoom(FName TransactionId)
 		}
 	}
 
+	// CH01 returns at shrine 3, before the full realm's elite and boss rooms.
+	// Its one guaranteed herb is earned with the second guided combat reward,
+	// and shares that room's committed-id guard/checkpoint, so reload cannot
+	// replay it. The two room rewards already sum to the full 80-shard payout.
+	if (State.RealmId == FName(UQinglanEconomyLibrary::TutorialRealmIdText) && RoomIndex == 2)
+	{
+		State.UnbankedLoot.SpiritHerb += UQinglanEconomyLibrary::TutorialPayoutHerbs;
+	}
+
 	// AUD-22: clearing the boss room commits its reward, but boss proof and the
 	// campaign flag are settlement outcomes. EndExpedition writes them only for
 	// an authoritative victory (boss cleared AND the run reached the exit), so a
@@ -641,9 +663,9 @@ void UQinglanRunSubsystem::EndExpedition(bool bVictory, bool bVoluntaryRetreat)
 	UQinglanProfileSubsystem* Profile = Instance ? Instance->GetSubsystem<UQinglanProfileSubsystem>() : nullptr;
 	UQinglanSaveSubsystem* Save = Instance ? Instance->GetSubsystem<UQinglanSaveSubsystem>() : nullptr;
 	const UQinglanRealmDataAsset* Realm = ResolveRealmTemplate(this, State.RealmId);
-	// AUD-22: an authoritative victory requires both the completed boss room
-	// and standing in the realm's final (exit) room. Defeat/retreat are still
-	// allowed from anywhere and simply never qualify for boss proof.
+	// Full realms require a completed boss and their final exit; CH01's
+	// guided route instead requires both combats, blessing and shrine 3.
+	// Defeat/retreat never qualify for boss proof.
 	const bool bAuthoritativeVictory = bVictory && CanClaimVictory();
 	if (!Profile || !Save || !Save->IsProfileSessionActive() || (bVictory && !bAuthoritativeVictory))
 	{
@@ -657,7 +679,15 @@ void UQinglanRunSubsystem::EndExpedition(bool bVictory, bool bVoluntaryRetreat)
 	FName FirstClearId = NAME_None;
 	// AUD-22: first-clear rewards ride the same authoritative victory gate as
 	// the settlement itself; defeat/retreat never compute or grant them.
-	if (bAuthoritativeVictory)
+	if (bAuthoritativeVictory && State.RealmId == FName(UQinglanEconomyLibrary::TutorialRealmIdText))
+	{
+		// The guided reward is an expedition TOTAL, not another room reward or
+		// a guardian first-clear bonus. Reconcile to the authored amount once
+		// the short-route proof passes, including a resumed pre-fix checkpoint
+		// that earned the former 20+20 shard split before reaching shrine 3.
+		UQinglanEconomyLibrary::GetTutorialPayout(Banked);
+	}
+	else if (bAuthoritativeVictory)
 	{
 		if (!AppendRepeatMaterialPayout(State, Realm, Banked))
 		{
@@ -770,6 +800,17 @@ bool UQinglanRunSubsystem::CanClaimVictory() const
 	{
 		return false;
 	}
+	if (State->RealmId == FName(UQinglanEconomyLibrary::TutorialRealmIdText))
+	{
+		// A short guided route is not a Bamboo Guardian clear. Its return is
+		// earned by both combat rooms, the real room-2 blessing selection, and
+		// reaching the authored safe shrine; no synthetic boss proof is used.
+		return Realm->GetRoomCount() == TutorialRoomCount
+			&& Realm->GetRoomKind(TutorialReturnRoom) == EQinglanRoomKind::Shrine
+			&& State->CurrentRoomIndex == TutorialReturnRoom
+			&& State->CommittedRoomIds.Contains(1) && State->CommittedRoomIds.Contains(2)
+			&& !State->bDraftPending && !State->AcquiredBlessings.IsEmpty();
+	}
 	// The exit interaction lives in the last room; a boss clear alone is not a
 	// completed expedition (the player could still die to trailing adds).
 	const int32 ExitRoomIndex = Realm->GetRoomCount() - 1;
@@ -794,7 +835,7 @@ bool UQinglanRunSubsystem::RequestExit()
 	if (!CanClaimVictory())
 	{
 		UE_LOG(LogQinglan, Warning,
-			TEXT("Exit refused: boss room %d incomplete or room %d is not the exit"),
+			TEXT("Exit refused: route completion requirements unmet (boss room %d, current room %d)"),
 			GetBossRoomIndex(), State->CurrentRoomIndex);
 		return false;
 	}
@@ -1004,6 +1045,18 @@ void UQinglanRunSubsystem::ImportCheckpoint(const FQinglanCheckpoint& In)
 	State.EntryAttributes = In.PlayerAttributes;
 	State.UnbankedLoot = In.Loot;
 	State.CommittedRoomIds = In.CommittedRoomIds;
+	// Older guided saves could still be standing in the full realm's rooms
+	// 4-6. Keep earned combat/draft proof, loot and exact RNG states, but resume
+	// at CH01's return shrine once both guided combats were already committed.
+	// This is position-only compatibility; victory settlement alone reconciles
+	// the tutorial payout. Ordinary realms and unfinished guided routes retain
+	// their original checkpoint positions.
+	if (State.RealmId == FName(UQinglanEconomyLibrary::TutorialRealmIdText)
+		&& In.RoomIndex >= TutorialReturnRoom && In.RoomIndex < RealmRoomCount
+		&& State.CommittedRoomIds.Contains(1) && State.CommittedRoomIds.Contains(2))
+	{
+		State.CurrentRoomIndex = TutorialReturnRoom;
+	}
 	// AUD-06: importing consumes no random draw and keeps the same choices.
 	// The save subsystem validates offer/room pairing before calling this bridge.
 	State.PendingBlessingOffer = In.PendingBlessingOffer;

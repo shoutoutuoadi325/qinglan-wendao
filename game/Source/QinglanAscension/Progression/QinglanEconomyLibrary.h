@@ -126,7 +126,8 @@ public:
 	static constexpr int64 AshenFirstClearCrystals = 3;
 	static constexpr int64 AshenRepeatCrystals = 2;
 
-	/** Stable realm ids, mirror data/examples/realm.json and localization realm.* keys. */
+	/** Stable logical/save ids, matching localization realm.* keys. Map asset
+	 * names are separate: ashen_peak travels to L_AshenVerge. */
 	static constexpr const TCHAR* BambooRealmIdText = TEXT("bamboo_hollow");
 	static constexpr const TCHAR* AshenRealmIdText = TEXT("ashen_peak");
 	static constexpr const TCHAR* TutorialRealmIdText = TEXT("tutorial_guided");

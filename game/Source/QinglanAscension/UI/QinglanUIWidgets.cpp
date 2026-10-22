@@ -2168,13 +2168,13 @@ void UQinglanHUDWidget::RefreshFromPlayer()
 		return; // no named elements bound: presentation stays with the fallbacks
 	}
 	AQinglanCharacter* Player = GetOwningPlayerPawn<AQinglanCharacter>();
-	if (!Player)
+	if (!IsValid(Player))
 	{
 		return; // pawn not in the world yet (loading order): next refresh retries
 	}
 
 	UQinglanCombatComponent* Combat = Player->GetCombat();
-	if (Combat)
+	if (IsValid(Combat))
 	{
 		// Vitals (docs/02 section 3 vitals block; percentages clamped 0..1).
 		const FQinglanAttributes& Attributes = Combat->GetAttributes();
@@ -2201,7 +2201,7 @@ void UQinglanHUDWidget::RefreshFromPlayer()
 	// Technique loadout: slot name from the string table via NameTextKey,
 	// dimmed while its cooldown runs (docs/11 "Active Skill | Technique").
 	UQinglanTechniqueComponent* Techniques = Player->GetTechniques();
-	if (Techniques && SkillTexts.Num() > 0)
+	if (IsValid(Techniques) && SkillTexts.Num() > 0)
 	{
 		const TArray<UQinglanTechniqueDataAsset*> Loadout = Techniques->GetLoadout();
 		for (int32 Index = 0; Index < SkillTexts.Num(); ++Index)
@@ -2212,9 +2212,19 @@ void UQinglanHUDWidget::RefreshFromPlayer()
 				continue;
 			}
 			UQinglanTechniqueDataAsset* Technique = Loadout.IsValidIndex(Index) ? Loadout[Index] : nullptr;
-			if (!Technique)
+			if (!IsValid(Technique))
 			{
 				SlotText->SetText(FText::GetEmpty()); // unequipped slot renders blank
+				continue;
+			}
+			// A corrupted/uninitialized FName would crash FName::ToString in
+			// the keying/fallback below (observed after input; see the
+			// invalid-FName HUD crash). Blank the slot instead of crashing.
+			const FName TechniqueId = Technique->TechniqueId;
+			if (!TechniqueId.IsValid())
+			{
+				UE_LOG(LogQinglanUI, Warning, TEXT("HUD: technique slot %d has an invalid id; slot left blank"), Index);
+				SlotText->SetText(FText::GetEmpty());
 				continue;
 			}
 			FFormatNamedArguments Args;
@@ -2223,9 +2233,9 @@ void UQinglanHUDWidget::RefreshFromPlayer()
 			// key when a legacy/imported asset carries NAME_None instead of
 			// rendering the missing-string marker in the skill HUD.
 			FName NameKey = Technique->NameTextKey;
-			if (NameKey.IsNone())
+			if (!NameKey.IsValid() || NameKey.IsNone())
 			{
-				NameKey = FName(*FString::Printf(TEXT("technique.%s.name"), *Technique->TechniqueId.ToString()));
+				NameKey = FName(*FString::Printf(TEXT("technique.%s.name"), *TechniqueId.ToString()));
 			}
 			// Readable fallback: never render the missing-string marker into
 			// the skill bar; the id with separators turned into spaces is
@@ -2233,7 +2243,7 @@ void UQinglanHUDWidget::RefreshFromPlayer()
 			FText NameText = UQinglanHUDStatics::GameText(NameKey);
 			if (NameText.ToString().Contains(TEXT("MISSING STRING TABLE ENTRY")))
 			{
-				FString Pretty = Technique->TechniqueId.ToString();
+				FString Pretty = TechniqueId.ToString();
 				Pretty.ReplaceInline(TEXT("_"), TEXT(" "));
 				NameText = FText::FromString(Pretty);
 			}
@@ -2306,7 +2316,7 @@ void UQinglanHUDWidget::RefreshLiveInfo(AQinglanCharacter* Player)
 			{
 				continue;
 			}
-			if (!Equipped.IsValidIndex(Index) || Equipped[Index].IsNone())
+			if (!Equipped.IsValidIndex(Index) || Equipped[Index].IsNone() || !Equipped[Index].IsValid())
 			{
 				Text->SetText(FText::GetEmpty());
 				continue;

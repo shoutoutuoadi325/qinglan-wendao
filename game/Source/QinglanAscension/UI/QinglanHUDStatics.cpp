@@ -121,6 +121,14 @@ FName UQinglanHUDStatics::GameStringTableId()
 
 FText UQinglanHUDStatics::GameText(FName Key)
 {
+	// A corrupted/uninitialized FName would crash inside FName::ToString.
+	// Treat it as a missing key and keep the HUD alive (observed once in a
+	// Development HUD refresh; the fallback makes the failure diagnosable).
+	if (!Key.IsValid())
+	{
+		UE_LOG(LogQinglanUI, Warning, TEXT("GameText: invalid FName key; using placeholder"));
+		return FText::FromString(TEXT("<invalid text key>"));
+	}
 	// AUD-48: the runtime bilingual service (packaged DT_Localization) is the
 	// primary resolver; it follows the active culture and falls back en-US.
 	// ST_Game remains the final fallback so a missing/unqueued importer output
@@ -324,6 +332,14 @@ UUserWidget* UQinglanHUDStatics::CreateWidgetById(const UObject* WorldContextObj
 		? GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::LogAndReturnNull)
 		: nullptr;
 	APlayerController* OwningPlayer = World ? World->GetFirstPlayerController() : nullptr;
+	// UMG widgets only accept a local player controller as their owner. Server-
+	// side and headless automation worlds can hold a controller that is not
+	// local; creating with it logs a PIE error and yields no usable widget, so
+	// treat "no local player" as "no presentation" instead.
+	if (!OwningPlayer || !OwningPlayer->IsLocalPlayerController())
+	{
+		return nullptr;
+	}
 	// Create takes a mutable context (world resolution only); the const here just pins the lookup.
 	return UWidgetBlueprintLibrary::Create(const_cast<UObject*>(WorldContextObject), Class, OwningPlayer);
 }

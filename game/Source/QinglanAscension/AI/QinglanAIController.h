@@ -156,8 +156,8 @@ public:
 	void NotifyDeathBegan();
 	void NotifyRetreatBegan(float Seconds) { RetreatRemaining = Seconds; }
 
-	/** Offscreen check + audible cue (docs/02 section 8). */
-	void PlayOffscreenAttackAudioCue();
+	/** One windup warning, retained for attacks outside the camera (docs/02 section 8). */
+	void PlayAttackAudioCue();
 	bool IsTargetOffscreenFromPlayerCamera() const;
 
 private:

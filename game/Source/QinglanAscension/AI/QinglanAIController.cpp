@@ -10,6 +10,7 @@
 #include "Combat/QinglanCharacter.h"
 #include "Combat/QinglanCombatComponent.h"
 #include "Combat/QinglanStatusComponent.h"
+#include "Core/QinglanAudioAssets.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Engine/Engine.h"
 #include "Engine/GameViewportClient.h"
@@ -25,11 +26,6 @@ DEFINE_LOG_CATEGORY(LogQinglanAI);
 
 namespace
 {
-	// Placeholder cue assets (docs/05 section 3: original placeholder
-	// alternatives until the Audio pass). Null-safe everywhere: a missing
-	// asset degrades to no sound, never to a crash or gameplay change.
-	const TCHAR* GOffscreenAttackCuePath = TEXT("/Game/Qinglan/Audio/S_EnemyAttackOffscreen");
-
 	USoundBase* LoadSound(const TCHAR* Path)
 	{
 		return Cast<USoundBase>(FSoftObjectPath(Path).TryLoad());
@@ -407,8 +403,8 @@ void AQinglanAIController::NotifyWindupBegan(float /*TelegraphDuration*/, const 
 		return;
 	}
 
-	// Audible cue for attacks the player cannot see (docs/02 section 8).
-	PlayOffscreenAttackAudioCue();
+	// One warning per windup, including attacks outside the camera view.
+	PlayAttackAudioCue();
 
 	// Record shape data at windup start so the release envelope is fixed and
 	// dodgeable (delayed ground effects, docs/02 section 8).
@@ -615,21 +611,21 @@ void AQinglanAIController::NotifyDeathBegan()
 	ClearFocus(EAIFocusPriority::Gameplay);
 }
 
-void AQinglanAIController::PlayOffscreenAttackAudioCue()
+void AQinglanAIController::PlayAttackAudioCue()
 {
 	AQinglanEnemyCharacter* Enemy = GetEnemy();
-	if (!Enemy || !IsTargetOffscreenFromPlayerCamera())
+	if (!Enemy)
 	{
 		return;
 	}
 	// Audio cues are never quality-stripped (docs/02 section 9: cast audio
 	// retained at low quality/low-flash; docs/06 section 6).
-	if (USoundBase* Cue = LoadSound(GOffscreenAttackCuePath))
+	if (USoundBase* Cue = LoadSound(QinglanAudioAssets::TelegraphWarning))
 	{
 		UGameplayStatics::PlaySoundAtLocation(this, Cue, Enemy->GetActorLocation(),
-			QinglanAITunables::OffscreenCueVolumeMultiplier);
+			IsTargetOffscreenFromPlayerCamera() ? QinglanAITunables::OffscreenCueVolumeMultiplier : 1.f);
 	}
-	UE_LOG(LogQinglanAI, Verbose, TEXT("Offscreen attack cue fired for %s"), *Enemy->GetEnemyId().ToString());
+	UE_LOG(LogQinglanAI, Verbose, TEXT("Attack warning cue fired for %s"), *Enemy->GetEnemyId().ToString());
 }
 
 bool AQinglanAIController::IsTargetOffscreenFromPlayerCamera() const

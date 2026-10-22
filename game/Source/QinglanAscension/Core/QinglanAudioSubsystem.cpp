@@ -1,4 +1,5 @@
 #include "Core/QinglanAudioSubsystem.h"
+#include "Core/QinglanAudioAssets.h"
 
 #include "Components/AudioComponent.h"
 #include "Engine/World.h"
@@ -26,7 +27,7 @@ namespace
 		if (SfxId == FName(TEXT("sfx_sword_swing")))       { return TEXT("/Game/Qinglan/Audio/SFX/SW_sfx_sword_swing"); }
 		if (SfxId == FName(TEXT("sfx_hit_impact")))        { return TEXT("/Game/Qinglan/Audio/SFX/SW_sfx_hit_impact"); }
 		if (SfxId == FName(TEXT("sfx_technique_release"))) { return TEXT("/Game/Qinglan/Audio/SFX/SW_sfx_technique_release"); }
-		if (SfxId == FName(TEXT("sfx_telegraph_warn")))    { return TEXT("/Game/Qinglan/Audio/SFX/SW_sfx_telegraph_warn"); }
+		if (SfxId == FName(TEXT("sfx_telegraph_warn")))    { return QinglanAudioAssets::TelegraphWarning; }
 		return nullptr;
 	}
 

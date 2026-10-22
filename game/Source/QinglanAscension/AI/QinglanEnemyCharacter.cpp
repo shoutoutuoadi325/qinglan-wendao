@@ -677,15 +677,8 @@ void AQinglanEnemyCharacter::UpdateDecisions(float DeltaSeconds)
 		{
 			PlayAnimMontage(Montage);
 		}
-		// Telegraph broadcast: presentation renders cue ids and keeps the
-		// silhouette at Low quality (docs/06 section 6).
-		if (UGameInstance* GameInstance = GetGameInstance())
-		{
-			if (UQinglanAudioSubsystem* Audio = GameInstance->GetSubsystem<UQinglanAudioSubsystem>())
-			{
-				Audio->PlaySfx(FName(TEXT("sfx_telegraph_warn"))); // docs/04 audio pass
-			}
-		}
+		// NotifyWindupBegan owns the single audio warning. Presentation keeps
+		// the telegraph silhouette at Low quality (docs/06 section 6).
 		OnTelegraph.Broadcast(this, Windup);
 	};
 

@@ -18,6 +18,7 @@
 #include "AI/QinglanAIController.h"
 #include "AI/QinglanEnemyCharacter.h"
 #include "Core/QinglanAudioSubsystem.h"
+#include "Core/QinglanAudioAssets.h"
 #include "Core/QinglanRoomLayout.h"
 #include "Components/SceneComponent.h"
 #include "Engine/GameInstance.h"
@@ -54,9 +55,6 @@ namespace
 	// exposes no stream getter and BeginEncounter() carries no seed; swap this
 	// derivation for the run-owned stream once that API exists.
 	constexpr uint32 EncounterDomainSalt = 0x514C414Eu; // "QLAN"
-
-	// Placeholder portal warning sound (docs/05 section 3); null-safe.
-	const TCHAR* GPortalWarningCuePath = TEXT("/Game/Qinglan/Audio/S_PortalWarning");
 
 	/** Per-director state that cannot live in the frozen scaffold header. */
 	struct FQinglanDirectorExtra
@@ -540,10 +538,10 @@ void AQinglanEncounterDirector::SpawnThroughPortal(UQinglanEnemyDataAsset* Data,
 
 	PendingSpawns.Add(Enemy);
 
-	// Portal warning: always audible (placeholder asset, null-safe); visual
+	// Portal warning: the imported telegraph cue is retained at every quality; visual
 	// cue ids route through quality tiers on the presentation side
 	// (code-contracts; docs/06 section 6).
-	if (USoundBase* Cue = Cast<USoundBase>(FSoftObjectPath(GPortalWarningCuePath).TryLoad()))
+	if (USoundBase* Cue = Cast<USoundBase>(FSoftObjectPath(QinglanAudioAssets::TelegraphWarning).TryLoad()))
 	{
 		UGameplayStatics::PlaySoundAtLocation(this, Cue, SpawnLocation);
 	}

@@ -1,4 +1,5 @@
 #include "QinglanAudioBootstrap.h"
+#include "QinglanRawAssets.h"
 
 #include "AssetImportTask.h"
 #include "AssetToolsModule.h"
@@ -12,7 +13,7 @@
 
 namespace
 {
-	const FString AudioRoot = TEXT("/inspire/hdd/project/qianghuaxuexi/s26044/assets-raw/audio");
+	FString AudioRoot;
 	const FString ContentRoot = TEXT("/Game/Qinglan/Audio");
 
 	struct FAudioEntry { const TCHAR* File; const TCHAR* Group; bool bLooping; };
@@ -78,6 +79,11 @@ USoundWave* UQinglanAudioBootstrapCommandlet::ImportSoundWave(const FString& Sou
 	const FString Base = TEXT("SW_") + FPaths::GetBaseFilename(SourceFile);
 	const FString DestPath = QinglanAudioContract::DestinationPackagePath(SourceFile, Group);
 	const FString FullSource = AudioRoot / SourceFile;
+	if (!IFileManager::Get().FileExists(*FullSource))
+	{
+		UE_LOG(LogTemp, Error, TEXT("audio source missing: %s"), *FullSource);
+		return nullptr;
+	}
 	if (USoundWave* Existing = LoadObject<USoundWave>(nullptr, *DestPath))
 	{
 		// Reuse only when the committed asset already came from this exact
@@ -95,12 +101,6 @@ USoundWave* UQinglanAudioBootstrapCommandlet::ImportSoundWave(const FString& Sou
 		UE_LOG(LogTemp, Log, TEXT("audio source changed; re-importing %s (previous %s)"),
 			*FullSource, *ImportedSource);
 	}
-	if (!IFileManager::Get().FileExists(*FullSource))
-	{
-		UE_LOG(LogTemp, Warning, TEXT("audio source missing: %s"), *FullSource);
-		return nullptr;
-	}
-
 	USoundFactory* Factory = NewObject<USoundFactory>();
 	Factory->bAutoCreateCue = false;
 	Factory->SuppressImportDialogs(); // headless: no import-option dialogs
@@ -150,6 +150,27 @@ USoundWave* UQinglanAudioBootstrapCommandlet::ImportSoundWave(const FString& Sou
 
 int32 UQinglanAudioBootstrapCommandlet::Main(const FString& Params)
 {
+	const FString RawRoot = QinglanRawAssets::ResolveRoot(Params);
+	AudioRoot = RawRoot / TEXT("audio");
+	if (!QinglanRawAssets::RequireDirectory(RawRoot) || !QinglanRawAssets::RequireDirectory(AudioRoot))
+	{
+		return 1;
+	}
+	// Validate every required source before importing or reusing any asset.
+	bool bSourcesPresent = true;
+	for (const FAudioEntry& Entry : Entries)
+	{
+		const FString Source = AudioRoot / Entry.File;
+		if (!IFileManager::Get().FileExists(*Source))
+		{
+			UE_LOG(LogTemp, Error, TEXT("audio source missing: %s"), *Source);
+			bSourcesPresent = false;
+		}
+	}
+	if (!bSourcesPresent)
+	{
+		return 1;
+	}
 	UE_LOG(LogTemp, Log, TEXT("QinglanAudioBootstrap starting; root=%s"), *AudioRoot);
 	bool bOk = true;
 	int32 Count = 0;

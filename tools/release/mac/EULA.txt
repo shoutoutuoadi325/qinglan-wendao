@@ -1,0 +1,32 @@
+QINGLAN: PATH OF ASCENSION - ALPHA BUILD LICENSE
+================================================
+
+Copyright © 2026 Qinglan Community. All rights reserved.
+
+1. Grant. You may download, install, and play this alpha build for personal,
+   non-commercial entertainment and testing.
+
+2. Restrictions. You may not sell, rent, sublicense, or redistribute this
+   build or modified copies of it. You may not reverse engineer the build
+   except where applicable law permits.
+
+3. Alpha status. This is an unfinished alpha. Features may change or be
+   removed, and save data may not be compatible with later versions.
+
+4. No warranty. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY
+   KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
+
+5. Unreal Engine. This product includes Unreal® Engine, licensed from Epic
+   Games, Inc. To the maximum extent permitted by law, Qinglan Community
+   disclaims any representations, warranties, conditions, and liabilities
+   related to the Unreal® Engine.
+
+6. Privacy. The game is offline and does not collect personal data. See the
+   project's PRIVACY.md for the current statement.
+
+7. Third-party notices. See CREDITS.txt and
+   Contents/UE/NOTICES.txt inside the app bundle.
+
+This alpha license does not grant any rights to the project's source code or
+art assets. The public repository remains all rights reserved.

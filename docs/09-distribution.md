@@ -47,13 +47,15 @@ The retrieved policy page labels version 7.20 as published 2026-09-15 and effect
 
 ## 5. macOS channel
 
-The Mac build is a native arm64 `.app`, distributed as an owner-approved signed/notarized download, with the same gameplay content version as Windows. Microsoft Store is not a macOS distribution channel. Mac App Store submission is not part of 1.0.
+The Mac build is a native arm64 `.app`, distributed as a direct GitHub Release with the same gameplay content version as Windows. Microsoft Store is not a macOS distribution channel. Mac App Store submission is not part of 1.0.
 
-Prepare the build on macOS, verify all embedded plugins/frameworks have arm64 support, and apply an appropriate bundle identifier. Owner-controlled Developer ID signing, hardened runtime configuration, notarization, and stapling are planned release tasks. Credentials remain in secure local/CI storage, not this repository. Trusted signing can require paid Apple enrollment; this is separate from the free engine requirement and no enrollment has been purchased.
+For the 0.1.0 alpha the owner has chosen not to enroll in the paid Apple Developer Program. The public alpha is therefore **ad-hoc signed and not notarized**, not Developer ID signed. This is an explicit alpha channel, not the final trusted deliverable; Gatekeeper will block the first launch, and the release must not describe the build as signed, notarized, or Store-ready.
 
-Use Apple's documented process and check `codesign`, Gatekeeper assessment, notarization results, and a clean-machine first launch. Never bypass security warnings as a release instruction. [Apple notarization documentation](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution).
+Prepare the build on macOS, verify all embedded plugins/frameworks have arm64 support, and apply a real bundle identifier. `tools/release/package-mac-unsigned.sh` re-signs the staged app ad hoc with the `app-sandbox` entitlement and without the debug-only `get-task-allow` entitlement, then creates the DMG and checksum file. Owner-controlled Developer ID signing, hardened runtime configuration, notarization, and stapling remain planned release tasks for a later signed build. Credentials remain in secure local/CI storage, not this repository.
 
-The direct Mac download location, signing identity, bundle ID, and support contact remain release configuration decisions. A `.zip` test build without trusted signing is an internal artifact, not the final distribution deliverable.
+Release instructions must be explicit: verify `SHA256SUMS`; open the app once; use **System Settings > Privacy & Security > Open Anyway**; if macOS reports the app is damaged, remove the quarantine flag for that app only with `xattr -dr com.apple.quarantine <app>`. Never instruct users to run `sudo spctl --master-disable`, disable Gatekeeper globally, or bypass warnings for a build they did not verify. Publish only through GitHub Releases and include the alpha EULA, credits, and install notes in the DMG. [Apple notarization documentation](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution).
+
+The direct Mac download location, bundle ID, and support contact remain release configuration decisions. The unsigned DMG is published only through GitHub Releases; it is not a Mac App Store deliverable.
 
 ## 6. Listing copy draft
 

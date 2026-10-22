@@ -2,17 +2,52 @@
 
 A completely free, offline, single-player **3D xianxia action game** for Windows and Apple Silicon macOS. Explore mountain sanctuaries, master the Five Elements, and survive Heavenly Tribulations with grounded materials and cinematic, scalable spell effects.
 
+## Play the macOS alpha
+
+> **Early unsigned alpha.** The macOS build is not signed with an Apple
+> Developer ID and is not notarized. macOS will warn on first launch; the
+> steps below explain the per-app override. Only download from this
+> repository's [Releases](https://github.com/shoutoutuoadi325/qinglan-wendao/releases).
+
+| Platform | Download | Requirements |
+| --- | --- | --- |
+| macOS (Apple Silicon) | [Releases](https://github.com/shoutoutuoadi325/qinglan-wendao/releases) | macOS 14.0+, M1 or newer, about 2 GB free disk |
+
+**Install**
+
+1. Download `Qinglan-0.1.0-alpha.1-macOS-arm64.dmg` and `SHA256SUMS` from the
+   release into the same folder.
+2. Verify the download: `shasum -a 256 -c SHA256SUMS`.
+3. Open the DMG and drag **Qinglan - Path of Ascension** into **Applications**.
+4. Try to open the app once, then open **System Settings > Privacy & Security**,
+   click **Open Anyway** for Qinglan, authenticate, and open the app again.
+5. If macOS reports the app is damaged, remove the quarantine flag for this app
+   only:
+   `xattr -dr com.apple.quarantine "/Applications/Qinglan - Path of Ascension.app"`.
+
+Never run `sudo spctl --master-disable` and never disable Gatekeeper globally.
+The build is ad-hoc signed, not Developer ID signed or notarized; see the
+[distribution guide](docs/09-distribution.md) for the release policy.
+
+**Save data:** `~/Library/Containers/io.github.shoutoutuoadi325.qinglan/Data/`.
+
+**Current limits:** early alpha; the full campaign is not yet interactively
+verified end to end, gamepad support is unverified, there is no auto-update,
+and save compatibility across versions is not guaranteed. Windows builds are
+not included. See the [v0.1.0-alpha.1 release notes](docs/releases/v0.1.0-alpha.1.md).
+
 **Project status (2026-10-20):** in active development on Linux (UE 5.8 source build). The `game/` Unreal project contains C++ implementations for combat, abilities, AI, progression, persistence, narrative, trials, UI, and a headless content pipeline (maps, materials, characters, montages, string tables, Niagara cue systems). Current recorded results: editor build green; automation **70/70**; functional new-profile journeys **30/30 main scenes** and **24/24 side stages**; clean content regeneration `rc_all=0`; Linux Shipping package `rc=0` with a verified IoStore inventory; rendered packaged boots in English, Simplified Chinese, and Low + low-flash; packaged keyboard/mouse movement, cold-start slot selection, and a real `kill -9`/relaunch at the hub boundary. **These results establish compilation, scripted subsystem behavior, packaging, and targeted rendered evidence; they do not establish a complete interactive playthrough.** Windows DX12 and Apple Silicon Metal builds/devices, a full keyboard/gamepad playthrough, and target-hardware performance captures remain open. See [docs/dev/build-and-run.md](docs/dev/build-and-run.md), [docs/dev/test-report.md](docs/dev/test-report.md), and the [owner runbook](docs/dev/remaining-acceptance-runbook.md).
 
 **Completion audit (2026-10-14):** development is not complete. See the [reviewed repair TODO and acceptance gates](docs/dev/completion-audit-todo.md) for confirmed integration defects, unfinished player flows, and required verification; the earlier build/test report does not establish campaign or release readiness.
 
-**Local Mac continuation (2026-10-20):** acceptance preparation is underway on
-Apple Silicon in a removable `.local` workspace. The locked engine source and
-raw assets, native dependencies and Metal Toolchain are installed. The user
-installed Xcode 27.1; the native editor build now passes with the documented
-local Xcode-stdin patch. Content regeneration is running; the expanded
-Unreal suite, Shipping package and rendered acceptance remain unverified.
-See [local Mac setup](docs/dev/local-mac-setup.md).
+**Local Mac continuation (2026-10-21):** the native Apple Silicon baseline is
+green: editor build, content regeneration, **90/90** automation, **30/30** main
+and **24/24** side journeys, and an arm64 Shipping package. The package boots
+with Metal; a keyboard cold start, profile slot load, hub movement, and a real
+`kill -9` / relaunch with save recovery are recorded. A full interactive
+CH00-CH07 playthrough, gamepad, Windows DX12/Win64, and target-hardware
+performance remain open. See [local Mac setup](docs/dev/local-mac-setup.md)
+and the [owner runbook](docs/dev/remaining-acceptance-runbook.md).
 
 ## Confirmed requirements
 
@@ -37,7 +72,7 @@ See [local Mac setup](docs/dev/local-mac-setup.md).
 | Combat | Sword combo, dodge, four equipped techniques, two talisman slots |
 | Story | Eight side quests, 24 environmental records, complete English/Simplified Chinese text |
 | Replay | Seeded encounter selection and temporary blessings in authored 3D rooms |
-| Distribution | Windows: Microsoft Store; Mac: signed and notarized direct download |
+| Distribution | Windows: Microsoft Store; Mac: direct GitHub Release (current alpha unsigned; Developer ID signing and notarization planned) |
 
 ## Read the development package
 
@@ -74,5 +109,7 @@ Gameplay source has completed the repair waves recorded in the audit TODO. Remai
 ## Rights and release status
 
 Public visibility does not grant a general reuse license. Original project material remains all rights reserved until the owner selects a redistribution license; see [NOTICE](NOTICE.md). Unreal Engine, licensed asset source files, third-party SDKs, signing keys, and store account details must not be uploaded here. The engine is separately obtained under Epic's license.
+
+The macOS alpha binaries on GitHub Releases are unsigned, ad-hoc-signed builds distributed under the alpha `EULA.txt` included in the download. They are not Developer ID signed or notarized, and they are not Mac App Store deliverables.
 
 The working title has not been reserved or cleared in Microsoft Store. The privacy statement is a release draft, not a claim that a game has already shipped.

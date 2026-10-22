@@ -15,7 +15,7 @@ A completely free, offline, single-player **3D xianxia action game** for Windows
 
 **Install**
 
-1. Download `Qinglan-0.1.0-alpha.1-macOS-arm64.dmg` and `SHA256SUMS` from the
+1. Download `Qinglan-0.1.0-alpha.2-macOS-arm64.dmg` and `SHA256SUMS` from the
    release into the same folder.
 2. Verify the download: `shasum -a 256 -c SHA256SUMS`.
 3. Open the DMG and drag **Qinglan - Path of Ascension** into **Applications**.
@@ -34,19 +34,21 @@ The build is ad-hoc signed, not Developer ID signed or notarized; see the
 **Current limits:** early alpha; the full campaign is not yet interactively
 verified end to end, gamepad support is unverified, there is no auto-update,
 and save compatibility across versions is not guaranteed. Windows builds are
-not included. See the [v0.1.0-alpha.1 release notes](docs/releases/v0.1.0-alpha.1.md).
+not included. See the [v0.1.0-alpha.2 release notes](docs/releases/v0.1.0-alpha.2.md).
 
 **Project status (2026-10-20):** in active development on Linux (UE 5.8 source build). The `game/` Unreal project contains C++ implementations for combat, abilities, AI, progression, persistence, narrative, trials, UI, and a headless content pipeline (maps, materials, characters, montages, string tables, Niagara cue systems). Current recorded results: editor build green; automation **70/70**; functional new-profile journeys **30/30 main scenes** and **24/24 side stages**; clean content regeneration `rc_all=0`; Linux Shipping package `rc=0` with a verified IoStore inventory; rendered packaged boots in English, Simplified Chinese, and Low + low-flash; packaged keyboard/mouse movement, cold-start slot selection, and a real `kill -9`/relaunch at the hub boundary. **These results establish compilation, scripted subsystem behavior, packaging, and targeted rendered evidence; they do not establish a complete interactive playthrough.** Windows DX12 and Apple Silicon Metal builds/devices, a full keyboard/gamepad playthrough, and target-hardware performance captures remain open. See [docs/dev/build-and-run.md](docs/dev/build-and-run.md), [docs/dev/test-report.md](docs/dev/test-report.md), and the [owner runbook](docs/dev/remaining-acceptance-runbook.md).
 
 **Completion audit (2026-10-14):** development is not complete. See the [reviewed repair TODO and acceptance gates](docs/dev/completion-audit-todo.md) for confirmed integration defects, unfinished player flows, and required verification; the earlier build/test report does not establish campaign or release readiness.
 
-**Local Mac continuation (2026-10-21):** the native Apple Silicon baseline is
-green: editor build, content regeneration, **90/90** automation, **30/30** main
-and **24/24** side journeys, and an arm64 Shipping package. The package boots
+**Local Mac continuation (2026-10-22):** the native Apple Silicon baseline is
+green after repairing the corrupted 2026-10-22 character-source batch: editor
+build, content regeneration, **90/90** automation, **30/30** main and
+**24/24** side journeys, and an arm64 Shipping package. The package boots
 with Metal; a keyboard cold start, profile slot load, hub movement, and a real
 `kill -9` / relaunch with save recovery are recorded. A full interactive
 CH00-CH07 playthrough, gamepad, Windows DX12/Win64, and target-hardware
-performance remain open. See [local Mac setup](docs/dev/local-mac-setup.md)
+performance remain open. See [local Mac setup](docs/dev/local-mac-setup.md),
+the [2026-10-22 package evidence](packaging/evidence/mac-shipping-2026-10-22.txt),
 and the [owner runbook](docs/dev/remaining-acceptance-runbook.md).
 
 ## Confirmed requirements

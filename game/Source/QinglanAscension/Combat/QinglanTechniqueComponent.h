@@ -83,9 +83,14 @@ private:
 	void ReleaseCurrentCast();
 	void FailValidation();
 
+	// UPROPERTY keeps the DataAssets reachable from GC. Without it the HUD
+	// could read freed memory after a collection (invalid FNames / crash in
+	// UQinglanHUDWidget::RefreshFromPlayer).
+	UPROPERTY()
 	TArray<TObjectPtr<UQinglanTechniqueDataAsset>> Loadout;
 	TMap<FName, float> CooldownEndsAt;
 	FQinglanCastId CurrentCastId;
+	UPROPERTY()
 	TObjectPtr<UQinglanTechniqueDataAsset> CurrentTechnique = nullptr;
 	float CastPhaseEndTime = 0.f;
 	bool bInAnticipation = false;

@@ -2723,8 +2723,8 @@ bool FQinglanAuditSkeletonSocketContract::RunTest(const FString& Parameters)
 
 // ---------------------------------------------------------------------------
 // AUD-55: the hero mesh material must actually sample the imported Quaternius
-// palette texture. The visual palette/UV art pass remains art work, but the
-// data binding (MIC parent + BaseColor texture parameter) is asserted here.
+// palette texture without averaging its five colour bands. This checks the
+// asset recipe; a rendered close-up remains the visual acceptance gate.
 // ---------------------------------------------------------------------------
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditHeroSkinBinding,
 	"Qinglan.Content.HeroSkinBinding", AuditFrameworkTestFlags)
@@ -2747,6 +2747,16 @@ bool FQinglanAuditHeroSkinBinding::RunTest(const FString& Parameters)
 		FHashedMaterialParameterInfo(FName(TEXT("BaseColor"))), BaseColor);
 	TestTrue(TEXT("MIC binds a BaseColor texture"), bFound);
 	TestEqual(TEXT("BaseColor is the imported clothed-skin palette"), BaseColor, static_cast<UTexture*>(Skin));
+	float Tiling = 0.f;
+	TestTrue(TEXT("MIC exposes UV tiling"), MIC->GetScalarParameterValue(
+		FHashedMaterialParameterInfo(FName(TEXT("Tiling"))), Tiling));
+	TestEqual(TEXT("Palette uses the source UVs without surface tiling"), Tiling, 1.f);
+	TestTrue(TEXT("Palette preserves source colour space"), Skin->SRGB);
+	TestTrue(TEXT("Palette avoids lossy block compression"), Skin->CompressionNone);
+	TestTrue(TEXT("Palette avoids mip averaging between colour bands"), Skin->MipGenSettings == TMGS_NoMipmaps);
+	TestTrue(TEXT("Palette samples a single colour texel"), Skin->Filter == TF_Nearest);
+	TestTrue(TEXT("Palette clamps both UV axes"), Skin->AddressX == TA_Clamp && Skin->AddressY == TA_Clamp);
+	TestTrue(TEXT("Palette cannot stream to a coarser mip"), Skin->NeverStream);
 	return true;
 }
 

@@ -1,5 +1,6 @@
 // Content bootstrap implementation. See header for intent.
 #include "QinglanContentBootstrap.h"
+#include "QinglanRawAssets.h"
 #include "Core/QinglanRoomLayout.h"
 
 #include "AssetImportTask.h"
@@ -62,7 +63,7 @@
 namespace
 {
 	const FString ContentRoot = TEXT("/Game/Qinglan");
-	const FString RawAssetsRoot = TEXT("/inspire/hdd/project/qianghuaxuexi/s26044/assets-raw");
+	FString RawAssetsRoot;
 
 	// AUD-55: the content bootstrap can emit a low-cost package variant
 	// (-lowquality) that binds every surface to its solid-colour MIC. The maps
@@ -174,6 +175,13 @@ UQinglanContentBootstrapCommandlet::UQinglanContentBootstrapCommandlet()
 
 int32 UQinglanContentBootstrapCommandlet::Main(const FString& Params)
 {
+	RawAssetsRoot = QinglanRawAssets::ResolveRoot(Params);
+	if (!QinglanRawAssets::RequireDirectory(RawAssetsRoot) ||
+		!QinglanRawAssets::RequireDirectory(RawAssetsRoot / TEXT("polyhaven/textures")))
+	{
+		return 1;
+	}
+	GTexturedSurfaceMaterials.Reset();
 	// -lowquality emits map bindings to the solid-colour MICs while still
 	// importing the full texture set. Without the flag maps use the textured
 	// MICs (missing BaseColor sets always fall back to solid).
@@ -429,6 +437,32 @@ UMaterial* UQinglanContentBootstrapCommandlet::CreateOrLoadMasterMaterial()
 	{
 		NormalParam->Texture = FlatNormal;
 	}
+	// The Roughness/AO samplers are LinearGrayscale. Their default texture must
+	// be a linear grayscale texture: the engine DefaultTexture is Color, which
+	// fails Metal shader compilation ("Sampler type is Linear Grayscale, should
+	// be Color") and silently falls back to the grey Default Material.
+	UTexture2D* GrayDefault = LoadObject<UTexture2D>(nullptr,
+		TEXT("/Engine/EngineMaterials/BaseFlattenGrayscaleMap.BaseFlattenGrayscaleMap"));
+	if (!GrayDefault)
+	{
+		GrayDefault = LoadObject<UTexture2D>(nullptr, TEXT("/Engine/EngineResources/Gray.Gray"));
+	}
+	if (GrayDefault)
+	{
+		RoughParam->Texture = GrayDefault;
+		AOParam->Texture = GrayDefault;
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("Default linear grayscale texture unavailable; M_QinglanSurface cannot compile data-map samplers"));
+		return nullptr;
+	}
+
+	// The same graph serves skeletal-mesh characters and static-mesh world
+	// geometry; record both usages on the parent so cooked shader maps exist.
+	Mat->SetMaterialUsage(MATUSAGE_SkeletalMesh);
+	Mat->SetMaterialUsage(MATUSAGE_StaticMesh);
+	Mat->SetMaterialUsage(MATUSAGE_InstancedStaticMeshes);
 
 	// UE 5.8: material input properties (BaseColor, Normal, ...) live on UMaterialEditorOnlyData.
 	Mat->GetEditorOnlyData()->BaseColor.Connect(0, BaseColorParam);
@@ -437,8 +471,7 @@ UMaterial* UQinglanContentBootstrapCommandlet::CreateOrLoadMasterMaterial()
 	Mat->GetEditorOnlyData()->AmbientOcclusion.Connect(1, AOParam);
 	Mat->PreEditChange(nullptr);
 	Mat->PostEditChange();
-	SavePackage(Pkg, Mat);
-	return Mat;
+	return SavePackage(Pkg, Mat) ? Mat : nullptr;
 }
 
 bool UQinglanContentBootstrapCommandlet::BootstrapVFXMaterials()
@@ -946,7 +979,10 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaterials()
 		Solid->GetEditorOnlyData()->Roughness.Connect(0, Roughness);
 		Solid->PreEditChange(nullptr);
 		Solid->PostEditChange();
-		SavePackage(Pkg, Solid);
+		if (!SavePackage(Pkg, Solid))
+		{
+			return false;
+		}
 	}
 
 	const FString TexRoot = RawAssetsRoot + TEXT("/polyhaven/textures");
@@ -1000,13 +1036,18 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaterials()
 
 	int32 ImportedTextures = 0;
 	int32 TexturedSets = 0;
-	bool bAnyOk = false;
+	bool bOk = true;
 	for (const FSurfaceSet& Set : Sets)
 	{
 		const FString Dir = TexRoot + TEXT("/") + Set.AssetId;
 		TArray<FString> Files;
 		IFileManager::Get().FindFilesRecursive(Files, *Dir, TEXT("*.jpg"), true, false, false);
 		Files.Sort(); // deterministic suffix choice across filesystems
+		if (Files.IsEmpty())
+		{
+			UE_LOG(LogTemp, Error, TEXT("surface texture set has no JPG sources: %s"), *Dir);
+			bOk = false;
+		}
 
 		TMap<FString, UTexture2D*> SlotTextures;
 		for (const TCHAR* SlotName : SlotNames)
@@ -1021,6 +1062,10 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaterials()
 			{
 				SlotTextures.Add(Slot, Tex);
 				++ImportedTextures;
+			}
+			else
+			{
+				bOk = false;
 			}
 		}
 
@@ -1065,7 +1110,7 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaterials()
 			MIC->SetScalarParameterValueEditorOnly(FMaterialParameterInfo(FName(TEXT("Roughness"))), 0.85f);
 		}
 		MIC->PostEditChange();
-		bAnyOk |= SavePackage(Cast<UPackage>(MIC->GetOutermost()), MIC);
+		bOk &= SavePackage(Cast<UPackage>(MIC->GetOutermost()), MIC);
 
 		// Companion solid instance for Low quality and for map resolution when
 		// the texture set has no BaseColor. Always generated, even in a
@@ -1076,7 +1121,7 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaterials()
 		SolidMIC->SetVectorParameterValueEditorOnly(FMaterialParameterInfo(FName(TEXT("Color"))), Set.FallbackColor);
 		SolidMIC->SetScalarParameterValueEditorOnly(FMaterialParameterInfo(FName(TEXT("Roughness"))), 0.85f);
 		SolidMIC->PostEditChange();
-		bAnyOk |= SavePackage(Cast<UPackage>(SolidMIC->GetOutermost()), SolidMIC);
+		bOk &= SavePackage(Cast<UPackage>(SolidMIC->GetOutermost()), SolidMIC);
 
 		UE_LOG(LogTemp, Log, TEXT("material %s from %s (%d texture map(s)%s)"),
 			*Set.MaterialName, *Set.AssetId, SlotTextures.Num(),
@@ -1099,18 +1144,23 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaterials()
 			FMaterialParameterInfo(FName(TEXT("Tiling"))), 1.f);
 		HumanMIC->SetScalarParameterValueEditorOnly(
 			FMaterialParameterInfo(FName(TEXT("Roughness"))), 0.75f);
+		// Skeletal-mesh shader maps are only cooked when the usage flag is set on
+		// the instance too; without it the packaged pawn falls back to the grey
+		// Default Material despite the parent being correct.
+		HumanMIC->SetMaterialUsage(MATUSAGE_SkeletalMesh);
 		HumanMIC->PostEditChange();
-		bAnyOk |= SavePackage(Cast<UPackage>(HumanMIC->GetOutermost()), HumanMIC);
+		bOk &= SavePackage(Cast<UPackage>(HumanMIC->GetOutermost()), HumanMIC);
 		UE_LOG(LogTemp, Log, TEXT("material MIC_HumanCharacter from Quaternius clothed skin"));
 	}
 	else
 	{
-		UE_LOG(LogTemp, Warning, TEXT("MIC_HumanCharacter skipped: T_Human_Clothed not imported"));
+		UE_LOG(LogTemp, Error, TEXT("MIC_HumanCharacter missing: T_Human_Clothed not imported"));
+		bOk = false;
 	}
 
 	UE_LOG(LogTemp, Log, TEXT("BootstrapMaterials: %d surface sets, %d textured, %d Texture2D assets"),
 		Sets.Num(), TexturedSets, ImportedTextures);
-	return bAnyOk;
+	return bOk;
 }
 //----------------------------------------------------------------------------
 // Maps
@@ -1164,6 +1214,10 @@ namespace
 		ATargetPoint* Point = World->SpawnActor<ATargetPoint>(ATargetPoint::StaticClass(), Location, FRotator::ZeroRotator, Params);
 		if (Point)
 		{
+			// Object names may acquire a uniqueness suffix, including replacing
+			// the number in authored IDs such as ashen.archive_3. Tags survive
+			// cooking and retain the exact interaction identity.
+			Point->Tags.AddUnique(Name);
 			Point->SetActorLabel(Name.ToString());
 		}
 		return Point;
@@ -1460,9 +1514,13 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaps()
 		SpawnShape(Hub, EngineCube(), FVector(0, 0, 400), FVector(12000, 12000, 400), Stone, TEXT("Hub_Courtyard_Floor"));
 
 		// Hall shell: floor, four walls, roof (dressing pass replaces boxes).
-		const FVector HallCenter(0, -3800, 700);
+		// The hall must share the courtyard's Z=600 walking surface. A raised
+		// 720cm floor buried its interaction anchors and exceeded the player's
+		// step height; a solid north wall also sealed the route to the gate.
+		const FVector HallCenter(0, -3800, 580);
 		SpawnShape(Hub, EngineCube(), HallCenter + FVector(0, 0, 0), FVector(3000, 2000, 40), Wood, TEXT("Hub_Hall_Floor"));
-		SpawnShape(Hub, EngineCube(), HallCenter + FVector(0, 1000, 300), FVector(3000, 100, 600), Wood, TEXT("Hub_Hall_Wall_N"));
+		SpawnShape(Hub, EngineCube(), HallCenter + FVector(-1000, 1000, 300), FVector(1000, 100, 600), Wood, TEXT("Hub_Hall_Wall_NW"));
+		SpawnShape(Hub, EngineCube(), HallCenter + FVector(1000, 1000, 300), FVector(1000, 100, 600), Wood, TEXT("Hub_Hall_Wall_NE"));
 		SpawnShape(Hub, EngineCube(), HallCenter + FVector(-1500, 0, 300), FVector(100, 2000, 600), Wood, TEXT("Hub_Hall_Wall_W"));
 		SpawnShape(Hub, EngineCube(), HallCenter + FVector(1500, 0, 300), FVector(100, 2000, 600), Wood, TEXT("Hub_Hall_Wall_E"));
 		SpawnShape(Hub, EngineCube(), HallCenter + FVector(0, 0, 640), FVector(3400, 2400, 160), Roof, TEXT("Hub_Hall_Roof"));

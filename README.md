@@ -6,6 +6,14 @@ A completely free, offline, single-player **3D xianxia action game** for Windows
 
 **Completion audit (2026-10-14):** development is not complete. See the [reviewed repair TODO and acceptance gates](docs/dev/completion-audit-todo.md) for confirmed integration defects, unfinished player flows, and required verification; the earlier build/test report does not establish campaign or release readiness.
 
+**Local Mac continuation (2026-10-20):** acceptance preparation is underway on
+Apple Silicon in a removable `.local` workspace. The locked engine source and
+raw assets, native dependencies and Metal Toolchain are installed. The user
+installed Xcode 27.1; the native editor build now passes with the documented
+local Xcode-stdin patch. Content regeneration is running; the expanded
+Unreal suite, Shipping package and rendered acceptance remain unverified.
+See [local Mac setup](docs/dev/local-mac-setup.md).
+
 ## Confirmed requirements
 
 - Windows and Apple Silicon macOS at first release.

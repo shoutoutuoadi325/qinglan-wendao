@@ -260,6 +260,9 @@ namespace
 			const FVector CameraDelta = TargetLocation - AimOrigin;
 			if (CameraDelta.Size() > QinglanInteractCameraReach)
 			{
+			const FVector CameraDelta = TargetLocation - AimOrigin;
+			if (CameraDelta.Size() > QinglanInteractCameraReach)
+			{
 				continue;
 			}
 			const float Dot = FVector::DotProduct(AimDirection, CameraDelta.GetSafeNormal());
@@ -439,9 +442,6 @@ namespace
 			{
 				Direction = Character->GetActorForwardVector();
 				Direction.Z = 0.f;
-			}
-		}
-		const FVector Normalized = Direction.GetSafeNormal2D();
 	// --- Gameplay-proof event producers (AUD-11) ---
 
 	/**
@@ -463,10 +463,10 @@ namespace
 		}
 		UQinglanGameplayProofRelay* Relay = RelaySlot.Get();
 		Relay->StorySubsystem = Story;
+		TObjectPtr<UQinglanGameplayProofRelay>& RelaySlot)
+	{
+		if (Character == nullptr)
 		{
-			return;
-		}
-		UQinglanGameplayProofRelay* Relay = RelaySlot.Get();
 		}
 	}
 
@@ -496,9 +496,9 @@ namespace
 	}
 
 	/** Authored room-clear realm token ("tutorial_guided" -> "tutorial"). */
-				const UAnimBlueprintGeneratedClass* const GeneratedClass =
-					Cast<UAnimBlueprintGeneratedClass>(AnimBlueprintClass);
-				if (GeneratedClass && GeneratedClass->GetTargetSkeleton() == MeshSkeleton)
+	}
+}
+
 		{
 			Techniques->OnCastReleased.RemoveDynamic(Relay, &UQinglanGameplayProofRelay::HandleCastReleased);
 		}
@@ -508,15 +508,6 @@ namespace
 	}
 
 	/** Authored room-clear realm token ("tutorial_guided" -> "tutorial"). */
-	}
-}
-
-// ---------------------------------------------------------------------------
-// UQinglanGameplayProofRelay
-// ---------------------------------------------------------------------------
-
-void UQinglanGameplayProofRelay::HandleDamageResultResolved(const FQinglanResolvedDamage& Result)
-{
 	UQinglanStorySubsystem* Story = StorySubsystem.Get();
 	AActor* Owner = OwnerActor.Get();
 	if (Story == nullptr || Owner == nullptr || Result.Attacker.Get() != Owner)
@@ -728,13 +719,13 @@ void AQinglanCharacter::BeginPlay()
 				// instance could be created, rather than showing the ref pose.
 
 void AQinglanCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
-{
-	UnbindStoryDelegates();
-	UnbindProfileDelegates();
-	if (CombatComponent)
-	{
-		CombatComponent->OnDamageResolved.RemoveDynamic(this, &AQinglanCharacter::HandleDamageResolved);
-	}
+				AnimInstance->SetActionState(EQinglanAnimActionState::Idle);
+			}
+			else if (UAnimSequence* const Idle = Cast<UAnimSequence>(
+					FSoftObjectPath(TEXT("/Game/Qinglan/Characters/Human/SK_HumanHuman_Armature_Idle.SK_HumanHuman_Armature_Idle")).TryLoad()))
+			{
+				// AUD-44 fallback: retain the old visible idle when no anim
+				// instance could be created, rather than showing the ref pose.
 	if (UWorld* const World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(DefeatTravelTimer);
@@ -1788,13 +1779,13 @@ void AQinglanCharacter::PlayHitReactionMontage()
 	if (AnimInstance && Montage)
 	}
 	else if (Dodge && Dodge->IsDodging())
-	{
-		DesiredState = EQinglanAnimActionState::Dodge;
-	}
-	else if (TechniqueComponent && TechniqueComponent->IsCasting())
-	{
-		DesiredState = EQinglanAnimActionState::Cast;
-	}
+	// Convention path authored by QinglanAnimBootstrap when available. Missing
+	// animation is non-fatal: the gate above still disables every action.
+	UAnimMontage* const Montage = Cast<UAnimMontage>(
+		FSoftObjectPath(TEXT("/Game/Qinglan/Characters/Human/Montages/AM_Human_HitReact.AM_Human_HitReact")).TryLoad());
+	USkeletalMeshComponent* const MeshComp = GetMesh();
+	UAnimInstance* const AnimInstance = MeshComp ? MeshComp->GetAnimInstance() : nullptr;
+	if (AnimInstance && Montage)
 	else if (Sword && Sword->IsSwinging())
 	{
 		DesiredState = EQinglanAnimActionState::Attack;
@@ -2004,12 +1995,37 @@ void AQinglanCharacter::OpenJournal(FName RecordId)
 	{
 		Journal->AddToViewport(60);
 	}
-	Journal->OpenJournal();
-	if (!RecordId.IsNone())
-	{
-		Journal->OpenRecord(RecordId);
 	}
 	RefreshMenuInputState();
+	UE_LOG(LogQinglan, Log, TEXT("Profile frontend open: select a slot to begin (AUD-01)"));
+
+	// QA capture aid: -QinglanAutoSlot=<0-2> confirms a slot through the real
+	// menu rows after a short settle, so an unattended capture can reach the
+	// hub. It never bypasses save validation; interactive selection acceptance
+	// still requires real input.
+	FString AutoSlotValue;
+	if (FParse::Value(FCommandLine::Get(), TEXT("QinglanAutoSlot="), AutoSlotValue))
+	{
+		const int32 AutoSlot = FMath::Clamp(FCString::Atoi(*AutoSlotValue), 0,
+			UQinglanSaveSubsystem::ProfileSlotCount - 1);
+		FTimerHandle AutoSlotHandle;
+		GetWorld()->GetTimerManager().SetTimer(AutoSlotHandle, FTimerDelegate::CreateWeakLambda(this, [this, AutoSlot]()
+		{
+			UQinglanMenuWidget* ActiveMenu = MenuWidget.Get();
+			if (!ActiveMenu || !ActiveMenu->IsMenuOpen())
+			{
+				return;
+			}
+			for (int32 Step = 0; Step < AutoSlot; ++Step)
+			{
+				ActiveMenu->MoveSelection(1);
+			}
+			ActiveMenu->ConfirmSelection();
+		}), 2.f, /*bLoop=*/false);
+	}
+}
+
+void AQinglanCharacter::CloseGameMenu()
 }
 
 bool AQinglanCharacter::SelectMenuOption(int32 Index)
@@ -2461,6 +2477,15 @@ void AQinglanCharacter::HandleRoomCompleted(int32 RoomIndex, int64 ShardsAwarded
 	// chapter scene (late chapters deliberately reuse local objective IDs).
 	// AUD-11: emit the authored boss-defeat proof event first; the guard-based
 	// auto-completion then proves the exact objective, and the direct notify
+	return Story == nullptr || !Story->IsScenePlaying();
+}
+
+bool AQinglanCharacter::HasSceneScriptExhaustedForInspection(FName SceneId) const
+{
+	const UGameInstance* Instance = GetGameInstance();
+	const UQinglanStorySubsystem* Story = Instance ? Instance->GetSubsystem<UQinglanStorySubsystem>() : nullptr;
+	if (!Story || SceneId.IsNone()) { return false; }
+	if (Story->IsSceneCompleted(SceneId)) { return true; }
 	return Story == nullptr || !Story->IsScenePlaying();
 }
 

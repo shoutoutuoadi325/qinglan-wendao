@@ -98,18 +98,38 @@ namespace
 	/** Dedicated VRAM below this selects the Low preset (docs/06 §1 matrix has no sub-4GB tier). */
 	constexpr int64 MinDedicatedVramGB = 4;
 
-	void SetIntCvar(const TCHAR* CvarName, int32 Value)
+	void SetIntCvar(const TCHAR* CvarName, int32 Value,
+		EConsoleVariableFlags Priority = ECVF_SetByGameSetting)
 	{
 		IConsoleVariable* Cvar = IConsoleManager::Get().FindConsoleVariable(CvarName);
 		if (Cvar != nullptr)
 		{
-			Cvar->Set(Value, ECVF_SetByGameSetting);
+			// Device profiles, system configuration, and command-line/debug
+			// overrides remain authoritative. Do not escalate to SetByCode just
+			// to force a user preset through one of those constraints.
+			const uint32 CurrentPriority = Cvar->GetFlags() & ECVF_SetByMask;
+			if (CurrentPriority > static_cast<uint32>(Priority))
+			{
+				UE_LOG(LogQinglanGraphics, Verbose,
+					TEXT("Console variable '%s' retains its higher-priority override"), CvarName);
+				return;
+			}
+			Cvar->Set(Value, Priority);
 		}
 		else
 		{
 			// Headless/early-boot tolerance: never fail the whole apply for one cvar.
 			UE_LOG(LogQinglanGraphics, Warning, TEXT("Console variable '%s' unavailable; value %d not applied"), CvarName, Value);
 		}
+	}
+
+	void SetFeaturePolicyCvar(const TCHAR* CvarName, int32 Value)
+	{
+		// RendererSettings supplies the project's starting GI/reflection
+		// methods at ProjectSetting priority. These three explicitly managed
+		// runtime switches belong to that same project policy; GameSetting is
+		// weaker and silently leaves the initial renderer methods unchanged.
+		SetIntCvar(CvarName, Value, ECVF_SetByProjectSetting);
 	}
 
 	/** Console variables UGameUserSettings does not persist itself. */
@@ -135,9 +155,9 @@ namespace
 		const bool bReduced = Settings.Preset == EQinglanQualityPreset::Low;
 		// 0 none / 1 Lumen / 2 SSGI for r.DynamicGlobalIlluminationMethod;
 		// 0 none / 1 Lumen / 2 SSR for r.ReflectionMethod; r.Nanite 0/1.
-		SetIntCvar(TEXT("r.DynamicGlobalIlluminationMethod"), bReduced ? 0 : 1);
-		SetIntCvar(TEXT("r.ReflectionMethod"), bReduced ? 2 : 1);
-		SetIntCvar(TEXT("r.Nanite"), bReduced ? 0 : 1);
+		SetFeaturePolicyCvar(TEXT("r.DynamicGlobalIlluminationMethod"), bReduced ? 0 : 1);
+		SetFeaturePolicyCvar(TEXT("r.ReflectionMethod"), bReduced ? 2 : 1);
+		SetFeaturePolicyCvar(TEXT("r.Nanite"), bReduced ? 0 : 1);
 	}
 
 	/** Full engine application: scalability + VSync + frame limit, then cvars. */
@@ -156,7 +176,12 @@ namespace
 				// User-side enable for r.DynamicRes.OperationMode=1 (engine
 				// keeps both sides in sync through its own status query).
 				GameUserSettings->SetDynamicResolutionEnabled(Settings.bDynamicResolution);
-				GameUserSettings->ApplySettings(/*bValidateForPlatform=*/false); // sanitized already
+				// Honor command-line window overrides (-windowed/-Res): the
+				// settings bool is bCheckForCommandLineOverrides, not a
+				// validation switch. Passing false silently re-applied the
+				// saved fullscreen mode over the capture/QA flags and put the
+				// window into a fullscreen transition before the first frame.
+				GameUserSettings->ApplySettings(/*bCheckForCommandLineOverrides=*/true);
 			}
 			else
 			{
@@ -581,3 +606,19 @@ bool UQinglanGraphicsSettingsService::IsFeatureAllowed(FName FeatureId) const
 	UE_LOG(LogQinglanGraphics, Verbose, TEXT("IsFeatureAllowed: unknown feature id '%s' denied"), *FeatureId.ToString());
 	return false;
 }
+
+#if WITH_DEV_AUTOMATION_TESTS
+// Same translation unit so the isolated CVar tests exercise the production
+// setter without exposing a runtime API or changing real renderer state.
+#include "Misc/AutomationTest.h"
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanGraphicsRuntimeFeaturePriority,
+	"Qinglan.Graphics.RuntimeFeaturePriority",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanGraphicsRespectsPlatformConstraints,
+	"Qinglan.Graphics.RespectsPlatformConstraints",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+#include "Platform/QinglanGraphicsSettingsTests.inl"
+#endif

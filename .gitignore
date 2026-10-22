@@ -43,7 +43,9 @@ core.*
 # Packaged builds are regenerable with tools/build/package-game.sh
 packaging/Linux/Engine/
 packaging/Linux/QinglanAscension/
-packaging/windows/
+packaging/windows/Engine/
+packaging/windows/QinglanAscension/
+packaging/windows/*.exe
 
 # Portable build entry points are tracked despite the global build/ ignore
 !tools/build/
@@ -53,4 +55,6 @@ packaging/LinuxDev/
 /.local/
 packaging/Mac/
 packaging/Win64/
-packaging/Windows/
+packaging/Windows/Engine/
+packaging/Windows/QinglanAscension/
+packaging/Windows/*.exe

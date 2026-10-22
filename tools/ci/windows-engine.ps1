@@ -32,7 +32,7 @@ if ($Source -eq 'archive') {
     if (-not $env:UE_SOURCE_TOKEN) {
         throw 'Missing UE_SOURCE_TOKEN secret with read access to EpicGames/UnrealEngine. The repository GITHUB_TOKEN cannot access Epic source. No Windows game has been built.'
     }
-    if ($freeGiB -lt 160) { throw "Only $([math]::Round($freeGiB, 1)) GiB free; the experimental source route requires 160 GiB before checkout. Use a smaller installed-engine archive instead." }
+    if ($freeGiB -lt 130) { throw "Only $([math]::Round($freeGiB, 1)) GiB free; the experimental source route requires 130 GiB before checkout. Use a smaller installed-engine archive instead." }
     $lock = Get-Content (Join-Path $repo 'tools/build/versions.lock') -Raw
     if ($lock -notmatch '(?m)^# engine_commit\s*=\s*([0-9a-f]{40})\s*$') { throw 'Engine commit is missing from versions.lock.' }
     $revision = $Matches[1]

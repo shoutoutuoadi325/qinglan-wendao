@@ -47,7 +47,8 @@ attempt and scope.
 3. Re-run the baseline before changing anything: the full current suite, both
    campaign journeys (`QINGLAN_RUN_CAMPAIGN=1`), and
    `bash tools/build/package-game.sh`. Expected results and evidence paths are
-   in [test-report.md](test-report.md) §0.
+   in [test-report.md](test-report.md) (current Mac baseline; historical Linux
+   results in §0).
    On the prepared native host, `bash tools/build/run-acceptance.sh` runs the
    build/regeneration/suite/journeys/package sequence and validates exported
    results. It discovers the current test names from source (including newly

@@ -43,8 +43,10 @@ label them as such rather than renaming them Unreal game/render-thread
 timings. Retain the report's memory definitions and units, and do not add
 graphics and process allocations into an invented unified-memory total.
 Use the Development procedure below for separate engine diagnostics. The
-Unreal CSV parser does not parse Apple's report format. This procedure is
-prepared, but no Shipping HUD report has yet been captured for this project.
+Unreal CSV parser does not parse Apple's report format. A 60 s packaged Shipping hub
+segment has been captured and summarized in
+`docs/dev/evidence/perf-mac-shipping-hub-2026-10-21.md`; only the Instruments
+HTML report is still absent.
 
 Sources: Apple's [HUD monitoring](https://developer.apple.com/documentation/xcode/monitoring-your-metal-apps-graphics-performance),
 [HUD customization](https://developer.apple.com/documentation/xcode/customizing-metal-performance-hud)

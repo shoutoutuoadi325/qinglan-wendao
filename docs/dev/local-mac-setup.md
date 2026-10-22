@@ -218,7 +218,11 @@ now been recovered from the committed SoundWave imported data with official
 Oodle and UEWavComp decoders, and all eight recovered MD5 values match the
 original import records. The originals are in
 `.local/assets-raw/audio/original/{music,sfx}`. No replacement audio was
-synthesized. Recovery details and hashes are in
+synthesized. Recovery parses each `FCompressedBuffer`, validates CRC32 and
+BLAKE3, decodes through the official Oodle 2.9.16 library, reverses the
+UEWavComp transform, and accepts only mono 44.1 kHz/16-bit PCM whose import
+MD5 matches; unsupported layouts, bad checksums, wrong formats and MD5
+mismatches are rejected before any WAV is written. Recovery details and hashes are in
 [audio-original-recovery-2026-10-20.json](evidence/audio-original-recovery-2026-10-20.json).
 To reproduce with the matching engine and Command Line Tools:
 

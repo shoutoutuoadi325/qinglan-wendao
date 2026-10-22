@@ -25,8 +25,8 @@ runbook's ordinary-combat-room and trial segments still need a playthrough.
   camera rotation.
 - Raw capture: `perf-mac-shipping-hub-hud-2026-10-21-log.txt` (full stderr log;
   the measured window is 19:41:58–19:42:58).
-- Screenshots: `rendered/perf-mac-shipping-hub-hud-settings-2026-10-21.png`
-  (hub + HUD settings) and `...-route-...png` (end of route, HUD stats).
+- Screenshot: `rendered/perf-mac-shipping-hub-hud-settings-2026-10-21.png`
+  (hub + HUD settings). Every reported number is also in the raw log and JSON.
 
 ## Results (nearest-rank P95 over 1,830 frames)
 

@@ -4,19 +4,11 @@ For the current removable Apple Silicon setup, start with
 [local-mac-setup.md](local-mac-setup.md). Source `tools/build/local-env.sh`
 to select the workspace engine, assets, Xcode and caches. Build, content and
 package wrappers now select native host tools and default the target to the
-host; set `QINGLAN_PLATFORM` explicitly for a different target. The evidence
-and manual command examples below describe the earlier Linux environment.
+host; set `QINGLAN_PLATFORM` explicitly for a different target.
 
-Environment used for development:
-
-- Engine: UE 5.8.3 source build at `/inspire/hdd/project/qianghuaxuexi/s26044/UnrealEngine`
-  (engine binaries built from source; game modules build against it)
-- Project: `/inspire/hdd/project/qianghuaxuexi/s26044/qinglan-wendao/game/QinglanAscension.uproject`
-- Raw CC0 assets: `/inspire/hdd/project/qianghuaxuexi/s26044/assets-raw` (Quaternius characters/props, PolyHaven HDRIs/textures)
-- GPU: 2x NVIDIA RTX 4090 (driver 570.195, CUDA 12.8). The NVIDIA Vulkan ICD
-  (`/usr/share/vulkan/icd.d/nvidia_icd.json`) and the Vulkan loader are installed,
-  and Xvfb :1 provides a display. The packaged Shipping client renders on the
-  4090s; sustained performance capture is still unstable (see "Rendering notes").
+The earlier Linux host (2x RTX 4090, Vulkan/Xvfb, `/inspire/hdd/...` checkouts)
+produced the historical Linux evidence. Use [local-mac-setup.md](local-mac-setup.md)
+for the current Apple Silicon environment.
 
 ## Build (editor target)
 
@@ -104,7 +96,7 @@ is auto-created). On a headless display, drive it with `xdotool key Return`.
 Maps: `L_Hub` (sanctuary), `L_BambooHollow`, `L_AshenVerge` (expedition realms),
 `L_TribulationArena` (finale). `GameDefaultMap` is L_Hub.
 
-## Rendering notes (this container)
+## Rendering notes (historical Linux container)
 
 - `-nullrhi` works for functional/automation runs (logic, saves, story branching).
 - Rendered checks work with `Xvfb :1 -screen 0 1280x720x24` plus
@@ -126,39 +118,19 @@ Maps: `L_Hub` (sanctuary), `L_BambooHollow`, `L_AshenVerge` (expedition realms),
   (`TextLocalizationManager.cpp:629`). Short rendered runs (boot, frontend,
   trial wave 2) succeed.
 
-## GPU rendering on this container (2026-10-14)
+## QA capture flags
 
-The container ships the NVIDIA userspace driver + ICD; enabling real GPU
-rendering required (all done, root):
+All capture flags are harmless when absent.
 
-```bash
-apt-get install -y libvulkan1 vulkan-tools          # Vulkan loader (was missing)
-# Headless X on the idle GPU (PCI 49:00.0; BusID is DECIMAL in xorg.conf):
-Xorg :1 -config /tmp/xorg-headless.conf -noreset &  # config in this doc's history
-export DISPLAY=:1 XDG_RUNTIME_DIR=/tmp/xdg VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json
-vulkaninfo --summary   # RTX 4090 enumerates via the proprietary driver
-```
-
-Caveats found on this machine:
-
-- UE 5.8 denylists driver 570.195 and pops a MODAL dialog at boot — with no
-  window manager the process blocks forever. `r.WarnOfBadDrivers=0` is set in
-  DefaultEngine.ini [SystemSettings] (log-only warning); rebuild packages so
-  the cooked ini carries it.
-- The editor `-game` path is not usable in this environment: it aborts at
-  startup in `TextLocalizationManager.cpp:629`
-  (`!InLocalizationTargetPath.IsEmpty()`). Use the packaged Shipping build for
-  rendered runs; it ships precompiled shaders.
-- QA capture flags (harmless without them): `-QinglanShot=<id>` takes one
-  screenshot and quits; `-QinglanShotDelay=<seconds>` defers that capture so a
-  timed route can be recorded (the hub's timer dies with the map travel, so
-  the arena's own delayed capture is the one that fires);
-  `-QinglanTrial=<seconds>` travels from the hub to `L_TribulationArena` and
-  starts the foundation trial (capture-only admission bypass) so
-  hazards/enemies can be rendered without a full run. Screenshots are written
-  to `<Saved>/Screenshots/qinglan_shot_<id>.png`; the old `/tmp` path was
-  denied by the sandboxed Mac package, and a `-UserDir` outside the sandbox
-  container is not writable either.
+- `-QinglanShot=<id>` takes one screenshot and quits; `-QinglanShotDelay=<seconds>`
+  defers that capture so a timed route can be recorded (the hub's timer dies
+  with the map travel, so the arena's own delayed capture is the one that
+  fires); `-QinglanTrial=<seconds>` travels from the hub to
+  `L_TribulationArena` and starts the foundation trial (capture-only admission
+  bypass) so hazards/enemies can be rendered without a full run. Screenshots
+  are written to `<Saved>/Screenshots/qinglan_shot_<id>.png`; the old `/tmp`
+  path was denied by the sandboxed Mac package, and a `-UserDir` outside the
+  sandbox container is not writable either.
 - `-QinglanHandShot=<id>` renders a QA close-up of the hero's sword hand at
   near (35 cm) and normal (150 cm) distances into the same `Screenshots`
   directory, for the AUD-55 hand UV/palette check. It needs no player input;
@@ -166,5 +138,3 @@ Caveats found on this machine:
 - `-QinglanAutoSlot=<0-2>` confirms a profile slot through the real menu rows
   after a 2 s settle, letting an unattended capture reach the hub. It does not
   bypass save validation; interactive slot selection still needs real input.
-- Driver-killed processes leak GPU memory until the host reaps them
-  (~600 MB per kill; harmless on 48 GB cards, visible via nvidia-smi).

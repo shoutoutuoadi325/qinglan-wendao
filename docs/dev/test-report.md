@@ -1,6 +1,6 @@
 # Test Report — Qinglan: Path of Ascension
 
-## Native Mac baseline passed (2026-10-21; rendered/interactive gates still open)
+## Native Mac baseline passed (2026-10-21)
 
 `bash tools/build/run-acceptance.sh` completed green on the owner Apple Silicon
 Mac: `.local/acceptance/20261021T114346.991305Z/` (`status: passed`; engine
@@ -91,15 +91,14 @@ Combat-room and normal-admission trial segments remain open.
 
 **Development performance attempt (2026-10-21):** the Development package now
 builds and archives correctly (the wrapper accepts the config-less
-`QinglanAscension.app` name). An FPS-chart run started
-(`LogChartCreation: Started creating FPS charts`) but did not finalize a frame
-table, and the Development client crashed twice in
+`QinglanAscension.app` name). An FPS-chart run started but did not finalize a
+frame table, and the Development client crashed twice in
 `UQinglanHUDWidget::RefreshFromPlayer -> GameText -> FName::ToString` with an
-invalid `FName`. `GameText` now checks `FName::IsValid()` and returns an
-`<invalid text key>` placeholder; the client stayed alive afterwards, but the
-root cause of the corrupted name is unresolved and the skill HUD showed the
-placeholder. Performance capture therefore remains open:
-[mac-performance-attempt-2026-10-21.md](evidence/mac-performance-attempt-2026-10-21.md).
+invalid `FName`. `GameText` now rejects invalid names and returns an
+`<invalid text key>` placeholder; the corrupted name came from technique
+loadout `TObjectPtr`s missing `UPROPERTY()` and being freed by GC, which is
+fixed. The accepted Shipping hub route below no longer reproduces it; combat
+and trial performance segments remain open.
 
 **Interactive Mac hub (2026-10-21):** after the display was unlocked, the
 packaged Shipping client accepted real keyboard input: Return loaded the saved
@@ -108,61 +107,15 @@ the save files byte-identical, and relaunch → slot load resumed the hub and
 wrote a new autosave. Evidence:
 [mac-interactive-hub-2026-10-21.md](evidence/mac-interactive-hub-2026-10-21.md).
 A complete CH00–CH07 keyboard playthrough, the gamepad half, realm/trial/ending
-boundaries and defeat/retreat/retry remain. AUD-42 still needs the DX12 capture; AUD-55
-performance capture needs an unlocked interactive route; AUD-59 still needs
-the hub frame and the Win64 package. Lock evidence:
+boundaries and defeat/retreat/retry remain. AUD-42 still needs the DX12
+capture, AUD-59 still needs the Win64 package, and AUD-55 combat and trial
+performance segments remain. Lock-time evidence:
 [mac-display-locked-2026-10-21.md](evidence/mac-display-locked-2026-10-21.md).
 
-## Local Mac continuation (2026-10-21; interactive acceptance still open)
+## 0. Linux baseline evidence (2026-10-20; historical)
 
-The matching UE 5.8.3 source checkout is now present under `.local`; native
-dependencies and the separate Metal Toolchain are installed;
-Xcode 27.1's first-launch check and the actual Metal compiler probe pass.
-UBT builds with zero warnings/errors, the Game/Editor target query passes,
-and ShaderCompileWorker completed 215 actions as native arm64. The project
-editor's UHT and native build now pass with the documented Xcode-stdin host
-patch. Evidence: `.local/acceptance/20261020T095017.651759Z/01-build-editor.log`
-(`Result: Succeeded`, wrapper exit 0). The host is an Apple M4 Mac
-with 32 GB RAM. Source changes repair host dispatch, raw-asset paths and the
-hand palette import recipe. The native attempt
-`.local/acceptance/20261020T095933.667543Z/` passed editor build and all six
-regeneration commandlets, then **72/72** named suite results with zero errors
-(54 successes without warnings, 18 with warnings). Its separately opted-in
-journeys completed **30/30 main scenes** and **24/24 side stages**, zero blocked.
-These are headless subsystem/content checks, not interactive playthroughs.
-
-That attempt stopped before native game compilation/cooking because UAT
-needed three files excluded by the Mac-only dependency selection. The exact
-official manifest inputs were restored from cached packs with SHA1/size
-verification (zero download bytes). A real `RunUAT.sh -CompileOnly` now exits
-0; evidence is `.local/bootstrap/uat-input-evidence.json` and
-`.local/bootstrap/uat-compile-only-20261021.log`. This does not prove packaging.
-
-The warning review exposed missing blessing text, malformed named backup
-formatting, obsolete AI audio and hero animation paths, and ineffective Low
-GI/reflection switches. Repairs and regression coverage are being validated.
-The next native attempt `.local/acceptance/20261021T011426.683609Z/` passed
-build and regeneration, but its expanded suite hit a genuine localization
-resource-target assertion in the new dual-culture recovery test. The runtime
-resource identity has been repaired; a fresh complete run remains required.
-Do not treat either incomplete attempt as Mac Shipping/runtime acceptance.
-
-Build-wrapper regression checks pass (8 executable-fixture cases), and
-acceptance-runner checks pass (13 report/process-fixture cases). Eight
-original WAVs were recovered with exact import-MD5 matches; the recovery
-format and native-decoder regression checks also pass. Together with the
-performance-summary fixtures, localization and UAT-input checks, the host-side suite passes **46/46** cases
-with native audio decoding enabled. These are host-side checks, not Unreal
-runtime acceptance. Raw-root precedence and read-only checkpoint inspection
-both passed in the 72-case native attempt. Further regressions expand current
-source discovery; the runner requires the exact current set. The inspection commandlet and evidence
-procedure are described in [checkpoint-evidence.md](checkpoint-evidence.md).
-Planning/story validators and the
-18 generated bilingual reading editions check also pass. CH04–CH07 reading locations were regenerated from current
-story data. Setup and remaining gates:
-[local-mac-setup.md](local-mac-setup.md).
-
-## 0. Current evidence (2026-10-20)
+> Superseded for platform status by the 2026-10-21 Mac baseline above; retained
+> as Linux provenance.
 
 Environment: Linux container, UE 5.8.3 source build (`tools/build/versions.lock`),
 headless `-nullrhi` for automation; rendered checks use Xvfb :1 with the NVIDIA
@@ -182,11 +135,11 @@ Vulkan ICD. Branch `fix/audit-repairs`. Evidence files live in
 | Rendered packaged boot, English | ✅ hub renders; HUD text, skill slots, talisman charges, vitals, camera and character scale correct | `docs/dev/evidence/rendered/hub-packaged-shipping-wave36-2026-10-19.png` |
 | Rendered packaged boot, Simplified Chinese | ✅ every HUD string resolves in `zh-Hans`; CJK glyphs render (no tofu) | `docs/dev/evidence/rendered/hub-packaged-shipping-zh-Hans-2026-10-19.png` |
 | Rendered packaged boot, Low + low-flash + `zh-Hans` | ✅ reduced-effects configuration boots and renders a readable HUD | `docs/dev/evidence/rendered/hub-packaged-shipping-low-lowflash-zh-2026-10-19.png` |
-| Sky atmosphere and hero skin material | ✅ lit sky/horizon; `MIC_HumanCharacter.BaseColor` resolves to `T_Human_Clothed` (`Qinglan.Content.HeroSkinBinding`); hand UV/palette art pass still open | `docs/dev/evidence/rendered/hub-sky-atmosphere-2026-10-19.png` |
-| Cold-start profile frontend (packaged, keyboard) | ✅ 3-slot Profile screen; Return creates slot 1 and enters the hub; Down+Return creates slot 2; both saves written | `docs/dev/evidence/rendered/profile-frontend-{cold-start,selected-slot1,slot-navigation}-2026-10-19.png` |
+| Sky atmosphere and hero skin material | ✅ lit sky/horizon; `MIC_HumanCharacter.BaseColor` resolves to `T_Human_Clothed` (`Qinglan.Content.HeroSkinBinding`); hand UV/palette captured on Metal 2026-10-21 | `docs/dev/evidence/rendered/hub-packaged-shipping-wave36-2026-10-19.png`, `docs/dev/evidence/rendered/metal-shipping-hub-2026-10-21.png` |
+| Cold-start profile frontend (packaged, keyboard) | ✅ 3-slot Profile screen; Return creates slot 1 and enters the hub; Down+Return creates slot 2; both saves written | `docs/dev/evidence/rendered/profile-frontend-{cold-start,slot-navigation}-2026-10-19.png`, `docs/dev/evidence/rendered/interactive-hub-spawn-keyboard-2026-10-19.png` |
 | Packaged input smoke (keyboard + mouse) | ✅ WASD moves, relative mouse motion rotates the camera, menu/slot navigation works; `J` is a keyboard attack key | `docs/dev/evidence/rendered/interactive-hub-{spawn-keyboard,walk-approach,camera-look}-2026-10-19.png` |
 | Packaged `SIGKILL` at the hub boundary | ✅ save hash byte-identical before/after `kill -9`; relaunch → slot load → hub renders and writes a new autosave | `docs/dev/evidence/rendered/kill-restart-hub-{before-sigkill,after-restart}-2026-10-19.png` |
-| Trial hazards under Low + low-flash (`-QinglanTrial=90` QA flag) | ✅ arena trial runs; wave-2 strike ground outlines render around the player and a spawned enemy renders with its mesh | `docs/dev/evidence/rendered/trial-lowflash-telegraph-wave2-dense-2026-10-19.png`, `trial-arena-enemy-visible-2026-10-19.png` |
+| Trial hazards under Low + low-flash (`-QinglanTrial=90` QA flag) | ✅ arena trial runs; wave-2 strike ground outlines render around the player and a spawned enemy renders with its mesh | `docs/dev/evidence/rendered/trial-lowflash-telegraph-wave2-dense-2026-10-19.png` |
 | Cast cue and skill-slot cooldown | ✅ technique cast renders a cue with the slot entering cooldown | `docs/dev/evidence/rendered/trial-cast-cue-2026-10-20.png` |
 | Cross-build probes (AUD-59) | ❌ UBT rejects Win64 and Mac: “Platform ... is not a valid platform to build. SDK validation failed” | `docs/dev/evidence/cross-build-win64-2026-10-20.log`, `cross-build-mac-2026-10-20.log` |
 | Planning validators | ✅ pass | `python3 tools/validate_repository.py`, `tools/validate_story.py` |
@@ -236,14 +189,15 @@ screenshot): see `docs/dev/build-and-run.md`.
 - **Process kills at every promised boundary**: the hub boundary is exercised
   with a real `SIGKILL`; the realm/reward/exit/trial-prep boundaries are covered
   by `ProcessRestartResume` and fault-injection tests but not yet interactively.
-- **Target graphics backends**: only the Linux Vulkan backend has rendered
-  evidence; DX12/Metal captures require target builds/devices (AUD-42/AUD-59).
-- **Hand art/UV pass** for the Quaternius palette skin (binding is verified; the
-  visual art remains open, AUD-55).
-- **Target-hardware performance capture**: `-csvprofile`/`-fpschart` packaged
-  runs abort in the cluster GPU-contention `MallocCrash`; editor `-game` aborts
-  with `TextLocalizationManager.cpp:629`. Needs a stable display machine
-  (AUD-55).
+- **Target graphics backends**: Linux Vulkan and macOS Metal both have rendered
+  evidence; DX12/Windows still requires a target build and device
+  (AUD-42/AUD-59).
+- **Hand art/UV pass** for the Quaternius palette skin: binding is verified and
+  packaged near/normal hand close-ups were captured on Metal; the remaining art
+  review is AUD-55.
+- **Target-hardware performance capture**: the 60 s packaged Shipping hub
+  segment on Metal is captured; combat-room and normally admitted trial
+  segments remain (AUD-55).
 - **Benchmark frontend map** (docs/06 §4) not authored.
 - **Equipped-talisman selection UI** — slots seed from charged talismans in
   catalog order (`QinglanTalismanComponent`).

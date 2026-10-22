@@ -4,9 +4,9 @@ Audit date: 2026-10-14 (Asia/Shanghai). Reviewed branch: `develop`.
 Reviewed revision: `e94be12ee39826a6fba73f57534b06bbf0c73db8`, matching
 `origin/develop` after fetch. The working tree was clean before this review.
 
-> **Reading this document (2026-10-20):** the repair log, the 2026-10-15
-> handoff, and the per-item finding text below describe the state *before* the
-> repair waves and are retained as provenance. The authoritative current
+> **Reading this document (2026-10-20):** the per-item finding text below
+> describes the state *before* the repair waves and is retained as provenance.
+> The authoritative current
 > disposition for all 60 IDs is the **Repair dispositions** table near the end
 > of this file; read that first. Environment-blocked acceptance steps are in
 > `docs/dev/remaining-acceptance-runbook.md`.
@@ -42,184 +42,6 @@ Reviewed revision: `e94be12ee39826a6fba73f57534b06bbf0c73db8`, matching
   (`docs/dev/evidence/perf-mac-shipping-hub-2026-10-21.md`); combat/trial
   segments remain open.
 
-
-- 2026-10-15: Repair work started on branch `fix/audit-repairs` (off `develop`
-  at `de3447a`). Baseline verification before any edit: incremental editor
-  build succeeded (UBT Linux Development, 28 s); working tree clean.
-  A four-wave repair plan was scheduled with disjoint file ownership per wave
-  (1: persistence/economy + AI lifecycle + abilities + config/bootstrap;
-  2: narrative + trials/rooms + UI/localization; 3: Character integration +
-  combat components + VFX/animation; 4: tests, asset regeneration, platform
-  evidence, dispositions). Wave 1 agents were dispatched, interrupted by a
-  transient API outage, resumed, then **halted by user request while still in
-  their read/analysis phase — no code edit landed**. All 60 items below remain
-  unrepaired and unchecked; no disposition is recorded yet.
-- 2026-10-15 documentation defect fixed in this file: AUD-59 referenced
-  `../../packaging/Windows/README.md`, but the tracked directory is
-  `packaging/windows/` (lowercase), so `tools/validate_repository.py` failed on
-  a broken link. The link now uses the tracked path; all three planning
-  validators pass again.
-- Evidence note for AUD-59 (Linux side): the untracked `packaging/Linux/`
-  directory in the working tree contains a complete prior Linux Shipping
-  package (Shipping binary, pak/utoc/ucas, staged engine files, manifests,
-  dated 2026-10-13) produced by the previous session. It is not yet committed;
-  committing it (or its manifests/checksums) belongs to the AUD-57/AUD-59
-  evidence work.
-- 2026-10-15 (second update): repair work resumed after the halt recorded
-  above, then was stopped again by user request. This entry supersedes the
-  "no code edit landed" statement: Wave 1 edits DID land and remain in the
-  working tree (branch `fix/audit-repairs`, **uncommitted, unbuilt, untested**;
-  24 files, +1262/−281). State by group:
-  - Edits complete per repair-agent reports (statically self-consistent, not
-    compiled or tested): AUD-23 geometry/KillZ authoring, AUD-24, AUD-25,
-    AUD-47, AUD-53, AUD-54, AUD-57 (`game/Config/DefaultEngine.ini`,
-    `QinglanContentBootstrap`, `QinglanGraphicsSettingsService`, new
-    `tools/build/{build-game,package-game,regenerate-content}.sh`) and
-    AUD-30 (player side), AUD-31 (player-projectile callsite), AUD-35,
-    AUD-38, AUD-39 (`QinglanProjectile`, `QinglanTechniqueExecutors`,
-    `QinglanTalismanComponent`).
-  - Edits interrupted mid-task, expected incomplete/inconsistent: AUD-01..08
-    (`QinglanSaveSubsystem`, `QinglanSaveMigration`, `QinglanSaveGame.h`,
-    `QinglanRunSubsystem`, `QinglanEconomyLibrary`, `QinglanGameModeBase`;
-    the agent was stopped while editing `QinglanRunSubsystem`
-    room/expedition functions).
-  - Edits believed complete but the final whole-file verification pass was
-    interrupted: AUD-28 (enemy side), AUD-29, AUD-31 (enemy callsites),
-    AUD-33, AUD-36 (AI side), AUD-40, AUD-41, AUD-46 (`AI/*` plus additive
-    `QinglanCombatComponent` changes).
-  - Generator-side changes (input assets, maps, string table) additionally
-    require an editor-commandlet regeneration
-    (`tools/build/regenerate-content.sh`) before runtime behavior changes;
-    not yet run.
-  - The remaining ~31 items (AUD-09..22, 26..29, 32, 34, 37, 42..45,
-    48..52, 55, 56, 58..60) have no edits. No checkbox below is ticked and
-    no disposition is recorded — nothing has passed compile, test, or
-    acceptance, so per this document's closure rule no item may be marked
-    complete. The only pushed commit on the branch is the documentation
-    update `ae2ece2`. Detailed per-item repair reports from the repair
-    agents are not yet persisted in this repository.
-- 2026-10-15 (third update): the Wave 1 working-tree edits above were
-  committed to `fix/audit-repairs` in four group commits at user request
-  and pushed: `3bf6c98` (abilities: AUD-30/31/35/38/39),
-  `917b3bf` (platform/config/tools: AUD-23/24/25/47/53/54/57),
-  `447abee` (AI: AUD-28/29/31/33/36/40/41/46 — verification pass was
-  interrupted), `160ebd1` (persistence WIP: AUD-01..08 partial, expected
-  incomplete, possibly non-compiling). **The code remains unbuilt and
-  untested**; commit messages carry the per-group caveats. The 1.6 GB
-  untracked `packaging/Linux/` output stays out of Git on purpose; only
-  manifests/checksums belong in the repository (AUD-57/59 evidence).
-
-## Current handoff: runtime integration pass (2026-10-15)
-
-The owner expanded the initial framework-only budget. This latest pass connects
-those frameworks to production callers, adds native usable controls and real
-runtime regression source, and supersedes the earlier framework-only handoff.
-**All 60 acceptance checkboxes remain open:** no Unreal build or playthrough has
-run on these changes. Source implementation and accepted gameplay are separate.
-
-- Branch: `fix/audit-repairs`; baseline source revision:
-  `12fa3bacb7d4e7884787f9534cc838fd66e7921e`.
-- The owner requested committing and pushing these three local passes on
-  2026-10-15. This handoff is included with the source/test changes in
-  `fix: integrate audit repairs and runtime regression coverage`; obtain the
-  repair commit hash from Git history. Six new runtime/helper/test files are
-  included. Unreal compilation and runtime verification remain pending.
-- Authored data changed: CH05_S04 now contains its existing localized
-  `story.ch05.s04.conditions` line, matching the acknowledgment choice pin.
-  English/Chinese UI JSON grew from 101 to 115 keys. CH05's bilingual reading
-  edition was regenerated. No cooked assets or map binaries were regenerated.
-- New runtime files: `Core/QinglanTrialAdmission.h/.cpp`,
-  `Core/QinglanRoomLayout.h`, `Narrative/QinglanStoryIdentity.h`.
-- New tests: `QinglanAuditFrameworkTests.cpp` (10) and
-  `QinglanRunIntegrationTests.cpp` (5), in the editor module. These are authored
-  test cases, **not 15 passing test results**.
-
-### Local source/content evidence
-
-- Source snapshot: `d2f4ce0146a1677da9201ea2f8554735586a74bcfb7f125c7e60051e1b7f6f2c` (SHA-256, 35 modified/new
-  files under `game/Source`).
-- Authored content snapshot: `566240af1d74363a9c126dca4b03f70e8a6d3864c79e40c8f5b37eeded69d3df` (SHA-256,
-  4 modified files under `data/` and `localization/`). This is source
-  data and generated reading text, not cooked `.uasset`/`.umap` evidence.
-- Reproduce each digest by taking the sorted union of tracked changed paths
-  (`git diff --name-only`) and untracked paths (`git ls-files --others
-  --exclude-standard`), selecting the prefixes above, and hashing each UTF-8
-  repository-relative path, NUL, raw bytes, NUL, in that order. No build hash
-  exists for these local changes yet. After committing, obtain the file list
-  with `git diff-tree --no-commit-id --name-only -r <repair-commit>` and read
-  each file at that revision before applying the same prefix filters/hash.
-
-### Per-item dispositions for the local passes
-
-| AUD | Disposition | Current implementation and remaining acceptance |
-| --- | --- | --- |
-| AUD-01 | **Still open; source path connected** | Hub arrival retains active profiles. A cold boot loads the first existing slot only once (slot selection frontend remains missing). Both OpenLevel wrappers save before travel; a failed new hub departure resets its empty run so the gate can retry. Verify hub return/restart, all selected slots and save failures in-engine. |
-| AUD-02 | **Still open; checkpoint resume connected** | Loaded runs route from hub to their realm before hub refill/autosave. Realm mode waits for possession, restores room entrance/vitals/status, re-arms only unfinished encounters and presents pending blessings. Interact retries a pending resume; loading is consumed only after restoration. Story scene/choice/proposal/ending/agreement boundaries now request saves. Save callbacks cannot recursively write/switch profile; Character displays save failure notices. Need real process-kill/failure tests and frontend recovery UX. |
-| AUD-04 | **Still open; subsystem isolation connected** | `ResetRun` discards every run-owned field; empty checkpoint import clears the previous run. Failed loads do not publish a target slot before checking the profile subsystem. Load/create reject save/import reentrancy. Verify profile switches with world/pawn teardown when the missing profile UI is implemented. |
-| AUD-05 | **Still open; signed stream callers repaired** | Removed stale two-argument RestoreStream calls left by Wave 1. Unfinished room checkpoints save the pre-wave encounter seed; rebuilding a room reproduces its wave rather than drawing the next one. New expeditions reset prior room RNG snapshots. Direct signed/zero-state and actual EnterRoom/reload comparisons are authored; run them with Unreal and check actual encounters. |
-| AUD-06 | **Still open; pending offer connected** | Pending offer/owner round-trip without reroll, restore to player presentation, and save on selection. Room transitions reject leaving an unresolved draft; completed-room events fire after offer creation/save. Direct round-trip, one-time selection and replay cases are authored. Legacy saves whose offer was already lost still need a documented compatibility/recovery policy. |
-| AUD-07 | **Still open; atomic settlement connected** | Base/optional first-clear delta and journal IDs commit together; allocation/profile/overflow/capacity failure retains run loot and emits a visible notice. Journal-sized ID search removes 999 cap. Exit/defeat/recall callers respect failed settlements. Reentrant EndExpedition is blocked. Test actual 999-run histories, disk failures and long-lived journal policy before acceptance. |
-| AUD-08 | **Still open; payout integration connected** | Victory uses overflow-checked repeat-material top-up plus first-minus-repeat bonus only. Expected Bamboo first/repeat: 3/2 herbs + 1 crystal; Ashen: 3/2 crystals. Retreat/death use exact integer ratios floored per stack, avoiding float underpayment and int64 overflow. Boss campaign proof comes only from the actual boss-kind room. Still verify full production payout/proof paths on first/repeat/retreat/death runs. |
-| AUD-09 | **Still open; runtime scoped identity implemented** | All Story objective/choice indexing uses owner-scoped keys. Production Character/Interactable/TrialDirector proof calls name exact scenes. Legacy bare APIs reject ambiguity; choice import/export migrates unique entries and logs/drops unknown, malformed or ambiguous entries. Import validation checks owner/member collisions. Lost overwritten legacy history cannot be reconstructed. Run direct scoped/runtime save tests plus the real CH04..07 journey. |
-| AUD-10 | **Still open; epilogue continuation only** | CH07 completion queues the next eligible epilogue scene in the same hub visit. Foundation debrief CH03_S03 starts on hub return. Full main/side scene-to-anchor authoring remains incomplete; do not infer all mandatory scene routing was fixed. |
-| AUD-12 | **Still open; runtime fix implemented** | Successful selection clears skip halt; actual SkipChoiceResume test checks no silent selection and reachable response/completion. Engine execution pending. |
-| AUD-13 | **Still open; groups and controls implemented** | Only active authored group/pin options are presented/selectable; every required group must resolve. CH05 conditions pin now has a script line. Ending controls re-open their family until atomic confirmation. Native dialogue renders clickable disabled-aware buttons, scrolling/focus, and number keys 5..8; arrows/DPad/Enter and native controller button focus are wired. Clear-before-select ordering preserves synchronously presented next groups. Verify mouse/keyboard/controller and long bilingual content in-engine. |
-| AUD-14 | **Still open; ending frontend connected** | Character binds preview/confirm/cancel events to a native scrollable ending widget added to viewport. Preview Continue preserves preview authorization; Cancel discards transient state. Confirmation requires explicit warning checkbox and calls actual ConfirmEnding; success requests hub travel into CH07. Modal input blocks gameplay/underlying choice shortcuts. Actual backend transaction test covers no-preview/no-ack/cancel/single commit. Verify rendered controls, every ending and failure/restart paths. Guardian release presentation/earned conditions remain AUD-11 work. |
-| AUD-18 | **Still open; admission authority connected** | Hub entry checks preparation prerequisites; direct anchors/Director enforce exact trial scene/objective and combat prerequisites. Foundation: Qi rank 3 + Bamboo; Golden Core: Foundation rank 3 + Ashen. Character entry defers one tick for its scene transaction. Ashen entry also requires Foundation and CH03 debrief. Profile breakthrough now requires actual Foundation trial proof, preventing shrine bypass. First-campaign policy is implemented; replay policy and full campaign acceptance remain open. |
-| AUD-19 | **Still open; return paths connected** | Foundation success commits scoped story proof, trial campaign flag and deterministic breakthrough, then saves/travels hub. Character stay action and Backspace/controller View cancellation use CancelTrialAndReturnToHub, including missing-director arena fallback. Failed save leaves the return retryable. Verify success/failure/cancel/retry interactively; no full pause/outcome frontend exists. |
-| AUD-20 | **Still open; free-win fallback removed only** | Failed initialization/lost wave engine grants no proof; Director validates canonical duration/tier, living player and absence of expedition. Required elite/boss/hazard phases are still unimplemented: the existing survival timer remains the success condition. This is not an implemented authored trial. |
-| AUD-21 | **Still open; room origins connected** | Shared RoomLayout constants now drive map authoring, door positioning/teleport, resume and encounter origin. Director has a root and uses current-room origin; portal positions stay on the room floor. Generator authors seven tagged PlayerStarts per realm; runtime fallback creates equivalent starts for old maps. Default spawn explicitly chooses the current room. Regenerate and verify saved maps, collision/nav and actual enemy locations. |
-| AUD-51 | **Still open; narrow frontend additions** | Save/bank error notices and ending/choice controls now exist. Profiles/settings/equipment/journal/shop/outcome screens remain incomplete. Do not call native ending/dialogue work a complete menu system. |
-| AUD-52 | **Still open; dialogue layout/dismiss partial** | Native responsive lower-screen dialogue has separate scrollable line/choice regions, real font sizes and wrapping. Focus scrolls options into view. Script source-kind labels now display; Backspace dismisses records when no mandatory choice is pending. Record registry lacks source classification; journal reopen and text-scale/720p/Retina/CJK visual acceptance still require work. |
-| AUD-58 | **Still open; 15 regressions authored** | Tests directly execute scoped Story behavior/migration, skip/groups, ending transaction, physical/authored trial admission, atomic settlement, exact bank flooring, Run checkpoint/reset/draft/reward replay and unfinished-room RNG reconstruction. Existing rank-gate fixture now asserts Foundation trial proof. Full SaveSubsystem disk failure injection, registered profile-to-run integration, functional maps and engine execution remain missing. |
-
-All other AUD IDs retain their prior status. Remaining save limitations include
-partial objective persistence, courier clock/delivery persistence (AUD-16), legacy
-schema-v1 field compatibility and true disk fault injection. A bank committed in
-memory but failing to save retains current memory plus the last valid disk
-snapshot as restart fallback; it is not durable until a later successful save.
-Scoped choice migration cannot restore decisions already overwritten by older
-bare-ID saves. Normal-choice/generic anchor proof still does not implement all
-authored gameplay conditions (AUD-11).
-
-### Verification and next-agent sequence
-
-Results on 2026-10-15 for the local changes above; all lightweight commands
-exited 0. This section records their evidence:
-
-- `python3 tools/validate_repository.py`: passed; 122 text files, **115 UI keys**
-  per locale and consistent planning/data/link/packaging contracts.
-- `python3 tools/validate_story.py`: passed; 30 main scenes, 24 side stages,
-  24 records, 40 barks and 768 story keys per locale.
-- `python3 tools/export_story_reading.py --check`: 18 bilingual editions current.
-- `git diff --check`: passed. New source files were also checked for trailing
-  whitespace; referenced helper types, exports, input APIs and locale keys were
-  reviewed against current source.
-- Independent static review found and corrected: missing ending viewport
-  insertion, stale per-room RNG snapshots across expeditions, blocked-departure
-  retry, pre-commit material overflow, and post-wave seed reuse on resume.
-
-**No Unreal build, automation execution, asset regeneration, cook, package or
-interactive rendering ran.** The test code is unbuilt. Native UI bypasses old
-placeholder widget layouts, but new UI keys still need string-table regeneration;
-the CH05 script/pins need regenerated story registry content. Tagged PlayerStarts
-also need regenerated maps for source-controlled assets (runtime fallback exists).
-The Chinese runtime localization pipeline remains AUD-48, not fixed by JSON parity.
-
-1. Build this entire branch with the selected engine, including editor tests and
-   UHT, before extending source. Preserve source and logs for any compiler repair.
-2. Run the existing `Qinglan` suite plus all 15 tests in the two new test files.
-   Attach automation output, actual source/build/content hashes and date. Do not
-   treat these document validators as proof of C++ or gameplay correctness.
-3. Regenerate registry/string-table/maps from current data, reload in a fresh
-   engine process, and test checkpoint travel/room/vitals/wave/offer restoration;
-   hub preservation; Foundation admission/success/debrief/Ashen gate; grouped
-   CH05 decisions; CH06 preview/ack/confirm/cancel and same-visit CH07 continuation.
-4. Continue P0 routing and earned-objective work (AUD-10/11), courier state and
-   time flow (AUD-15/16/17), then real trial mechanics (AUD-20), remaining input/
-   loadout/frontends/localization and asset/release acceptance. Existing acceptance
-   criteria below remain authoritative; tick only with actual evidence.
-
 ## Decision
 
 **Development is not complete.** The repository has substantial gameplay code
@@ -237,7 +59,7 @@ The current implementation does not meet the version 1.0 acceptance contract in
 | Total | 60 |
 
 This document is a repair backlog for the development agent. The original audit
-changed no game code; subsequent source work is recorded in the handoff above. Every finding below needs a recorded disposition and its acceptance checks;
+changed no game code; subsequent source work is recorded in the progress log above and the dispositions table below. Every finding below needs a recorded disposition and its acceptance checks;
 compiling modules or passing the automation suite does not close these items.
 
 ## Review scope and evidence limits
@@ -1405,7 +1227,7 @@ string table carries 966 keys (199 bilingual JSON keys). Packaging evidence:
 
 | AUD | Disposition | Implementation and coverage | Remaining acceptance |
 | --- | --- | --- | --- |
-| AUD-01 | Partially fixed | Hub arrival no longer re-imports slot 0; save-before-travel wrappers; profile replacement clears run state. `ProcessRestartResume` simulates a process exit (new GameInstance/subsystems) and reloads the persisted checkpoint. Selected-slot frontend landed: `UQinglanGameInstance::Init` no longer creates slot 0 on first launch, `AQinglanHubGameMode` defers all arrival work (checkpoint resume, talisman refill, autosave, epilogue entry) until a profile session exists, and `AQinglanCharacter` opens the 3-slot Profile screen (local player controllers only) at cold start; a successful load/create closes it and runs the deferred arrival. The Profile screen cannot be backed out of without a session, and the load/create failures surface `menu.notice.load_failed`/`create_failed`. Verified in the packaged Shipping build with real keyboard input: empty slots render, Return creates slot 1 and enters the hub, Down+Return creates slot 2 — `docs/dev/evidence/rendered/profile-frontend-cold-start-2026-10-19.png`, `profile-frontend-selected-slot1-2026-10-19.png`, `profile-frontend-slot-navigation-2026-10-19.png`; save files for both slots are written. | Mac keyboard cold start → slot 1 load → hub render → hub autosave → `kill -9` (save byte-identical) → relaunch/resume was verified on 2026-10-21 (`docs/dev/evidence/mac-interactive-hub-2026-10-21.md`). A full CH00–CH07 playthrough with return/restart at every chapter remains. |
+| AUD-01 | Partially fixed | Hub arrival no longer re-imports slot 0; save-before-travel wrappers; profile replacement clears run state. `ProcessRestartResume` simulates a process exit (new GameInstance/subsystems) and reloads the persisted checkpoint. Selected-slot frontend landed: `UQinglanGameInstance::Init` no longer creates slot 0 on first launch, `AQinglanHubGameMode` defers all arrival work (checkpoint resume, talisman refill, autosave, epilogue entry) until a profile session exists, and `AQinglanCharacter` opens the 3-slot Profile screen (local player controllers only) at cold start; a successful load/create closes it and runs the deferred arrival. The Profile screen cannot be backed out of without a session, and the load/create failures surface `menu.notice.load_failed`/`create_failed`. Verified in the packaged Shipping build with real keyboard input: empty slots render, Return creates slot 1 and enters the hub, Down+Return creates slot 2 — `docs/dev/evidence/rendered/profile-frontend-cold-start-2026-10-19.png`, `interactive-hub-spawn-keyboard-2026-10-19.png`, `profile-frontend-slot-navigation-2026-10-19.png`; save files for both slots are written. | Mac keyboard cold start → slot 1 load → hub render → hub autosave → `kill -9` (save byte-identical) → relaunch/resume was verified on 2026-10-21 (`docs/dev/evidence/mac-interactive-hub-2026-10-21.md`). A full CH00–CH07 playthrough with return/restart at every chapter remains. |
 | AUD-02 | Partially fixed | All promised boundaries request durable saves; realm resume restores room/vitals/encounters/blessings. `SaveRotationFaultInjection`, `SaveTruncatedTempRejected`, and `ProcessRestartResume` (new subsystem instance reload) cover the failure and restart paths. The cold-start frontend surfaces load/create failures as localized notices (`menu.notice.load_failed`/`create_failed`/`profile_required`) and keeps the selector open for retry; hub arrival work runs only after a successful selection. A real `SIGKILL` at the hub boundary was exercised on the packaged build: the slot-0 save hash was byte-identical before and after the kill, and relaunch → slot selection → hub loaded and wrote a new hub autosave (`kill-restart-hub-before-sigkill-2026-10-19.png`, `kill-restart-hub-after-restart-2026-10-19.png`). | The hub boundary was verified interactively on the Mac with a real `kill -9` (`docs/dev/evidence/mac-interactive-hub-2026-10-21.md`). Realm, reward-screen, exit and trial-prep boundaries remain for the full playthrough. |
 | AUD-03 | Fixed (source + real-file fault injection) | Rotation only replaces validated back-ups and never deletes the last valid copy before the new primary commits; a failed dead-backup delete now aborts fail-safe. Tests: `SaveBackupRecoveryChain` (primary+bak1 corrupt, bak2 recovered), `SaveRotationFaultInjection` (one-shot failure at each rotation Move/Delete; last commit stays loadable, retry leaves a validated backup), `SaveTruncatedTempRejected` (torn temp write leaves the old primary byte-identical). Uses test-only save-directory override + one-shot Move/Delete/Write hooks. | Real process-kill / OS-level I/O failure on target hardware. |
 | AUD-04 | Fixed (source) | Profile load/create atomically replaces profile+run, including an explicit empty run; reentrancy rejected. | Profile-switch UI with pawn/world teardown. |
@@ -1446,7 +1268,7 @@ string table carries 966 keys (199 bilingual JSON keys). Packaging evidence:
 | AUD-39 | Fixed | Recall routes through the authoritative cleared-room retreat and never charges on rejection. | In-engine recall QA. |
 | AUD-40 | Fixed (source) | Wolf orbit has a finite budget and inward transition before the telegraph. | Functional AI test. |
 | AUD-41 | Fixed | Ashen embers gated to the boss at 50% with warnings and a safe-lane broadcast. | Rendered Low/Metal QA. |
-| AUD-42 | Partially fixed | Cue component instantiated on enemies, telegraph/ember/impact context carried, ground-center/ring/safe-lane placeholders, visible projectile bodies, no-Niagara fallback. `BootstrapNiagaraEffects` now authors `/Game/Qinglan/VFX/NS_{Impact,Telegraph,Cast}` from engine emitter templates (1 emitter handle each, post-save load verified; deletes the package on verification failure); the cue component resolves/caches the category system, spawns it for impact/telegraph/safe-lane with a bounded per-component Niagara budget, suppresses Niagara (placeholder markers remain) under Low quality / low-flash, and tears instances down on cue decay and pool reset. `Qinglan/VFX` is listed in `DirectoriesToAlwaysCook` because the systems are loaded by runtime path (no hard reference). Evidence: `content-bootstrap-2026-10-19-niagara-sockets.log`. Test: `Qinglan.VFX.NiagaraCueContract`. Enemy presentation paths were also package-only (`FSoftObjectPath` without `.Object`), so no archetype ever loaded its mesh, idle, or montage; the catalog now builds real object paths, addresses the Bat/Dragon meshes by their imported names, and resolves the sibling slot graph per rig. Test: `Qinglan.Content.EnemyPresentationAssets` (asserts every archetype mesh/idle/attack/hit-react asset resolves and its slot graph targets the mesh skeleton). The trial storm's `OnTrialHazardTelegraph` had no subscriber at all, so lightning strikes had no warning outline; the director now owns a cue presenter and draws the ground outline for every volley. Captured on the packaged build in the arena with Low preset + low-flash: wave-2 strike outlines and the spawned enemy are visible (`rendered/trial-lowflash-telegraph-wave2-dense-2026-10-19.png`, `rendered/trial-arena-enemy-visible-2026-10-19.png`). Impact/strike cues now play the imported `sfx_hit_impact`; swing/release/telegraph sounds remain owned by the sword, technique and enemy paths (no double audio). | Capture overlapping effects on the Metal backend. The **packaged Shipping client** produced a Metal frame with two strike telegraphs plus a wave enemy (`docs/dev/evidence/rendered/metal-shipping-trial-telegraphs-2026-10-21.png`); a developer `-game` comparison frame is also saved. DX12/Windows capture remains an owner action. |
+| AUD-42 | Partially fixed | Cue component instantiated on enemies, telegraph/ember/impact context carried, ground-center/ring/safe-lane placeholders, visible projectile bodies, no-Niagara fallback. `BootstrapNiagaraEffects` now authors `/Game/Qinglan/VFX/NS_{Impact,Telegraph,Cast}` from engine emitter templates (1 emitter handle each, post-save load verified; deletes the package on verification failure); the cue component resolves/caches the category system, spawns it for impact/telegraph/safe-lane with a bounded per-component Niagara budget, suppresses Niagara (placeholder markers remain) under Low quality / low-flash, and tears instances down on cue decay and pool reset. `Qinglan/VFX` is listed in `DirectoriesToAlwaysCook` because the systems are loaded by runtime path (no hard reference). Evidence: `content-bootstrap-2026-10-19-niagara-sockets.log`. Test: `Qinglan.VFX.NiagaraCueContract`. Enemy presentation paths were also package-only (`FSoftObjectPath` without `.Object`), so no archetype ever loaded its mesh, idle, or montage; the catalog now builds real object paths, addresses the Bat/Dragon meshes by their imported names, and resolves the sibling slot graph per rig. Test: `Qinglan.Content.EnemyPresentationAssets` (asserts every archetype mesh/idle/attack/hit-react asset resolves and its slot graph targets the mesh skeleton). The trial storm's `OnTrialHazardTelegraph` had no subscriber at all, so lightning strikes had no warning outline; the director now owns a cue presenter and draws the ground outline for every volley. Captured on the packaged build in the arena with Low preset + low-flash: wave-2 strike outlines and the spawned enemy are visible (`rendered/trial-lowflash-telegraph-wave2-dense-2026-10-19.png`). Impact/strike cues now play the imported `sfx_hit_impact`; swing/release/telegraph sounds remain owned by the sword, technique and enemy paths (no double audio). | Capture overlapping effects on the Metal backend. The **packaged Shipping client** produced a Metal frame with two strike telegraphs plus a wave enemy (`docs/dev/evidence/rendered/metal-shipping-trial-telegraphs-2026-10-21.png`); a developer `-game` comparison frame is also saved. DX12/Windows capture remains an owner action. |
 | AUD-43 | Fixed | Lights stored before registration, bounded, destroyed on decay/reset, honor preset + low-flash. Test: `CueLightBookkeeping`. | Rendered light-budget QA. |
 | AUD-44 | Fixed (source + content + rendered) | Montage references corrected, per-cut playback, cast montages, stationary-socket sampling with fallbacks, and a native animation instance (`UQinglanCharacterAnimInstance`) with a speed-driven Idle/Walk/Run/Airborne state machine plus action states wired on player and enemies. The bootstrap generates `SK_HumanHuman_Armature_Walk` (1.0 s) / `_Run` (0.6 s) via the engine data-controller recipe and a compiled `ABP_Human` (parent = the native anim instance, Root←Slot "DefaultSlot", 0 compile errors), so montage slots have a pose graph; non-Human rigs get their own compiled slot graphs (`ABP_Knight/Slime/Skeleton/Bat/Dragon`, 0 compile errors, target skeleton verified, re-loaded after save) and `AQinglanEnemyCharacter` derives/verifies the sibling graph from the mesh package. The bootstrap authors `sword_base`, `sword_tip`, and `cast_source` on `SK_Human_Skeleton` at `RightHand` (saved with the skeleton and re-verified every run); `AQinglanSwordComponent` samples the blade sockets with fallbacks for the sweep and `AQinglanCharacter::GetAimPoint` uses the cast socket. `AM_Human_HitReact` / `AM_Knight_HitReact` are cloned so every catalog path resolves. Tests: `MontagePathContract`, `NativeStateMachineExists`, `Qinglan.Animation.SkeletonSocketContract`, `Qinglan.Content.EnemyPresentationAssets`. Rendered: the packaged hub/walk captures show the procedural stride, and the arena capture shows a technique cast cue and skill-slot cooldown (`rendered/interactive-hub-walk-approach-2026-10-19.png`, `rendered/trial-lowflash-telegraph-wave2-dense-2026-10-19.png`, `rendered/trial-cast-cue-2026-10-20.png`). Keyboard J now covers the primary attack so a keyboard-only run can swing. | — |
 | AUD-45 | Fixed | Independent package per montage with explicit skeleton; post-build contract verification. Test: `MontagePathContract`; regeneration verified 8 montages. | Cooking/playback from a fresh process. |

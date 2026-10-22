@@ -56,8 +56,14 @@ if ($env:GITHUB_STEP_SUMMARY) {
 if ($StorePackage -or ($env:STORE_PACKAGE -eq 'true')) {
     Write-Host "`n==> Packaging for Microsoft Store..."
     $storeOut = Join-Path $base 'store-package'
-    # The staged client lives under <StagedRoot>\QinglanAscension\Binaries\Win64
-    $stagedRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $clients[0].FullName))
+    # Locate the staged root containing Engine and QinglanAscension
+    $stagedRoot = Split-Path -Parent $clients[0].FullName
+    while ($stagedRoot -and -not (Test-Path (Join-Path $stagedRoot 'Engine')) -and (Split-Path -Parent $stagedRoot) -ne $stagedRoot) {
+        $stagedRoot = Split-Path -Parent $stagedRoot
+    }
+    if (-not $stagedRoot -or -not (Test-Path (Join-Path $stagedRoot 'Engine'))) {
+        $stagedRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $clients[0].FullName)))
+    }
     & (Join-Path $PSScriptRoot 'windows-store-package.ps1') `
         -StagedPath $stagedRoot `
         -OutputPath $storeOut `

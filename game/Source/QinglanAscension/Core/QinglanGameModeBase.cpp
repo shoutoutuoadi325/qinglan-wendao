@@ -21,7 +21,13 @@
 #include "Core/QinglanInteractable.h"
 #include "Core/QinglanRoomLayout.h"
 #include "Core/QinglanTrialDirector.h"
+#include "Components/SceneCaptureComponent2D.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/SceneCapture2D.h"
+#include "Engine/TextureRenderTarget2D.h"
+#include "Kismet/KismetRenderingLibrary.h"
 #include "Misc/PackageName.h"
+#include "Misc/Paths.h"
 #include "TimerManager.h"
 #include "Misc/CommandLine.h" // FParse
 #include "UnrealClient.h" // FScreenshotRequest
@@ -114,44 +120,139 @@ namespace
 {
 	/**
 	 * -QinglanShot=<id>: capture one gameplay screenshot after a short settle
-	 * and exit. Used for headless visual verification (docs/dev/build-and-run
-	 * "GPU rendering") and CI image regression; harmless without the flag.
+	 * and exit. -QinglanShotDelay=<seconds> defers that capture so a timed QA
+	 * route (for example -QinglanTrial=90 wave 2) can be recorded; the hub
+	 * world's own timer dies with the map travel. Used for rendered visual
+	 * verification (docs/dev/build-and-run) and CI image regression; harmless
+	 * without the flag.
 	 */
 	void SetupQinglanShotMode(AActor* Mode)
 	{
-		if (!FParse::Param(FCommandLine::Get(), TEXT("QinglanShot")))
+		FString ShotId;
+		const bool bNamedShot = FParse::Value(FCommandLine::Get(), TEXT("QinglanShot="), ShotId);
+		// Param accepts bare switches only; the documented =<id> form must
+		// be recognized through Value before checking the optional bare flag.
+		if (!bNamedShot && !FParse::Param(FCommandLine::Get(), TEXT("QinglanShot")))
 		{
 			return;
 		}
-		FString ShotId = TEXT("map");
-		FParse::Value(FCommandLine::Get(), TEXT("QinglanShot="), ShotId);
+		if (ShotId.IsEmpty()) { ShotId = TEXT("map"); }
+		float ShotDelaySeconds = 0.f;
+		FParse::Value(FCommandLine::Get(), TEXT("QinglanShotDelay="), ShotDelaySeconds);
+		ShotDelaySeconds = FMath::Max(0.f, ShotDelaySeconds);
 		UWorld* World = Mode ? Mode->GetWorld() : nullptr;
 		if (!World)
 		{
 			return;
 		}
 		FTimerHandle Unused;
-		World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(Mode, [World, ShotId]()
+		World->GetTimerManager().SetTimer(Unused, FTimerDelegate::CreateWeakLambda(Mode, [World, ShotId]()
 		{
-			// Second tick so the first rendered frame is complete, then shoot.
-			World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(World, [World, ShotId]()
+			// Sandboxed Mac packages cannot write outside their container, so an
+			// absolute /tmp path fails silently. Keep the capture in the
+			// project Saved tree (honors -UserDir) where the process can write.
+			const FString Path = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Screenshots"),
+				FString::Printf(TEXT("qinglan_shot_%s"), *ShotId));
+			FScreenshotRequest::RequestScreenshot(Path, /*bShowUI=*/true, /*bAddFilenameSuffix=*/false);
+			UE_LOG(LogQinglan, Log, TEXT("QinglanShot: requested %s.png"), *Path);
+			// Give the readback two frames, then quit so batch runs terminate.
+			World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(World, [World]()
 			{
-				const FString Path = FString::Printf(TEXT("/tmp/qinglan_shot_%s"), *ShotId);
-				FScreenshotRequest::RequestScreenshot(Path, /*bShowUI=*/true, /*bAddFilenameSuffix=*/false);
-				UE_LOG(LogQinglan, Log, TEXT("QinglanShot: requested %s.png"), *Path);
-				// Give the readback two frames, then quit so batch runs terminate.
 				World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(World, [World]()
 				{
-					World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(World, [World]()
+					if (APlayerController* PC = World->GetFirstPlayerController())
 					{
-						if (APlayerController* PC = World->GetFirstPlayerController())
-						{
-							PC->ConsoleCommand(TEXT("quit"));
-						}
-					}));
+						PC->ConsoleCommand(TEXT("quit"));
+					}
 				}));
 			}));
-		}));
+		}), ShotDelaySeconds, /*bLoop=*/false);
+	}
+
+	/**
+	 * -QinglanHandShot=<id>: QA close-up of the hero's sword hand for the
+	 * AUD-55 UV/palette art check. A SceneCapture2D renders the hand at a near
+	 * and a normal distance into Saved/Screenshots, then the process quits.
+	 * It needs no player input, so it also works on a locked display.
+	 * -QinglanHandShotDelay=<seconds> defaults to 3.
+	 */
+	void SetupQinglanHandShotMode(AActor* Mode)
+	{
+		FString ShotId;
+		if (!FParse::Value(FCommandLine::Get(), TEXT("QinglanHandShot="), ShotId))
+		{
+			return;
+		}
+		if (ShotId.IsEmpty()) { ShotId = TEXT("hands"); }
+		float DelaySeconds = 3.f;
+		FParse::Value(FCommandLine::Get(), TEXT("QinglanHandShotDelay="), DelaySeconds);
+		UWorld* World = Mode ? Mode->GetWorld() : nullptr;
+		if (!World) { return; }
+		FTimerHandle Unused;
+		World->GetTimerManager().SetTimer(Unused, FTimerDelegate::CreateWeakLambda(Mode, [World, ShotId]()
+		{
+			AQinglanCharacter* Player = Cast<AQinglanCharacter>(UGameplayStatics::GetPlayerCharacter(World, 0));
+			USkeletalMeshComponent* Mesh = Player ? Player->GetMesh() : nullptr;
+			if (!Mesh) { return; }
+			const FName HandSocket(TEXT("sword_base"));
+			FVector Anchor = FVector::ZeroVector;
+			if (Mesh->DoesSocketExist(HandSocket))
+			{
+				Anchor = Mesh->GetSocketLocation(HandSocket);
+			}
+			else if (Mesh->GetBoneIndex(TEXT("hand_r")) != INDEX_NONE)
+			{
+				Anchor = Mesh->GetBoneLocation(TEXT("hand_r"));
+			}
+			else
+			{
+				return;
+			}
+			const FString Directory = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Screenshots"));
+			IFileManager::Get().MakeDirectory(*Directory, true);
+			// Three-quarter view from the character's front-right so both the
+			// palm-side UV seam and the palette bands are readable.
+			const FVector ViewDirection = (Player->GetActorForwardVector() * 0.7f
+				+ Player->GetActorRightVector() * 0.7f + FVector(0.f, 0.f, 0.35f)).GetSafeNormal();
+			struct FDistance { const TCHAR* Suffix; float Distance; };
+			const FDistance Distances[] = { {TEXT("near"), 35.f}, {TEXT("normal"), 150.f} };
+			for (const FDistance& Entry : Distances)
+			{
+				const FVector CameraLocation = Anchor + ViewDirection * Entry.Distance;
+				ASceneCapture2D* Capture = World->SpawnActor<ASceneCapture2D>(
+					ASceneCapture2D::StaticClass(), CameraLocation,
+					(Anchor - CameraLocation).Rotation());
+				if (!Capture) { continue; }
+				UTextureRenderTarget2D* Target = NewObject<UTextureRenderTarget2D>(Capture);
+				// 8-bit LDR target so ExportRenderTarget writes PNG. The export
+				// helper keys off RenderTargetFormat, which defaults to RGBA16f and
+				// would otherwise write OpenEXR regardless of the extension.
+				Target->RenderTargetFormat = RTF_RGBA8;
+				Target->InitCustomFormat(512, 512, PF_B8G8R8A8, /*bForceLinearGamma=*/false);
+				Target->ClearColor = FLinearColor::Black;
+				USceneCaptureComponent2D* CaptureComponent = Capture->GetCaptureComponent2D();
+				CaptureComponent->TextureTarget = Target;
+				CaptureComponent->CaptureSource = ESceneCaptureSource::SCS_FinalColorLDR;
+				CaptureComponent->bCaptureEveryFrame = false;
+				CaptureComponent->bCaptureOnMovement = false;
+				CaptureComponent->FOVAngle = 45.f;
+				CaptureComponent->CaptureScene();
+				UKismetRenderingLibrary::ExportRenderTarget(World, Target, Directory,
+					FString::Printf(TEXT("qinglan_hand_%s_%s.png"), *ShotId, Entry.Suffix));
+				Capture->Destroy();
+			}
+			UE_LOG(LogQinglan, Log, TEXT("QinglanHandShot: wrote near/normal hand captures for %s"), *ShotId);
+			// Let both PNG writers finish before exiting (a same-tick quit can
+			// truncate the second export).
+			FTimerHandle QuitHandle;
+			World->GetTimerManager().SetTimer(QuitHandle, FTimerDelegate::CreateWeakLambda(World, [World]()
+			{
+				if (APlayerController* PC = World->GetFirstPlayerController())
+				{
+					PC->ConsoleCommand(TEXT("quit"));
+				}
+			}), 1.f, /*bLoop=*/false);
+		}), FMath::Max(0.f, DelaySeconds), /*bLoop=*/false);
 	}
 }
 
@@ -170,6 +271,7 @@ void AQinglanHubGameMode::BeginPlay()
 	Super::BeginPlay();
 	UE_LOG(LogQinglan, Log, TEXT("Hub mode active (sanctuary)"));
 	SetupQinglanShotMode(this);
+	SetupQinglanHandShotMode(this);
 
 	// QA capture (`-QinglanTrial=`): travel straight to the arena. Packaged
 	// builds ignore a positional map URL when GameDefaultMap is set, so the
@@ -314,6 +416,7 @@ void AQinglanRealmGameMode::BeginPlay()
 {
 	Super::BeginPlay();
 	SetupQinglanShotMode(this);
+	SetupQinglanHandShotMode(this);
 
 	// Realm exploration starts on the prepare loop; the encounter director
 	// switches to Combat/Boss when waves begin (docs/04 audio pass).

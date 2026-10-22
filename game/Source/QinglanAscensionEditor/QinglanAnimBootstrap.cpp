@@ -1,11 +1,12 @@
-// Animation bootstrap: builds combat montages from imported FBX takes, and
-// procedurally authors the missing Human Walk/Run locomotion sequences
-// (AUD-44 placeholders) through the UE 5.8 animation data model API.
+// Animation bootstrap: builds combat montages from imported FBX takes.
+// Original Human locomotion/action clips are required; optional procedural
+// locomotion authoring is retained only as a diagnostic tool.
 // Discovers anim sequences under /Game/Qinglan/Characters, cuts combo montages
 // with notify windows, and pairs them to techniques/enemies by naming rules.
 //
 // Run: UnrealEditor-Cmd QinglanAscension.uproject -run=QinglanAnimBootstrap
 #include "QinglanAnimBootstrap.h"
+#include "QinglanHumanAnimationContract.h"
 #include "Engine/SkeletalMeshSocket.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -87,27 +88,6 @@ namespace
 		const TCHAR* MontageSuffix; // output montage name suffix after "AM_<Group>_"
 	};
 
-	/**
-	 * Player (Human skeleton) take rules; order matters — first match wins.
-	 * The imported Human rig carries three takes (Human_Armature_Idle / _Jump /
-	 * _ArmatureAction_001); the action take drives every melee/cast montage,
-	 * Jump stands in for the dodge. Misses are logged, never fatal: the sword
-	 * component runs its phase timers without montages.
-	 */
-	const FTakeRule PlayerRules[] = {
-		{ TEXT("ArmatureAction"), TEXT("SwordCut_1") },
-		{ TEXT("Attack2"),  TEXT("SwordCut_2") },
-		{ TEXT("Attack3"),  TEXT("SwordCut_3") },
-		{ TEXT("Punch"),    TEXT("SwordCut_1") },
-		{ TEXT("Slash"),    TEXT("SwordCut_1") },
-		{ TEXT("Attack"),   TEXT("SwordCut_1") },
-		{ TEXT("Cast"),     TEXT("Cast") },
-		{ TEXT("Spell"),    TEXT("Cast") },
-		{ TEXT("Jump"),     TEXT("Dodge") },
-		{ TEXT("Roll"),     TEXT("Dodge") },
-		{ TEXT("Dodge"),    TEXT("Dodge") },
-	};
-
 	/** Monster groups: take rules per skeleton directory. */
 	const FTakeRule MonsterRules[] = {
 		{ TEXT("Attack"),   TEXT("Attack") },
@@ -180,8 +160,8 @@ namespace
 	// -----------------------------------------------------------------------
 	// AUD-44: procedural placeholder Walk/Run animation sequences.
 	//
-	// The Quaternius Human pack ships Idle/Jump/ArmatureAction but no locomotion
-	// takes. Until the art pass authors real Walk/Run clips, this generates two
+	// The Quaternius Human pack contains real Walk/Run takes, imported by
+	// MeshImport. This optional diagnostic can generate two
 	// independent one-second / 0.6-second loop assets with hand-authored limb
 	// swing so UQinglanCharacterAnimInstance's convention paths resolve.
 	//
@@ -881,34 +861,24 @@ UAnimMontage* UQinglanAnimBootstrapCommandlet::BuildComboMontage(const FString& 
 		UE_LOG(LogTemp, Error, TEXT("AUD-45: invalid montage package path '%s'"), *PackagePath);
 		return nullptr;
 	}
-	// Re-running the commandlet without the regeneration clean step used to
-	// build a second in-memory package over the existing file, and SavePackage
-	// refused to overwrite loaded content (the whole run failed). A montage
-	// that still matches its source skeleton and has the slot track is already
-	// the product of this function; reuse it. A stale one is deleted from disk
-	// so the rebuild below starts from a clean package name.
-	if (UAnimMontage* Existing = LoadObject<UAnimMontage>(nullptr, *PackagePath))
-	{
-		if (Existing->GetSkeleton() == Sequence->GetSkeleton() && Existing->SlotAnimTracks.Num() > 0)
-		{
-			UE_LOG(LogTemp, Log, TEXT("AUD-45: montage %s already valid; reusing"), *PackagePath);
-			return Existing;
-		}
-		Existing->GetOutermost()->SetDirtyFlag(false);
-		IFileManager::Get().Delete(*FPackageName::LongPackageNameToFilename(
-			PackagePath, FPackageName::GetAssetPackageExtension()));
-		CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
-	}
-	UPackage* Package = CreatePackage(*PackagePath);
+	// Refresh existing generated assets in place: matching skeleton/slot alone
+	// must not keep a montage referencing the obsolete static action take.
+	UAnimMontage* Montage = LoadObject<UAnimMontage>(nullptr, *PackagePath);
+	UPackage* Package = Montage ? Montage->GetOutermost() : CreatePackage(*PackagePath);
 	if (Package == nullptr)
 	{
 		return nullptr;
 	}
-	UAnimMontage* Montage = NewObject<UAnimMontage>(Package, *MontageName, RF_Public | RF_Standalone | RF_Transactional);
+	if (!Montage)
+	{
+		Montage = NewObject<UAnimMontage>(Package, *MontageName, RF_Public | RF_Standalone | RF_Transactional);
+	}
 	if (Montage == nullptr)
 	{
 		return nullptr;
 	}
+	Montage->SlotAnimTracks.Reset();
+	Montage->Notifies.Reset();
 
 	// AUD-45: explicit skeleton from the source take. Monsters can have multiple
 	// rigs, so each montage follows its own source sequence rather than a shared
@@ -956,14 +926,14 @@ int32 UQinglanAnimBootstrapCommandlet::Main(const FString& Params)
 	// (FAssetRegistryModule::AssetCreated) and by the montage discovery pass.
 	FAssetRegistryModule& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
 
-	// --- AUD-44: author placeholder Human Walk/Run sequences. ---
+	// --- Optional diagnostic placeholder authoring, never the default. ---
 	// These use conventions matching the existing SK_HumanHuman_Armature_Idle
 	// asset, so UQinglanCharacterAnimInstance picks them up automatically.
 	// The engine recipe (asset controller + SetModel + InitializeModel) makes
 	// the procedural authoring path work; existing assets are left untouched so
-	// a future art pass can replace them. Pass -no-procedural-locomotion to
-	// skip generation (e.g. for an art-only regeneration).
-	const bool bAuthorProceduralLocomotion = !FParse::Param(*Params, TEXT("no-procedural-locomotion"));
+	// a source take can replace them. The required-source validation below
+	// rejects placeholders as runtime acceptance evidence.
+	const bool bAuthorProceduralLocomotion = FParse::Param(*Params, TEXT("procedural-locomotion"));
 	USkeleton* const HumanSkeleton = LoadHumanSkeleton();
 	if (bAuthorProceduralLocomotion && HumanSkeleton)
 	{
@@ -1155,6 +1125,36 @@ int32 UQinglanAnimBootstrapCommandlet::Main(const FString& Params)
 		NewPlan.bPlayer = bPlayer;
 		return NewPlan;
 	};
+	FGroupPlan& HumanPlan = GroupOf(TEXT("Human"), true);
+	for (const QinglanHumanAnimation::FSourceTake& Take : QinglanHumanAnimation::RequiredTakes)
+	{
+		UAnimSequence* Sequence = LoadObject<UAnimSequence>(nullptr, *QinglanHumanAnimation::ObjectPath(Take.Suffix));
+		FString Reason;
+		if (!QinglanHumanAnimation::Validate(Sequence, HumanSkeleton, Take, Reason))
+		{
+			UE_LOG(LogTemp, Error, TEXT("Required Human source take %s invalid: %s"), Take.Suffix, *Reason);
+			bOk = false;
+			continue;
+		}
+		if (FString(Take.Suffix) == TEXT("Punch"))
+		{
+			// The pack has no authored sword/cast clip. Punch is an explicit
+			// moving cosmetic approximation; neither ArmatureAction take is
+			// valid here (.001 is static, .002 duplicates Run).
+			HumanPlan.Takes.Add(FName(TEXT("SwordCut_1")), Sequence);
+			HumanPlan.Takes.Add(FName(TEXT("SwordCut_2")), Sequence);
+			HumanPlan.Takes.Add(FName(TEXT("SwordCut_3")), Sequence);
+			HumanPlan.Takes.Add(FName(TEXT("Cast")), Sequence);
+		}
+		else if (FString(Take.Suffix) == TEXT("Jump"))
+		{
+			HumanPlan.Takes.Add(FName(TEXT("Dodge")), Sequence);
+		}
+	}
+	if (!bOk)
+	{
+		return 1; // A missing source action must not regenerate static fallback montages.
+	}
 
 	for (const FAssetData& Asset : AllAssets)
 	{
@@ -1173,8 +1173,9 @@ int32 UQinglanAnimBootstrapCommandlet::Main(const FString& Params)
 			continue;
 		}
 		const bool bPlayer = Group.Equals(TEXT("Human"), ESearchCase::IgnoreCase);
-		const FTakeRule* Rules = bPlayer ? PlayerRules : MonsterRules;
-		const int32 RuleCount = bPlayer ? UE_ARRAY_COUNT(PlayerRules) : UE_ARRAY_COUNT(MonsterRules);
+		if (bPlayer) { continue; } // Human sources are validated and selected explicitly above.
+		const FTakeRule* Rules = MonsterRules;
+		const int32 RuleCount = UE_ARRAY_COUNT(MonsterRules);
 
 		UAnimSequence* Sequence = Cast<UAnimSequence>(Asset.GetAsset());
 		if (Sequence == nullptr)
@@ -1216,24 +1217,6 @@ int32 UQinglanAnimBootstrapCommandlet::Main(const FString& Params)
 	for (FGroupPlan& Plan : Groups)
 	{
 		const FString Dir = MontageDir(Plan.Group);
-		// The imported Human rig has a single action take; clone it into the
-		// missing combo cuts with distinct notify windows so all three player
-		// montages exist (visual repetition is acceptable; timing still differs).
-		if (Plan.bPlayer)
-		{
-			const TObjectPtr<UAnimSequence>* CutOne = Plan.Takes.Find(FName(TEXT("SwordCut_1")));
-			if (CutOne)
-			{
-				for (const TCHAR* Missing : { TEXT("SwordCut_2"), TEXT("SwordCut_3") })
-				{
-					Plan.Takes.FindOrAdd(FName(Missing)) = *CutOne;
-				}
-				if (!Plan.Takes.Contains(FName(TEXT("Cast"))))
-				{
-					Plan.Takes.FindOrAdd(FName(TEXT("Cast"))) = *CutOne;
-				}
-			}
-		}
 		// Every group's data asset references AM_<Group>_HitReact. Human and
 		// Knight rigs ship no hurt take, so clone the closest body motion
 		// (player dodge jump / knight attack) into a hit-react montage instead

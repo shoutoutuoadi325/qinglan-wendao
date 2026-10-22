@@ -49,6 +49,8 @@ private:
 	void SynthesizeHubRestAnchor(UWorld* World, const TMap<FName, FVector>& AnchorPositions);
 	/** AUD-10: ledger/correspondence stations for maps authored before they existed. */
 	void SynthesizeHubSceneAnchors(UWorld* World, const TMap<FName, FVector>& AnchorPositions);
+	/** A visible, harmless practice target beside the training-yard station. */
+	void SynthesizeHubTrainingTarget(UWorld* World, const TMap<FName, FVector>& AnchorPositions);
 	/** Realm-only: one door interactable at each corridor mouth (rooms 0..5 -> 1..6). */
 	void SynthesizeRealmDoors(UWorld* World);
 };

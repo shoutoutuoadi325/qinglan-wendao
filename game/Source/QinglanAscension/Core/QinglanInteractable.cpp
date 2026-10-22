@@ -21,6 +21,7 @@
 #include "Core/QinglanTrialDirector.h"
 #include "Core/QinglanTrialAdmission.h"
 #include "Core/QinglanRoomLayout.h"
+#include "Core/QinglanSceneInspections.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -862,6 +863,31 @@ void AQinglanInteractable::ExecuteInteraction(AQinglanCharacter* Player)
 	UQinglanRunSubsystem* Run = Instance ? Instance->GetSubsystem<UQinglanRunSubsystem>() : nullptr;
 	UQinglanProfileSubsystem* Profile = Instance ? Instance->GetSubsystem<UQinglanProfileSubsystem>() : nullptr;
 	const FString Id = InteractionId.ToString();
+	if (QinglanSceneInspections::Execute(this, Player)) { return; }
+
+	// CH01's inspection route ends at shrine 3, after two actual encounters,
+	// the blessing choice and the inspection outlet. Full realms keep their
+	// separate guardian/exit rules below.
+	if (InteractionId == FName(TEXT("bamboo.tutorial_return")))
+	{
+		const UQinglanRealmDataAsset* Realm = Run ? Run->GetCurrentRealm() : nullptr;
+		if (!Player || !Story || !Realm
+			|| Realm->RealmId != FName(UQinglanEconomyLibrary::TutorialRealmIdText)
+			|| Run->GetCurrentRoomIndex() != 3 || IsAnyEncounterActive(GetWorld()))
+		{
+			return;
+		}
+		if (!Story->HasFlag(FName(TEXT("mq_ch01_short_route_clear"))) || !Run->CanClaimVictory())
+		{
+			Player->ShowGameMessage(UQinglanHUDStatics::GameText(FName(TEXT("story.ch01.s02.objective"))));
+			return;
+		}
+		if (Run->RequestExit() && !Run->IsInExpedition())
+		{
+			QinglanInteraction::TravelToMap(this, QinglanInteraction::HubMapPath);
+		}
+		return;
+	}
 
 	// AUD-11 producer: the shrine is the free recovery station. Restore health
 	// and spiritual energy (no cost) before any scene routing so the authored

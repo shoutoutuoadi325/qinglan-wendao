@@ -28,7 +28,7 @@ class UShapeComponent;
  * ExecuteInteraction routes to the subsystem that owns the behavior.
  */
 UCLASS()
-class AQinglanInteractable : public AActor
+class QINGLANASCENSION_API AQinglanInteractable : public AActor
 {
 	GENERATED_BODY()
 

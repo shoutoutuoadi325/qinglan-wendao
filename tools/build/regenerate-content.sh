@@ -2,9 +2,8 @@
 # Portable content regeneration: data import -> mesh import -> content
 # bootstrap -> animation/UI bootstrap, then mandatory-output validation. Mesh
 # import precedes content bootstrap so generated maps can dress rooms with the
-# imported nature meshes (AUD-55). The editor commandlets only warn about
-# missing sources in-process; this wrapper makes those conditions fail the run
-# (docs/dev/completion-audit-todo.md AUD-57).
+# imported nature meshes (AUD-55). Required source failures and missing
+# mandatory outputs fail the run (docs/dev/completion-audit-todo.md AUD-57).
 #
 #   QINGLAN_ENGINE_ROOT   source engine checkout (default: beside the repo)
 #   QINGLAN_PROJECT_DIR   game project directory  (default: <repo>/game)
@@ -27,20 +26,16 @@ QINGLAN_LOW_QUALITY="${QINGLAN_LOW_QUALITY:-0}"
 
 CONTENT_BOOTSTRAP_ARGS=()
 [ "$QINGLAN_LOW_QUALITY" = "1" ] && CONTENT_BOOTSTRAP_ARGS+=("-lowquality")
-
-EDITOR_CMD="$QINGLAN_ENGINE_ROOT/Engine/Binaries/Linux/UnrealEditor-Cmd"
-UPROJECT="$QINGLAN_PROJECT_DIR/QinglanAscension.uproject"
-CONTENT="$QINGLAN_PROJECT_DIR/Content/Qinglan"
+DDC_ARGS=()
+[ -n "${QINGLAN_DDC:-}" ] && DDC_ARGS+=("-DDC=$QINGLAN_DDC")
 
 fail() { echo "regenerate-content.sh: ERROR: $*" >&2; exit 1; }
 
-run_as_build_user() {
-  if [ "$(id -u)" = "0" ] && id qdev >/dev/null 2>&1; then
-    runuser -u qdev -- "$@"
-  else
-    "$@"
-  fi
-}
+source "$SCRIPT_DIR/common.sh"
+qinglan_init_host
+EDITOR_CMD="$(qinglan_editor_tool)"
+UPROJECT="$QINGLAN_PROJECT_DIR/QinglanAscension.uproject"
+CONTENT="$QINGLAN_PROJECT_DIR/Content/Qinglan"
 
 [ -f "$EDITOR_CMD" ] || fail "editor command binary missing: $EDITOR_CMD (set QINGLAN_ENGINE_ROOT)"
 [ -f "$UPROJECT" ] || fail "project file missing: $UPROJECT (set QINGLAN_PROJECT_DIR)"
@@ -65,13 +60,16 @@ done
 
 run_cmdlet() {
   local name="$1"; shift
-  echo "--- $name $(date -Is) ---"
-  run_as_build_user bash -c "cd '$QINGLAN_PROJECT_DIR' && '$EDITOR_CMD' '$UPROJECT' -run=$name -unattended -nop4 -stdout -nullrhi $*"
+  echo "--- $name $(qinglan_timestamp) ---"
+  (cd "$QINGLAN_PROJECT_DIR" && qinglan_run_engine "$EDITOR_CMD" "$NATIVE_PROJECT" "-run=$name" -unattended -nop4 -stdout -nullrhi "${DDC_ARGS[@]}" "$@")
   local rc=$?
   echo "--- $name rc=$rc ---"
   return "$rc"
 }
 
+NATIVE_PROJECT="$(qinglan_native_path "$UPROJECT")" || exit 1
+NATIVE_DATA="$(qinglan_native_path "$REPO_ROOT/data")" || exit 1
+NATIVE_RAW="$(qinglan_native_path "$QINGLAN_ASSETS_RAW")" || exit 1
 rc_all=0
 # Widget blueprints are fully code-authored by UIBootstrap. A package left on
 # disk is discovered (partially loaded) by the commandlet process, and UE 5.8
@@ -89,28 +87,20 @@ rm -rf "$CONTENT/Data"
 
 # Project commandlets live in the PostEngineInit editor module, which is not
 # auto-discovered without the "Module.Class" form (-run appends "Commandlet").
-run_cmdlet QinglanAscensionEditor.QinglanDataImport -data="$REPO_ROOT/data" || rc_all=1
+run_cmdlet QinglanAscensionEditor.QinglanDataImport "-data=$NATIVE_DATA" || rc_all=1
 # Mesh import runs before the content bootstrap because the map generator
 # dresses rooms with the imported Quaternius nature meshes (AUD-55). The
-# Interchange pipeline logs per-take frame-alignment errors that set the editor
-# process exit code even though every mesh imports. The commandlet's own
-# completion marker (written to its saved log) plus the mandatory-output checks
-# below are the authority for this step.
-if ! run_cmdlet QinglanAscensionEditor.QinglanMeshImport; then
-  if grep -q 'QinglanMeshImport finished ok=1' "$QINGLAN_PROJECT_DIR/Saved/Logs/QinglanAscension.log" 2>/dev/null; then
-    echo "note: MeshImport exited nonzero after importing every mesh (Interchange frame-alignment errors); continuing"
-  else
-    rc_all=1
-  fi
-fi
-run_cmdlet QinglanAscensionEditor.QinglanContentBootstrap "${CONTENT_BOOTSTRAP_ARGS[@]}" || rc_all=1
+# Human animation sampling is aligned by the importer. Every commandlet
+# must exit successfully: a mesh completion marker cannot excuse failed takes.
+run_cmdlet QinglanAscensionEditor.QinglanMeshImport "-assetsraw=$NATIVE_RAW" || rc_all=1
+run_cmdlet QinglanAscensionEditor.QinglanContentBootstrap "-assetsraw=$NATIVE_RAW" "${CONTENT_BOOTSTRAP_ARGS[@]}" || rc_all=1
 # Combat montages (AUD-44/45) are rebuilt after the mesh import so each one is
 # saved to its own package with the source skeleton assigned. Existing montage
 # packages are removed first for the same partial-load reason as the widgets.
 find "$CONTENT/Characters" \( -path '*/Montages/AM_*.uasset' -o -name 'Montages.uasset' \) -delete 2>/dev/null
 run_cmdlet QinglanAscensionEditor.QinglanAnimBootstrap || rc_all=1
 # AUD-56: import the project-original music/SFX (deterministic synthesized WAVs).
-run_cmdlet QinglanAscensionEditor.QinglanAudioBootstrap || rc_all=1
+run_cmdlet QinglanAscensionEditor.QinglanAudioBootstrap "-assetsraw=$NATIVE_RAW" || rc_all=1
 run_cmdlet QinglanAscensionEditor.QinglanUIBootstrap || rc_all=1
 
 # Mandatory outputs: the commandlets can report success without producing
@@ -147,8 +137,8 @@ for ABP in Human/ABP_Human Knight/ABP_Knight Monsters/ABP_Slime Monsters/ABP_Ske
     || { echo "regenerate-content.sh: ERROR: anim slot graph $CONTENT/Characters/$ABP.uasset missing" >&2; rc_all=1; }
 done
 
-# AUD-56: QinglanAudioBootstrap imports 4 music + 4 SFX sound waves. The
-# commandlet only warns on a missing source, so require the committed assets.
+# AUD-56: QinglanAudioBootstrap imports 4 music + 4 SFX sound waves;
+# require the resulting assets as well as a successful commandlet exit.
 AUDIO_COUNT=$(find "$CONTENT/Audio" -type f -name '*.uasset' 2>/dev/null | wc -l | tr -d ' ')
 if [ "${AUDIO_COUNT:-0}" -lt 8 ]; then
   echo "regenerate-content.sh: ERROR: only ${AUDIO_COUNT:-0} audio assets under $CONTENT/Audio (expected >= 8)" >&2
@@ -173,5 +163,5 @@ for MIC in M_BambooWall M_Cobblestone M_CobblestoneAlt M_StonePath M_GrassRock M
     || { echo "regenerate-content.sh: ERROR: solid fallback instance $CONTENT/Materials/${MIC}_Solid.uasset missing" >&2; rc_all=1; }
 done
 
-echo "=== content regeneration done rc_all=$rc_all $(date -Is) ==="
+echo "=== content regeneration done rc_all=$rc_all $(qinglan_timestamp) ==="
 exit "$rc_all"

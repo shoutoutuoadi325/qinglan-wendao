@@ -32,7 +32,7 @@ namespace
 	// (UStringTable registers under its path name and FText::FromStringTable
 	// resolves asset-path ids through the engine bridge); a bare "ST_Game"
 	// would bypass the bridge and fall back to key text.
-	const FName GameStringTableId(TEXT("/Game/Qinglan/Data/ST_Game"));
+	const FName GameStringTableId(TEXT("/Game/Qinglan/Data/ST_Game.ST_Game"));
 
 	// Authored defaults (see file-header FIXME-CONTRACT), built once on first
 	// use so no FName lives in static-initialization order limbo.

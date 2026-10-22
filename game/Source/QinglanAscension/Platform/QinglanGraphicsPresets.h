@@ -14,7 +14,7 @@ DECLARE_LOG_CATEGORY_EXTERN(LogQinglanGraphics, Log, All);
 namespace QinglanGraphics
 {
 	/** All player-facing text resolves from ST_Game only (code-contracts.md). */
-	inline constexpr const TCHAR* GameStringTableId = TEXT("/Game/Qinglan/Data/ST_Game");
+	inline constexpr const TCHAR* GameStringTableId = TEXT("/Game/Qinglan/Data/ST_Game.ST_Game");
 
 	inline FText Loc(const TCHAR* Key)
 	{

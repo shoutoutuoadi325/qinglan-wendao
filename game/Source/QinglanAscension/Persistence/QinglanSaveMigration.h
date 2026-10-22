@@ -27,7 +27,7 @@ namespace QinglanSave
 	/** All player-facing save text resolves from ST_Game only (code-contracts.md). */
 	inline FText Loc(const TCHAR* Key)
 	{
-		return FText::FromStringTable(TEXT("/Game/Qinglan/Data/ST_Game"), Key);
+		return FText::FromStringTable(TEXT("/Game/Qinglan/Data/ST_Game.ST_Game"), Key);
 	}
 
 	/** Registers a step so future schema bumps pick it up automatically. */

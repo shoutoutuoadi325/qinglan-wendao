@@ -10,6 +10,7 @@
 #include "Internationalization/TextLocalizationManager.h"
 #include "Internationalization/TextLocalizationResource.h"
 #include "Misc/ConfigCacheIni.h"
+#include "Misc/Paths.h"
 #include "Misc/ScopeLock.h"
 #include "QinglanAscension.h"
 #include "UObject/SoftObjectPath.h"
@@ -185,7 +186,15 @@ namespace
 			// Resource priority is inverted relative to source priority: smaller
 			// numbers win (mirrors the engine locres source's BaseResourcePriority).
 			const int32 ResourcePriority = -GetPriority();
-			const FTextKey LocResId(TEXT("QinglanRuntime"));
+			// UE 5.8 derives a localization target by removing the filename and
+			// culture directories from each nonempty LocResId. A bare label
+			// produces an empty target and asserts during culture refresh.
+			// This is a virtual resource identity: translations still come from
+			// DT_Localization and no .locres file needs to exist at this path.
+			const FString VirtualLocResPath = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+				FPaths::ProjectContentDir(), TEXT("Localization"), TEXT("QinglanRuntime"),
+				CultureName, TEXT("QinglanRuntime.locres")));
+			const FTextKey LocResId(VirtualLocResPath);
 			const FTextKey Namespace(GameStringTableNamespace);
 
 			auto AddEntries = [&Entries, ResourcePriority, &LocResId, &Namespace](FTextLocalizationResource& Resource)
@@ -345,6 +354,10 @@ FText FQinglanLocalizationService::Resolve(FName Key)
 
 bool FQinglanLocalizationService::TryResolve(FName Key, FText& OutText)
 {
+	if (!Key.IsValid())
+	{
+		return false;
+	}
 	FString Value;
 	if (!TryResolveFromTables(Key.ToString(), GetRuntimeCultureName(), Value))
 	{
@@ -356,6 +369,10 @@ bool FQinglanLocalizationService::TryResolve(FName Key, FText& OutText)
 
 FText FQinglanLocalizationService::ResolveForCulture(FName Key, const FString& CultureName)
 {
+	if (!Key.IsValid())
+	{
+		return FText::FromString(TEXT("<invalid text key>"));
+	}
 	FString Value;
 	if (TryResolveFromTables(Key.ToString(), CultureName, Value))
 	{

@@ -201,7 +201,7 @@ namespace QinglanStoryRuntime
 	inline constexpr const TCHAR* StoryRegistrySoftPath = TEXT("/Game/Qinglan/Data/DA_StoryRegistry");
 
 	/** Single game string table (code-contracts.md "Localization keys"). */
-	inline constexpr const TCHAR* GameStringTableId = TEXT("/Game/Qinglan/Data/ST_Game");
+	inline constexpr const TCHAR* GameStringTableId = TEXT("/Game/Qinglan/Data/ST_Game.ST_Game");
 
 	/** Courier round trips are in-fiction time only, never real-time waits
 	 * (docs/dev/implementation-blueprint.md section 1.9: "SQ02 18 h, SQ03 12 h,

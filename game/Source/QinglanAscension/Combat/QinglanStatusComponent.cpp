@@ -351,7 +351,7 @@ FText UQinglanStatusComponent::GetStatusDisplayName(EQinglanStatus Status) const
 	{
 		return FText::GetEmpty();
 	}
-	return FText::FromStringTable(TEXT("/Game/Qinglan/Data/ST_Game"), Key.ToString());
+	return FText::FromStringTable(TEXT("/Game/Qinglan/Data/ST_Game.ST_Game"), Key.ToString());
 }
 
 bool UQinglanStatusComponent::IsRooted() const

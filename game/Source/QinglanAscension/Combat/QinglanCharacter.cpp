@@ -442,32 +442,21 @@ namespace
 	// --- Gameplay-proof event producers (AUD-11) ---
 
 	/**
-	 * Character -> proof relay. The character header is frozen, so the relay is
-	 * GC-rooted here (TStrongObjectPtr) and removed on EndPlay. Dynamic
+	 * Character -> proof relay. The actor owns the relay through a UPROPERTY,
+	 * so it survives while the actor is alive without rooting its world. Dynamic
 	 * delegates bind UFUNCTIONs only; the relay forwards stable proof event
 	 * names to QinglanStoryRuntime::NotifyGameplayEvent.
 	 */
-	TMap<TWeakObjectPtr<AQinglanCharacter>, TStrongObjectPtr<UQinglanGameplayProofRelay>> GQinglanGameplayProofRelays;
-
-	void QinglanBindGameplayProofEvents(AQinglanCharacter* Character, UQinglanStorySubsystem* Story)
+	void QinglanBindGameplayProofEvents(AQinglanCharacter* Character, UQinglanStorySubsystem* Story,
+		TObjectPtr<UQinglanGameplayProofRelay>& RelaySlot)
 	{
 		if (Character == nullptr || Story == nullptr)
 		{
 			return;
 		}
-		// Prune stale characters so automation instances cannot leak relays.
-		for (auto It = GQinglanGameplayProofRelays.CreateIterator(); It; ++It)
+		if (!RelaySlot)
 		{
-			if (!It.Key().IsValid())
-			{
-				It.RemoveCurrent();
-			}
-		}
-		const TWeakObjectPtr<AQinglanCharacter> Key(Character);
-		TStrongObjectPtr<UQinglanGameplayProofRelay>& RelaySlot = GQinglanGameplayProofRelays.FindOrAdd(Key);
-		if (!RelaySlot.IsValid())
-		{
-			RelaySlot = TStrongObjectPtr<UQinglanGameplayProofRelay>(NewObject<UQinglanGameplayProofRelay>(Character));
+			RelaySlot = NewObject<UQinglanGameplayProofRelay>(Character);
 		}
 		UQinglanGameplayProofRelay* Relay = RelaySlot.Get();
 		Relay->StorySubsystem = Story;
@@ -486,14 +475,10 @@ namespace
 		}
 	}
 
-	void QinglanUnbindGameplayProofEvents(AQinglanCharacter* Character)
+	void QinglanUnbindGameplayProofEvents(AQinglanCharacter* Character,
+		TObjectPtr<UQinglanGameplayProofRelay>& RelaySlot)
 	{
 		if (Character == nullptr)
-		{
-			return;
-		}
-		TStrongObjectPtr<UQinglanGameplayProofRelay> RelaySlot;
-		if (!GQinglanGameplayProofRelays.RemoveAndCopyValue(TWeakObjectPtr<AQinglanCharacter>(Character), RelaySlot))
 		{
 			return;
 		}
@@ -514,6 +499,9 @@ namespace
 		{
 			Techniques->OnCastReleased.RemoveDynamic(Relay, &UQinglanGameplayProofRelay::HandleCastReleased);
 		}
+		Relay->StorySubsystem.Reset();
+		Relay->OwnerActor.Reset();
+		RelaySlot = nullptr;
 	}
 
 	/** Authored room-clear realm token ("tutorial_guided" -> "tutorial"). */
@@ -2740,8 +2728,8 @@ void AQinglanCharacter::BindStoryDelegates()
 		Save->OnSaveFailed.AddDynamic(this, &AQinglanCharacter::HandleSaveFailed);
 	}
 	// AUD-11: bind the dynamic combat/dodge/technique delegates through the
-	// proof relay (the character header is frozen and cannot declare handlers).
-	QinglanBindGameplayProofEvents(this, Story);
+	// actor-owned proof relay, which shares the character's GC lifetime.
+	QinglanBindGameplayProofEvents(this, Story, GameplayProofRelay);
 	bStoryDelegatesBound = true;
 }
 
@@ -2751,7 +2739,7 @@ void AQinglanCharacter::UnbindStoryDelegates()
 	{
 		return;
 	}
-	QinglanUnbindGameplayProofEvents(this);
+	QinglanUnbindGameplayProofEvents(this, GameplayProofRelay);
 	if (UGameInstance* const Instance = GetGameInstance())
 	{
 		if (UQinglanStorySubsystem* const Story = Instance->GetSubsystem<UQinglanStorySubsystem>())

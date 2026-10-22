@@ -21,6 +21,7 @@ class UQinglanEndingWidget;
 class UQinglanMenuWidget;
 class UQinglanJournalWidget;
 class AQinglanInteractable;
+class UQinglanGameplayProofRelay;
 
 /**
  * Action classes covered by the unified priority gate (AUD-32). Priority:
@@ -317,6 +318,8 @@ protected:
 	int32 MenuSelectionIndex = 0;
 	bool bHudCreated = false;
 	bool bStoryDelegatesBound = false;
+	/** Owned by this actor; a process-wide strong root would retain its entire world. */
+	UPROPERTY(Transient) TObjectPtr<UQinglanGameplayProofRelay> GameplayProofRelay;
 	bool bDefeatHandled = false;
 	/** AUD-51 gameplay input gate; mirrors any open menu/journal overlay. */
 	bool bMenuOpen = false;

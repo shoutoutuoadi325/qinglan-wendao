@@ -170,9 +170,9 @@ public:
 /**
  * Gameplay-proof event relay (AUD-11 event producers). The player character's
  * combat/dodge/technique delegates are dynamic, so they can only bind
- * UFUNCTIONs; the character header is frozen, so these handlers live here and
+ * UFUNCTIONs; these handlers live here and
  * forward stable proof event names to QinglanStoryRuntime::NotifyGameplayEvent.
- * Owned (and GC-rooted) by the character's binding helpers.
+ * Owned by a reflected property on the character, without an external GC root.
  */
 UCLASS()
 class UQinglanGameplayProofRelay : public UObject

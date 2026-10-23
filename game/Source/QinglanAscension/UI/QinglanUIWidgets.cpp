@@ -1189,16 +1189,16 @@ void UQinglanMenuWidget::ApplyProfileRows()
 	{
 		return;
 	}
-	for (int32 Slot = 0; Slot < UQinglanSaveSubsystem::ProfileSlotCount; ++Slot)
+	for (int32 ProfileSlot = 0; ProfileSlot < UQinglanSaveSubsystem::ProfileSlotCount; ++ProfileSlot)
 	{
-		const bool bHas = Save->HasProfile(Slot);
+		const bool bHas = Save->HasProfile(ProfileSlot);
 		FFormatNamedArguments Args;
-		Args.Add(TEXT("index"), FText::AsNumber(Slot + 1));
+		Args.Add(TEXT("index"), FText::AsNumber(ProfileSlot + 1));
 		Args.Add(TEXT("status"), UQinglanHUDStatics::GameText(
 			FName(bHas ? TEXT("menu.profile.occupied") : TEXT("menu.profile.empty"))));
 		Rows.Add({ QinglanUIFormat(FName(TEXT("menu.profile.slot")), Args),
 			FName(bHas ? TEXT("profile.load") : TEXT("profile.create")),
-			FName(*FString::FromInt(Slot)) });
+			FName(*FString::FromInt(ProfileSlot)) });
 	}
 }
 
@@ -1438,17 +1438,17 @@ FText UQinglanMenuWidget::ResolveSummary() const
 		// Four equipped slots, including explicit empty placeholders.
 		TArray<FString> TechniqueSlots;
 		const TArray<FName> EquippedTechniques = Profile->GetEquippedTechniques();
-		for (int32 Slot = 0; Slot < QinglanProgression::EquippedTechniqueLimit; ++Slot)
+		for (int32 TechSlot = 0; TechSlot < QinglanProgression::EquippedTechniqueLimit; ++TechSlot)
 		{
 			FText SlotName = UQinglanHUDStatics::GameText(FName(TEXT("menu.equipment.empty")));
-			if (EquippedTechniques.IsValidIndex(Slot))
+			if (EquippedTechniques.IsValidIndex(TechSlot))
 			{
-				const FName TechniqueId = EquippedTechniques[Slot];
+				const FName TechniqueId = EquippedTechniques[TechSlot];
 				FName NameKey(*FString::Printf(TEXT("technique.%s.name"), *TechniqueId.ToString()));
 				SlotName = QinglanUILocalizedOrId(NameKey, TechniqueId);
 			}
 			FFormatNamedArguments SlotArgs;
-			SlotArgs.Add(TEXT("index"), FText::AsNumber(Slot + 1));
+			SlotArgs.Add(TEXT("index"), FText::AsNumber(TechSlot + 1));
 			SlotArgs.Add(TEXT("name"), SlotName);
 			TechniqueSlots.Add(QinglanUIFormat(FName(TEXT("menu.equipment.slot")), SlotArgs).ToString());
 		}
@@ -1663,17 +1663,17 @@ void UQinglanMenuWidget::ActivateRow(int32 RowIndex)
 			SetNotice(UQinglanHUDStatics::GameText(FName(TEXT("menu.notice.save_unavailable"))));
 			return;
 		}
-		const int32 Slot = FCString::Atoi(*Row.Payload.ToString());
+		const int32 ProfileSlotIndex = FCString::Atoi(*Row.Payload.ToString());
 		FText Result;
 		bool bOk = true;
 		if (Action == FName(TEXT("profile.load")))
 		{
-			bOk = Save->LoadProfile(Slot, Result);
+			bOk = Save->LoadProfile(ProfileSlotIndex, Result);
 		}
 		else
 		{
-			Save->CreateNewProfile(Slot);
-			bOk = Save->HasProfile(Slot);
+			Save->CreateNewProfile(ProfileSlotIndex);
+			bOk = Save->HasProfile(ProfileSlotIndex);
 		}
 		if (Result.IsEmpty() && !bOk)
 		{
@@ -2080,10 +2080,10 @@ UTextBlock* UQinglanHUDWidget::EnsureNamedText(FName Name, const FVector2D& Posi
 	{
 		return nullptr;
 	}
-	if (UCanvasPanelSlot* Slot = Root->AddChildToCanvas(Text))
+	if (UCanvasPanelSlot* CanvasSlot = Root->AddChildToCanvas(Text))
 	{
-		Slot->SetPosition(Position);
-		Slot->SetSize(Size);
+		CanvasSlot->SetPosition(Position);
+		CanvasSlot->SetSize(Size);
 	}
 	return Text;
 }

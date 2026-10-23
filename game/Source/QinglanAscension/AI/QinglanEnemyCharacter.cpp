@@ -509,15 +509,15 @@ void AQinglanEnemyCharacter::InitializeFromData(UQinglanEnemyDataAsset* InData)
 	// every step null-safe so tests without imported content still run.
 	if (USkeletalMeshComponent* MeshComp = GetMesh())
 	{
-		if (USkeletalMesh* Mesh = InData->Mesh.LoadSynchronous())
+		if (USkeletalMesh* SkelMesh = InData->Mesh.LoadSynchronous())
 		{
-			MeshComp->SetSkeletalMesh(Mesh);
+			MeshComp->SetSkeletalMesh(SkelMesh);
 			// Pivot the rig onto the capsule: root at capsule base, facing
 			// the movement forward axis (Quaternius exports face +Y).
 			// The FBX rigs import ~3x human height, so normalize the component
 			// scale to the capsule (same contract as the player pawn).
 			const float CapsuleHalfHeight = GetCapsuleComponent() ? GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight() : 88.f;
-			const FBoxSphereBounds MeshBounds = Mesh->GetBounds();
+			const FBoxSphereBounds MeshBounds = SkelMesh->GetBounds();
 			const float MeshHalfHeight = FMath::Max(1.f, static_cast<float>(MeshBounds.BoxExtent.Z));
 			const float MeshScale = CapsuleHalfHeight / MeshHalfHeight;
 			MeshComp->SetRelativeScale3D(FVector(MeshScale));

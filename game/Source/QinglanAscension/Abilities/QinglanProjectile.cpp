@@ -538,13 +538,13 @@ bool AQinglanProjectile::SweepProjectilePath(const FVector& ProposedLocation)
 
 void AQinglanProjectile::TickOrbitPulses(float DeltaSeconds)
 {
-	AActor* Owner = EffectOwner.Get();
-	if (!Owner)
+	AActor* OwningActor = EffectOwner.Get();
+	if (!OwningActor)
 	{
 		ReturnToPool();
 		return;
 	}
-	SetActorLocation(Owner->GetActorLocation(), false);
+	SetActorLocation(OwningActor->GetActorLocation(), false);
 
 	PulseTimer += DeltaSeconds;
 	while (PulseTimer >= PulseInterval && PulsesRemaining > 0)
@@ -564,21 +564,21 @@ void AQinglanProjectile::TickOrbitPulses(float DeltaSeconds)
 
 void AQinglanProjectile::ExecuteOrbitPulse()
 {
-	AActor* Owner = EffectOwner.Get();
-	if (!Owner)
+	AActor* OwningActor = EffectOwner.Get();
+	if (!OwningActor)
 	{
 		return;
 	}
 
 	FCollisionObjectQueryParams ObjectParams(ECC_Pawn);
-	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(QinglanOrbitPulse), false, Owner);
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(QinglanOrbitPulse), false, OwningActor);
 
 	TArray<FOverlapResult> Overlaps;
-	GetWorld()->OverlapMultiByObjectType(Overlaps, Owner->GetActorLocation(), FQuat::Identity,
+	GetWorld()->OverlapMultiByObjectType(Overlaps, OwningActor->GetActorLocation(), FQuat::Identity,
 		ObjectParams, FCollisionShape::MakeSphere(PulseRadiusCm), QueryParams);
 
 	// Deterministic nearest-first ordering: distance, then name.
-	Overlaps.Sort([Center = Owner->GetActorLocation()](const FOverlapResult& A, const FOverlapResult& B)
+	Overlaps.Sort([Center = OwningActor->GetActorLocation()](const FOverlapResult& A, const FOverlapResult& B)
 	{
 		const AActor* ActorA = A.GetActor();
 		const AActor* ActorB = B.GetActor();
@@ -621,8 +621,8 @@ void AQinglanProjectile::ExecuteOrbitPulse()
 
 void AQinglanProjectile::TickHealOverTime(float DeltaSeconds)
 {
-	AActor* Owner = EffectOwner.Get();
-	if (!Owner)
+	AActor* OwningActor = EffectOwner.Get();
+	if (!OwningActor)
 	{
 		ReturnToPool();
 		return;
@@ -644,8 +644,8 @@ void AQinglanProjectile::TickHealOverTime(float DeltaSeconds)
 
 void AQinglanProjectile::TickWetTrail(float DeltaSeconds)
 {
-	AActor* Owner = EffectOwner.Get();
-	if (!Owner)
+	AActor* OwningActor = EffectOwner.Get();
+	if (!OwningActor)
 	{
 		ReturnToPool();
 		return;
@@ -653,7 +653,7 @@ void AQinglanProjectile::TickWetTrail(float DeltaSeconds)
 	// The trail follows the owner's actual dodge: capsule-driven movement
 	// stops at blockers, so sampling the real position each tick can never
 	// soak wall-separated or unreachable targets (docs/02 §2 dodge rule).
-	const UQinglanDodgeComponent* Dodge = Owner->FindComponentByClass<UQinglanDodgeComponent>();
+	const UQinglanDodgeComponent* Dodge = OwningActor->FindComponentByClass<UQinglanDodgeComponent>();
 	if (!Dodge || !Dodge->IsDodging())
 	{
 		ReturnToPool(); // dash finished (or wall-stopped early)
@@ -661,7 +661,7 @@ void AQinglanProjectile::TickWetTrail(float DeltaSeconds)
 	}
 
 	FCollisionObjectQueryParams ObjectParams(ECC_Pawn);
-	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(QinglanWetTrail), false, Owner);
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(QinglanWetTrail), false, OwningActor);
 
 	TArray<FOverlapResult> Overlaps;
 	GetWorld()->OverlapMultiByObjectType(Overlaps, Owner->GetActorLocation(), FQuat::Identity,

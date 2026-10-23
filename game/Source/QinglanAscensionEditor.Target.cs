@@ -10,6 +10,7 @@ public class QinglanAscensionEditorTarget : TargetRules
 		DefaultBuildSettings = BuildSettingsVersion.Latest;
 		IncludeOrderVersion = EngineIncludeOrderVersion.Latest;
 		bOmitPCDebugInfoInDevelopment = true;
+		ShadowVariableWarningLevel = WarningLevel.Warning;
 		ExtraModuleNames.Add("QinglanAscension");
 		ExtraModuleNames.Add("QinglanAscensionEditor");
 	}

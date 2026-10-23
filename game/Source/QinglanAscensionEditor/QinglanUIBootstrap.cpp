@@ -69,7 +69,7 @@ namespace
 	{
 		// UE 5.8: UWidget has no SetObjectName; widgets are named at construction.
 		UTextBlock* Text = Tree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), Name);
-		Text->Text = Label;
+		Text->SetText(Label);
 		// TODO pass font size when the default font asset chain is wired; scale via render transform.
 		Text->SetRenderScale(FVector2D(FontSize / 18.f, FontSize / 18.f));
 		if (UCanvasPanelSlot* Slot = Cast<UCanvasPanelSlot>(Parent->AddChild(Text)))

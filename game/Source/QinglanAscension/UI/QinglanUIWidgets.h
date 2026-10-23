@@ -641,7 +641,7 @@ public:
 	/** Selection consumed or offer dismissed: clear and return to Pause. */
 	void CloseOffer();
 	UFUNCTION(BlueprintCallable, Category = "Qinglan|Menu") void SetNotice(const FText& InNotice);
-	void CaptureNumberKey(int32 Slot) { MenuState.CaptureNumberKey(Slot); }
+	void CaptureNumberKey(int32 InSlot) { MenuState.CaptureNumberKey(InSlot); }
 	/** Row activation entry point for the per-row click relay. */
 	void ActivateRow(int32 RowIndex);
 

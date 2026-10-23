@@ -8,7 +8,8 @@ param(
     [string]$PublisherId = '',
     [string]$PublisherDisplayName = '',
     [string]$StoreId = '',
-    [string]$Version = '0.1.0.0'
+    [string]$Version = '0.1.0.0',
+    [switch]$SkipEditorBuild
 )
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
@@ -43,11 +44,15 @@ foreach ($dir in $ubtDirs) {
     $ubtXml | Set-Content (Join-Path $dir 'BuildConfiguration.xml') -Encoding utf8
 }
 
-# Run build with 3 parallel actions on the 4-core runner.
-$build = Join-Path $engine 'Engine/Build/BatchFiles/Build.bat'
-& $build QinglanAscensionEditor Win64 Development "-Project=$project" -WaitMutex -NoUBA -MaxParallelActions=3 2>&1 |
-    Tee-Object (Join-Path $reports 'editor-build.log')
-if ($LASTEXITCODE) { throw "Win64 editor build failed ($LASTEXITCODE)." }
+if (-not $SkipEditorBuild) {
+    # Run build with 3 parallel actions on the 4-core runner.
+    $build = Join-Path $engine 'Engine/Build/BatchFiles/Build.bat'
+    & $build QinglanAscensionEditor Win64 Development "-Project=$project" -WaitMutex -NoUBA -MaxParallelActions=3 2>&1 |
+        Tee-Object (Join-Path $reports 'editor-build.log')
+    if ($LASTEXITCODE) { throw "Win64 editor build failed ($LASTEXITCODE)." }
+} else {
+    Write-Host "Skipping standalone Editor build (-SkipEditorBuild specified); relying on restored editor binaries."
+}
 $uat = Join-Path $engine 'Engine/Build/BatchFiles/RunUAT.bat'
 & $uat BuildCookRun "-project=$project" -noP4 -platform=Win64 -clientconfig=Shipping -build -cook -stage -pak -iostore -compressed -archive "-archivedirectory=$package" -unattended -nosplash -utf8output -nullrhi -nodebuginfo '-ubtargs=-NoUBA -MaxParallelActions=3' 2>&1 |
     Tee-Object (Join-Path $reports 'package.log')

@@ -98,7 +98,7 @@ jobs:
           retention-days: 1
           if-no-files-found: warn
 
-  package:
+  build-editor:
     needs: preflight
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'package'
     runs-on: windows-2022
@@ -127,7 +127,66 @@ jobs:
           UE_WINDOWS_ARCHIVE_URL: ${{ secrets.UE_WINDOWS_ARCHIVE_URL }}
           UE_WINDOWS_ARCHIVE_SHA256: ${{ vars.UE_WINDOWS_ARCHIVE_SHA256 }}
         run: ./tools/ci/windows-engine.ps1 -Source '${{ inputs.engine_source }}'
-      - name: Compile, cook, and package Win64 & Microsoft Store
+      - name: Compile and archive Unreal Engine Editor
+        shell: pwsh
+        run: |
+          ./tools/ci/windows-build-editor.ps1 -ArchiveDir "${{ runner.temp }}/editor-cache"
+      - name: Upload compiled Editor cache
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: qinglan-editor-cache-${{ github.run_id }}
+          path: ${{ runner.temp }}/editor-cache/**
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+      - name: Save editor build diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-editor-diagnostics-${{ github.run_id }}
+          path: ${{ runner.temp }}/qinglan-win64/reports/**
+          retention-days: 1
+          if-no-files-found: warn
+
+  package:
+    needs: [preflight, build-editor]
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'package'
+    runs-on: windows-2022
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          lfs: false
+      - name: "Configure 32GB pagefile on D:"
+        uses: al-cheb/configure-pagefile-action@v1.4
+        with:
+          minimum-size: 16GB
+          maximum-size: 32GB
+          disk-root: "D:"
+      - name: Configure Windows Defender performance exclusions
+        shell: pwsh
+        run: |
+          Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE"
+          Add-MpPreference -ExclusionPath "$env:RUNNER_TEMP"
+          Add-MpPreference -ExclusionProcess "cl.exe", "link.exe", "UnrealBuildTool.exe", "UnrealEditor.exe", "UnrealEditor-Cmd.exe"
+      - name: Prepare licensed Unreal Engine 5.8.3
+        shell: pwsh
+        env:
+          UE_SOURCE_TOKEN: ${{ secrets.UE_SOURCE_TOKEN }}
+          UE_WINDOWS_ARCHIVE_URL: ${{ secrets.UE_WINDOWS_ARCHIVE_URL }}
+          UE_WINDOWS_ARCHIVE_SHA256: ${{ vars.UE_WINDOWS_ARCHIVE_SHA256 }}
+        run: ./tools/ci/windows-engine.ps1 -Source '${{ inputs.engine_source }}'
+      - name: Download compiled Editor cache
+        uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
+        with:
+          name: qinglan-editor-cache-${{ github.run_id }}
+          path: ${{ runner.temp }}/editor-cache
+      - name: Restore compiled Editor cache
+        shell: pwsh
+        run: |
+          ./tools/ci/windows-editor-cache.ps1 -Action restore -ArchiveDir "${{ runner.temp }}/editor-cache"
+      - name: Compile shipping, cook, and package Win64 & Microsoft Store
         shell: pwsh
         env:
           STORE_PACKAGE: ${{ inputs.store_package }}
@@ -140,6 +199,7 @@ jobs:
           GDK_ARCHIVE_URL: ${{ secrets.GDK_ARCHIVE_URL }}
         run: |
           ./tools/ci/windows-package.ps1 `
+            -SkipEditorBuild `
             -StorePackage:$([bool]('${{ inputs.store_package }}' -ne 'false')) `
             -StoreFormat '${{ inputs.store_package_format || 'both' }}' `
             -IdentityName ($env:STORE_IDENTITY_NAME) `

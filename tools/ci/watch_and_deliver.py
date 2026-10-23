@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Continuously monitors a GitHub Actions run with resilient retry logic,
-downloads artifacts upon successful completion, and runs validation.
+Continuously monitors a GitHub Actions run with resilient retry logic across
+multi-job pipelines (build-editor -> package), downloads artifacts upon
+successful completion, and runs validation.
 """
 import sys
 import time
@@ -27,8 +28,12 @@ def run_cmd(cmd: list, retries=5, delay=5) -> tuple:
     return 1, ""
 
 def main():
-    run_id = sys.argv[1] if len(sys.argv) > 1 else "39958964619"
+    run_id = sys.argv[1] if len(sys.argv) > 1 else ""
     repo = sys.argv[2] if len(sys.argv) > 2 else "shoutoutuoadi325/qinglan-wendao"
+    if not run_id:
+        log("ERROR: Run ID must be provided as first argument.")
+        sys.exit(1)
+
     output_dir = Path("dist/store").resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -66,32 +71,49 @@ def main():
         conclusion = data.get("conclusion")
         jobs = data.get("jobs", [])
 
-        # Find package job
-        pkg_job = next((j for j in jobs if j.get("name") == "package"), None)
-        active_step = "Unknown"
-        if pkg_job:
-            steps = pkg_job.get("steps", [])
-            for step in steps:
-                if step.get("status") == "in_progress":
-                    active_step = f"Step {step.get('number')}: {step.get('name')}"
-                    break
-            if active_step == "Unknown" and pkg_job.get("status") == "in_progress":
-                active_step = "Package job running"
+        # Summarize jobs
+        job_summaries = []
+        active_details = []
+        has_failure = False
+
+        for j in jobs:
+            j_name = j.get("name", "job")
+            j_status = j.get("status", "unknown")
+            j_concl = j.get("conclusion")
+            summary = f"{j_name}:{j_status}"
+            if j_concl:
+                summary += f"({j_concl})"
+            job_summaries.append(summary)
+
+            if j_concl == "failure":
+                has_failure = True
+
+            if j_status == "in_progress":
+                steps = j.get("steps", [])
+                active_step_name = ""
+                for s in steps:
+                    if s.get("status") == "in_progress":
+                        active_step_name = f"Step {s.get('number')}: {s.get('name')}"
+                        break
+                if not active_step_name:
+                    active_step_name = "running"
+                active_details.append(f"[{j_name}] {active_step_name}")
 
         elapsed_mins = int((time.time() - start_time) / 60)
-        log(f"Status: {status} | Conclusion: '{conclusion}' | Active: {active_step} | Elapsed: {elapsed_mins}m")
+        active_str = "; ".join(active_details) if active_details else "Waiting / None active"
+        jobs_str = " | ".join(job_summaries)
+        log(f"Status: {status} | Conclusion: '{conclusion}' | Elapsed: {elapsed_mins}m | Active: {active_str} | Jobs: [{jobs_str}]")
 
         if status == "completed":
             log(f"Run {run_id} completed with conclusion: {conclusion}")
             if conclusion == "success":
-                log("Build succeeded! Downloading Microsoft Store artifacts...")
-                # Download artifacts
+                log("Build pipeline succeeded! Downloading artifacts...")
                 dl_code, dl_out = run_cmd([
                     "gh", "run", "download", run_id,
                     "--repo", repo,
                     "--dir", str(output_dir)
                 ], retries=5, delay=10)
-                
+
                 log(f"Download result code: {dl_code}")
                 if dl_code != 0:
                     log("ERROR: Failed to download artifacts after multiple retries.")
@@ -115,10 +137,10 @@ def main():
             else:
                 log("Run completed with failure. Fetching failed logs...")
                 _, fail_logs = run_cmd(["gh", "run", "view", run_id, "--repo", repo, "--log-failed"])
-                print(fail_logs[-2000:])
+                print(fail_logs[-3000:])
                 sys.exit(1)
 
-        time.sleep(60)
+        time.sleep(30)
 
 if __name__ == "__main__":
     main()

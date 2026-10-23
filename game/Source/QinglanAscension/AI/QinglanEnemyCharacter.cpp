@@ -532,7 +532,7 @@ void AQinglanEnemyCharacter::InitializeFromData(UQinglanEnemyDataAsset* InData)
 			// (e.g. an unregistered pooled mesh during tests), keep the old
 			// single-node idle path as the visible fallback.
 			UAnimSequence* const Idle = InData->IdleAnimation.LoadSynchronous();
-			MeshComp->SetAnimInstanceClass(ResolveEnemyAnimInstanceClass(Mesh));
+			MeshComp->SetAnimInstanceClass(ResolveEnemyAnimInstanceClass(SkelMesh));
 			if (UQinglanCharacterAnimInstance* const AnimInstance =
 					Cast<UQinglanCharacterAnimInstance>(MeshComp->GetAnimInstance()))
 			{

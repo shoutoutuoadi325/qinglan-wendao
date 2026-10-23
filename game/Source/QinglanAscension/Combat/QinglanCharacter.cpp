@@ -715,7 +715,7 @@ void AQinglanCharacter::BeginPlay()
 				MeshComp->SetMaterial(0, Skin);
 			}
 
-			MeshComp->SetAnimInstanceClass(ResolveHumanoidAnimInstanceClass(Mesh));
+			MeshComp->SetAnimInstanceClass(ResolveHumanoidAnimInstanceClass(HeroMesh));
 			if (UQinglanCharacterAnimInstance* const AnimInstance =
 					Cast<UQinglanCharacterAnimInstance>(MeshComp->GetAnimInstance()))
 			{

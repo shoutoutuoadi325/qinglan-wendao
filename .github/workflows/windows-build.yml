@@ -102,12 +102,24 @@ jobs:
     needs: preflight
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'package'
     runs-on: windows-2022
-    timeout-minutes: 350
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
           lfs: false
+      - name: Configure 32GB pagefile on D:
+        uses: al-cheb/configure-pagefile-action@v1.4
+        with:
+          minimum-size: 16GB
+          maximum-size: 32GB
+          disk-root: "D:"
+      - name: Configure Windows Defender performance exclusions
+        shell: pwsh
+        run: |
+          Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE"
+          Add-MpPreference -ExclusionPath "$env:RUNNER_TEMP"
+          Add-MpPreference -ExclusionProcess "cl.exe", "link.exe", "UnrealBuildTool.exe", "UnrealEditor.exe", "UnrealEditor-Cmd.exe"
       - name: Prepare licensed Unreal Engine 5.8.3
         shell: pwsh
         env:

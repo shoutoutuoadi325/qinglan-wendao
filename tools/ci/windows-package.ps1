@@ -34,6 +34,7 @@ $ubtXml = @'
     <bOmitPCDebugInfoInDevelopment>true</bOmitPCDebugInfoInDevelopment>
     <bDisableDebugInfoForGeneratedCode>true</bDisableDebugInfoForGeneratedCode>
     <bUsePDBFiles>false</bUsePDBFiles>
+    <bAllowLTCG>false</bAllowLTCG>
   </BuildConfiguration>
 </Configuration>
 '@

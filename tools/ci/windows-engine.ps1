@@ -63,6 +63,27 @@ if ($Source -eq 'archive') {
         & ./Engine/Binaries/DotNET/GitDependencies/win-x64/GitDependencies.exe --force --no-cache --exclude=Mac --exclude=Linux --exclude=LinuxArm64 --exclude=Android --exclude=TVOS --exclude=VisionOS --exclude=HoloLens --exclude=Win32 --exclude=Samples --exclude=Templates --exclude=FeaturePacks
         if ($LASTEXITCODE) { throw "Engine dependency sync failed ($LASTEXITCODE)." }
     } finally { Pop-Location }
+
+    # Clean up massive git metadata and unneeded files to reclaim disk space on disposable CI runner
+    $gitDir = Join-Path $root '.git'
+    if (Test-Path $gitDir) {
+        cmd.exe /c "rd /s /q `"$gitDir`"" 2>&1 | Out-Null
+        if (Test-Path $gitDir) {
+            Get-ChildItem -Path $gitDir -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object {
+                if ($_.Attributes -band [IO.FileAttributes]::ReadOnly) {
+                    $_.Attributes = $_.Attributes -band (-bnot [IO.FileAttributes]::ReadOnly)
+                }
+            }
+            Remove-Item -Recurse -Force $gitDir -ErrorAction SilentlyContinue
+        }
+    }
+    foreach ($extra in @('Samples', 'Templates', 'Engine/Documentation')) {
+        $extraPath = Join-Path $root $extra
+        if (Test-Path $extraPath) {
+            cmd.exe /c "rd /s /q `"$extraPath`"" 2>&1 | Out-Null
+            Remove-Item -Recurse -Force $extraPath -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 $versionPath = Join-Path $root 'Engine/Build/Build.version'

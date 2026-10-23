@@ -22,13 +22,33 @@ $reports = Join-Path $base 'reports'
 New-Item -ItemType Directory -Force $package, $reports | Out-Null
 & (Join-Path $PSScriptRoot 'windows-preflight.ps1') -ReportPath (Join-Path $reports 'preflight.json') -RequireBuildTools
 
-# Limit compile concurrency to leave memory for the cooker on a 16 GiB runner.
+# Configure UnrealBuildTool to omit debug info/PDBs on CI to avoid disk exhaustion and accelerate linking.
+$ubtDirs = @(
+    (Join-Path $env:APPDATA 'Unreal Engine/UnrealBuildTool'),
+    (Join-Path $engine 'Engine/Saved/UnrealBuildTool')
+)
+$ubtXml = @'
+<?xml version="1.0" encoding="utf-8" ?>
+<Configuration xmlns="https://www.unrealengine.com/BuildConfiguration">
+  <BuildConfiguration>
+    <bOmitPCDebugInfoInDevelopment>true</bOmitPCDebugInfoInDevelopment>
+    <bDisableDebugInfoForGeneratedCode>true</bDisableDebugInfoForGeneratedCode>
+    <bUsePDBFiles>false</bUsePDBFiles>
+  </BuildConfiguration>
+</Configuration>
+'@
+foreach ($dir in $ubtDirs) {
+    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force $dir | Out-Null }
+    $ubtXml | Set-Content (Join-Path $dir 'BuildConfiguration.xml') -Encoding utf8
+}
+
+# Run build with 3 parallel actions on the 4-core runner.
 $build = Join-Path $engine 'Engine/Build/BatchFiles/Build.bat'
-& $build QinglanAscensionEditor Win64 Development "-Project=$project" -WaitMutex -NoUBA -MaxParallelActions=2 2>&1 |
+& $build QinglanAscensionEditor Win64 Development "-Project=$project" -WaitMutex -NoUBA -MaxParallelActions=3 2>&1 |
     Tee-Object (Join-Path $reports 'editor-build.log')
 if ($LASTEXITCODE) { throw "Win64 editor build failed ($LASTEXITCODE)." }
 $uat = Join-Path $engine 'Engine/Build/BatchFiles/RunUAT.bat'
-& $uat BuildCookRun "-project=$project" -noP4 -platform=Win64 -clientconfig=Shipping -build -cook -stage -pak -iostore -compressed -archive "-archivedirectory=$package" -unattended -nosplash -utf8output -nullrhi '-ubtargs=-NoUBA -MaxParallelActions=2' 2>&1 |
+& $uat BuildCookRun "-project=$project" -noP4 -platform=Win64 -clientconfig=Shipping -build -cook -stage -pak -iostore -compressed -archive "-archivedirectory=$package" -unattended -nosplash -utf8output -nullrhi -nodebuginfo '-ubtargs=-NoUBA -MaxParallelActions=3' 2>&1 |
     Tee-Object (Join-Path $reports 'package.log')
 if ($LASTEXITCODE) { throw "Win64 Shipping packaging failed ($LASTEXITCODE)." }
 $clients = @(Get-ChildItem $package -Recurse -File -Filter 'QinglanAscension*.exe' | Where-Object { $_.FullName -match '\\Binaries\\Win64\\' })

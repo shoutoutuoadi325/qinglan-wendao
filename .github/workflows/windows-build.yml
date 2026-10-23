@@ -108,7 +108,7 @@ jobs:
         with:
           persist-credentials: false
           lfs: false
-      - name: Configure 32GB pagefile on D:
+      - name: "Configure 32GB pagefile on D:"
         uses: al-cheb/configure-pagefile-action@v1.4
         with:
           minimum-size: 16GB

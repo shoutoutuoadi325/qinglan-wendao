@@ -21,8 +21,8 @@ on:
       engine_source:
         description: 'Licensed engine source; see docs/dev/github-windows-build.md'
         type: choice
-        options: [archive, source]
-        default: archive
+        options: [source, archive]
+        default: source
       store_package:
         description: 'Build Microsoft Store submission package'
         type: boolean

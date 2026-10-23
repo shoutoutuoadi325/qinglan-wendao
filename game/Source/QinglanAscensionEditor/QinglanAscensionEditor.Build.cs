@@ -6,7 +6,6 @@ public class QinglanAscensionEditor : ModuleRules
 	public QinglanAscensionEditor(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
-		ShadowVariableWarningLevel = WarningLevel.Warning;
 
 		PublicDependencyModuleNames.AddRange(new string[]
 		{

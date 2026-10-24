@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-Saves and restores compiled Unreal Engine Editor binaries and intermediates
+Saves and restores compiled Unreal Engine Editor binaries and receipts
 between GitHub Actions workflow jobs.
 #>
 [CmdletBinding()]
@@ -33,20 +33,19 @@ $gameArchive = Join-Path $ArchiveDir 'editor-game.7z'
 
 if ($Action -eq 'save') {
     Write-Host "=========================================================="
-    Write-Host "   Saving compiled Editor binaries and intermediates      "
+    Write-Host "   Saving compiled Editor binaries and receipts           "
     Write-Host "=========================================================="
     Write-Host "Engine: $engine"
     Write-Host "Output: $ArchiveDir"
 
-    # 1. Archive Engine/Binaries, Engine/Build/Receipts, and Engine Intermediates
+    # 1. Archive Engine/Binaries, Engine/Build/Receipts, and plugin binaries ONLY.
+    # NOTE: Never archive Intermediate directories (.obj, .pch) - they are 40+ GB
+    # and not needed by UnrealEditor-Cmd.exe cooker or RunUAT.
     Push-Location $engine
     try {
         $engItems = @()
         if (Test-Path 'Engine/Binaries/Win64') { $engItems += 'Engine/Binaries/Win64' }
         if (Test-Path 'Engine/Build/Receipts') { $engItems += 'Engine/Build/Receipts' }
-        if (Test-Path 'Engine/Intermediate/Build/Win64') {
-            $engItems += 'Engine/Intermediate/Build/Win64'
-        }
 
         # Collect plugin binaries
         if (Test-Path 'Engine/Plugins') {
@@ -60,8 +59,9 @@ if ($Action -eq 'save') {
         Write-Host "Found $($engItems.Count) Engine directories to archive."
         $listFile = Join-Path $ArchiveDir 'engine-items.txt'
         $engItems | Set-Content -LiteralPath $listFile -Encoding utf8
-        Write-Host "Compressing Engine items into $engineArchive..."
-        & 7z a -t7z -mx=1 -ms=on $engineArchive "@$listFile"
+        Write-Host "Compressing Engine binaries into $engineArchive (fast, 2 threads)..."
+        # -mx=1: fastest compression, -mmt=2: limit to 2 threads to prevent starving runner process
+        & 7z a -t7z -mx=1 -mmt=2 $engineArchive "@$listFile"
         if ($LASTEXITCODE) { throw "7z Engine archive creation failed ($LASTEXITCODE)." }
         Remove-Item -LiteralPath $listFile -Force -ErrorAction SilentlyContinue
     }
@@ -69,15 +69,12 @@ if ($Action -eq 'save') {
         Pop-Location
     }
 
-    # 2. Archive game project Binaries, Receipts, and Intermediates
+    # 2. Archive game project Binaries and Receipts
     Push-Location $repo
     try {
         $gameItems = @()
         if (Test-Path 'game/Binaries/Win64') { $gameItems += 'game/Binaries/Win64' }
         if (Test-Path 'game/Build/Receipts') { $gameItems += 'game/Build/Receipts' }
-        if (Test-Path 'game/Intermediate/Build/Win64') {
-            $gameItems += 'game/Intermediate/Build/Win64'
-        }
         if (Test-Path 'game/Plugins') {
             Get-ChildItem 'game/Plugins' -Recurse -Directory -Filter 'Win64' |
                 Where-Object { $_.FullName -match '[\\/]Binaries[\\/]Win64$' } |
@@ -91,12 +88,12 @@ if ($Action -eq 'save') {
             $listFile = Join-Path $ArchiveDir 'game-items.txt'
             $gameItems | Set-Content -LiteralPath $listFile -Encoding utf8
             Write-Host "Compressing Game items into $gameArchive..."
-            & 7z a -t7z -mx=1 -ms=on $gameArchive "@$listFile"
+            & 7z a -t7z -mx=1 -mmt=2 $gameArchive "@$listFile"
             if ($LASTEXITCODE) { throw "7z Game archive creation failed ($LASTEXITCODE)." }
             Remove-Item -LiteralPath $listFile -Force -ErrorAction SilentlyContinue
         } else {
             # Create a small marker archive if no game items
-            & 7z a -t7z -mx=1 $gameArchive (Join-Path $repo 'game/QinglanAscension.uproject')
+            & 7z a -t7z -mx=1 -mmt=2 $gameArchive (Join-Path $repo 'game/QinglanAscension.uproject')
         }
     }
     finally {
@@ -109,7 +106,7 @@ if ($Action -eq 'save') {
 }
 elseif ($Action -eq 'restore') {
     Write-Host "=========================================================="
-    Write-Host "   Restoring compiled Editor binaries and intermediates   "
+    Write-Host "   Restoring compiled Editor binaries and receipts        "
     Write-Host "=========================================================="
     if (-not (Test-Path $engineArchive)) { throw "Missing engine archive: $engineArchive" }
 

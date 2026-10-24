@@ -135,9 +135,13 @@ def main():
                 log("DELIVERY COMPLETE: Microsoft Store package ready in dist/store")
                 sys.exit(0)
             else:
-                log("Run completed with failure. Fetching failed logs...")
-                _, fail_logs = run_cmd(["gh", "run", "view", run_id, "--repo", repo, "--log-failed"])
-                print(fail_logs[-3000:])
+                log("Run completed with failure. Fetching failure details...")
+                _, fail_logs = run_cmd(["gh", "run", "view", run_id, "--repo", repo, "--log-failed"], retries=2, delay=5)
+                if fail_logs:
+                    print(fail_logs[-3000:])
+                else:
+                    _, annot = run_cmd(["gh", "api", f"/repos/{repo}/actions/runs/{run_id}/jobs"], retries=2, delay=5)
+                    print(annot[:2000])
                 sys.exit(1)
 
         time.sleep(30)

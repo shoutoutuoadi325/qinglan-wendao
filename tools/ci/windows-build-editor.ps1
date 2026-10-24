@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
 Builds QinglanAscensionEditor (Win64 Development) and saves the compiled
-binaries and intermediates to a portable cache archive.
+binaries and receipts to a portable cache archive.
 #>
 [CmdletBinding()]
 param(
@@ -52,7 +52,12 @@ $build = Join-Path $engine 'Engine/Build/BatchFiles/Build.bat'
     Tee-Object (Join-Path $reports 'editor-build.log')
 if ($LASTEXITCODE) { throw "Win64 editor build failed ($LASTEXITCODE)." }
 
-# 2. Package the compiled binaries and intermediates
+# 2. Reclaim intermediate disk space before archiving
+Write-Host "`n==> Freeing bulky intermediate compiler artifacts before archiving..."
+Remove-Item -Recurse -Force (Join-Path $engine 'Engine/Intermediate/Build') -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force (Join-Path $repo 'game/Intermediate/Build') -ErrorAction SilentlyContinue
+
+# 3. Package the compiled binaries and receipts
 Write-Host "`n==> Archiving compiled Editor cache..."
 & (Join-Path $PSScriptRoot 'windows-editor-cache.ps1') -Action save -ArchiveDir $ArchiveDir
 Write-Host "Editor build and caching complete!"

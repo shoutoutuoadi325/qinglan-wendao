@@ -83,7 +83,6 @@ Write-Host "   Cooking, Staging, and Archiving Win64 Shipping         "
 Write-Host "=========================================================="
 $uat = Join-Path $engine 'Engine/Build/BatchFiles/RunUAT.bat'
 & $uat BuildCookRun "-project=$project" -noP4 -platform=Win64 -clientconfig=Shipping `
-    -nocompile -nocompileeditor -skipbuildeditor -notools `
     -cook -stage -pak -iostore -compressed -archive "-archivedirectory=$package" `
     -unattended -nosplash -utf8output -nullrhi -nodebuginfo 2>&1 |
     Tee-Object (Join-Path $reports 'package.log')

@@ -52,9 +52,14 @@ on:
         description: 'Package version (must end with .0, e.g. 0.1.0.0)'
         type: string
         default: '0.1.0.0'
+      editor_cache_run_id:
+        description: 'Optional Run ID to reuse compiled editor cache from (e.g. 40100842245)'
+        type: string
+        default: '40100842245'
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: windows-build-${{ github.ref }}
@@ -100,7 +105,7 @@ jobs:
 
   build-editor:
     needs: preflight
-    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'package'
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'package' && (!inputs.editor_cache_run_id)
     runs-on: windows-2022
     timeout-minutes: 360
     steps:
@@ -150,7 +155,12 @@ jobs:
 
   package:
     needs: [preflight, build-editor]
-    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'package'
+    if: |
+      always() &&
+      github.event_name == 'workflow_dispatch' &&
+      inputs.mode == 'package' &&
+      needs.preflight.result == 'success' &&
+      (needs.build-editor.result == 'success' || needs.build-editor.result == 'skipped')
     runs-on: windows-2022
     timeout-minutes: 360
     steps:
@@ -180,7 +190,9 @@ jobs:
       - name: Download compiled Editor cache
         uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
         with:
-          name: qinglan-editor-cache-${{ github.run_id }}
+          name: qinglan-editor-cache-${{ inputs.editor_cache_run_id || github.run_id }}
+          run-id: ${{ inputs.editor_cache_run_id || github.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           path: ${{ runner.temp }}/editor-cache
       - name: Restore compiled Editor cache
         shell: pwsh

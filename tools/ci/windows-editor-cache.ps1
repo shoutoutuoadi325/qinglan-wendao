@@ -122,11 +122,23 @@ elseif ($Action -eq 'restore') {
         if ($LASTEXITCODE) { throw "Extraction of $gameArchive failed ($LASTEXITCODE)." }
     }
 
-    # Verify key binary
+    # Verify key binaries
     $editorExe = Join-Path $engine 'Engine/Binaries/Win64/UnrealEditor.exe'
     $editorCmd = Join-Path $engine 'Engine/Binaries/Win64/UnrealEditor-Cmd.exe'
     if (-not (Test-Path $editorExe) -and -not (Test-Path $editorCmd)) {
         throw "Verification failed: Neither UnrealEditor.exe nor UnrealEditor-Cmd.exe found at $engine/Engine/Binaries/Win64 after restore."
+    }
+    $scwExe = Join-Path $engine 'Engine/Binaries/Win64/ShaderCompileWorker.exe'
+    $pakExe = Join-Path $engine 'Engine/Binaries/Win64/UnrealPak.exe'
+    if (Test-Path $scwExe) {
+        Write-Host "Verification: ShaderCompileWorker.exe is present."
+    } else {
+        Write-Warning "ShaderCompileWorker.exe not found at $engine/Engine/Binaries/Win64."
+    }
+    if (Test-Path $pakExe) {
+        Write-Host "Verification: UnrealPak.exe is present."
+    } else {
+        Write-Warning "UnrealPak.exe not found at $engine/Engine/Binaries/Win64."
     }
     Write-Host "Verification succeeded: Editor binaries are present."
 }

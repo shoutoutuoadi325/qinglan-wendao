@@ -52,6 +52,20 @@ $build = Join-Path $engine 'Engine/Build/BatchFiles/Build.bat'
     Tee-Object (Join-Path $reports 'editor-build.log')
 if ($LASTEXITCODE) { throw "Win64 editor build failed ($LASTEXITCODE)." }
 
+Write-Host "`n=========================================================="
+Write-Host "   Compiling Tools: ShaderCompileWorker (Win64 Development)"
+Write-Host "=========================================================="
+& $build ShaderCompileWorker Win64 Development "-Project=$project" -WaitMutex -NoUBA -MaxParallelActions=3 2>&1 |
+    Tee-Object -Append (Join-Path $reports 'editor-build.log')
+if ($LASTEXITCODE) { throw "ShaderCompileWorker build failed ($LASTEXITCODE)." }
+
+Write-Host "`n=========================================================="
+Write-Host "   Compiling Tools: UnrealPak (Win64 Development)         "
+Write-Host "=========================================================="
+& $build UnrealPak Win64 Development "-Project=$project" -WaitMutex -NoUBA -MaxParallelActions=3 2>&1 |
+    Tee-Object -Append (Join-Path $reports 'editor-build.log')
+if ($LASTEXITCODE) { throw "UnrealPak build failed ($LASTEXITCODE)." }
+
 # 2. Reclaim intermediate disk space before archiving
 Write-Host "`n==> Freeing bulky intermediate compiler artifacts before archiving..."
 Remove-Item -Recurse -Force (Join-Path $engine 'Engine/Intermediate/Build') -ErrorAction SilentlyContinue

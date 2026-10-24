@@ -44,17 +44,48 @@ foreach ($dir in $ubtDirs) {
     $ubtXml | Set-Content (Join-Path $dir 'BuildConfiguration.xml') -Encoding utf8
 }
 
+$build = Join-Path $engine 'Engine/Build/BatchFiles/Build.bat'
+
 if (-not $SkipEditorBuild) {
-    # Run build with 3 parallel actions on the 4-core runner.
-    $build = Join-Path $engine 'Engine/Build/BatchFiles/Build.bat'
+    Write-Host "=========================================================="
+    Write-Host "   Compiling QinglanAscensionEditor (Win64 Development)   "
+    Write-Host "=========================================================="
     & $build QinglanAscensionEditor Win64 Development "-Project=$project" -WaitMutex -NoUBA -MaxParallelActions=3 2>&1 |
         Tee-Object (Join-Path $reports 'editor-build.log')
     if ($LASTEXITCODE) { throw "Win64 editor build failed ($LASTEXITCODE)." }
+
+    Write-Host "`n=========================================================="
+    Write-Host "   Compiling Tools: ShaderCompileWorker (Win64 Development)"
+    Write-Host "=========================================================="
+    & $build ShaderCompileWorker Win64 Development "-Project=$project" -WaitMutex -NoUBA -MaxParallelActions=3 2>&1 |
+        Tee-Object -Append (Join-Path $reports 'editor-build.log')
+    if ($LASTEXITCODE) { throw "ShaderCompileWorker build failed ($LASTEXITCODE)." }
+
+    Write-Host "`n=========================================================="
+    Write-Host "   Compiling Tools: UnrealPak (Win64 Development)         "
+    Write-Host "=========================================================="
+    & $build UnrealPak Win64 Development "-Project=$project" -WaitMutex -NoUBA -MaxParallelActions=3 2>&1 |
+        Tee-Object -Append (Join-Path $reports 'editor-build.log')
+    if ($LASTEXITCODE) { throw "UnrealPak build failed ($LASTEXITCODE)." }
 } else {
-    Write-Host "Skipping standalone Editor build (-SkipEditorBuild specified); relying on restored editor binaries."
+    Write-Host "Skipping standalone Editor & Tools build (-SkipEditorBuild specified); relying on restored editor binaries."
 }
+
+Write-Host "`n=========================================================="
+Write-Host "   Compiling QinglanAscension (Win64 Shipping)            "
+Write-Host "=========================================================="
+& $build QinglanAscension Win64 Shipping "-Project=$project" -WaitMutex -NoUBA -MaxParallelActions=3 2>&1 |
+    Tee-Object (Join-Path $reports 'shipping-build.log')
+if ($LASTEXITCODE) { throw "Win64 Shipping build failed ($LASTEXITCODE)." }
+
+Write-Host "`n=========================================================="
+Write-Host "   Cooking, Staging, and Archiving Win64 Shipping         "
+Write-Host "=========================================================="
 $uat = Join-Path $engine 'Engine/Build/BatchFiles/RunUAT.bat'
-& $uat BuildCookRun "-project=$project" -noP4 -platform=Win64 -clientconfig=Shipping -build -cook -stage -pak -iostore -compressed -archive "-archivedirectory=$package" -unattended -nosplash -utf8output -nullrhi -nodebuginfo '-ubtargs=-NoUBA -MaxParallelActions=3' 2>&1 |
+& $uat BuildCookRun "-project=$project" -noP4 -platform=Win64 -clientconfig=Shipping `
+    -nocompile -nocompileeditor -skipbuildeditor -notools `
+    -cook -stage -pak -iostore -compressed -archive "-archivedirectory=$package" `
+    -unattended -nosplash -utf8output -nullrhi -nodebuginfo 2>&1 |
     Tee-Object (Join-Path $reports 'package.log')
 if ($LASTEXITCODE) { throw "Win64 Shipping packaging failed ($LASTEXITCODE)." }
 $clients = @(Get-ChildItem $package -Recurse -File -Filter 'QinglanAscension*.exe' | Where-Object { $_.FullName -match '\\Binaries\\Win64\\' })

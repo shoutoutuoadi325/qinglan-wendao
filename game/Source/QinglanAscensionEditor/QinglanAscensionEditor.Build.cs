@@ -6,6 +6,10 @@ public class QinglanAscensionEditor : ModuleRules
 	public QinglanAscensionEditor(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
+		// Importers and automation fixtures intentionally have file-local
+		// helper names. Keep their translation units separate on clean builds;
+		// adaptive unity grouping otherwise merges anonymous namespaces.
+		bUseUnity = false;
 
 		PublicDependencyModuleNames.AddRange(new string[]
 		{

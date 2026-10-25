@@ -77,6 +77,10 @@ foreach ($assetName in $requiredAssets) {
     }
     Copy-Item -LiteralPath $srcFile -Destination (Join-Path $assetsDst $assetName) -Force
 }
+$largeLogo = Join-Path $assetsSrc 'Square480x480Logo.png'
+if (Test-Path -LiteralPath $largeLogo -PathType Leaf) {
+    Copy-Item -LiteralPath $largeLogo -Destination (Join-Path $assetsDst 'Square480x480Logo.png') -Force
+}
 Write-Host "Shell visual assets staged to $assetsDst"
 
 # 3. Resolve identity values
@@ -113,11 +117,11 @@ function Get-MakePkgTool {
         if ($base -and (Test-Path -LiteralPath $base -PathType Container)) {
             $tools = @(Get-ChildItem -LiteralPath $base -Recurse -File -ErrorAction SilentlyContinue |
                 Where-Object { $_.Name -in @('makepkg2.exe', 'makepkg.exe') } |
-                Sort-Object @{ Expression = { if ($_.Name -eq 'makepkg2.exe') { 0 } else { 1 } } }, FullName)
+                Sort-Object @{ Expression = { if ($_.Name -eq 'makepkg.exe') { 0 } else { 1 } } }, FullName)
             if ($tools.Count) { return $tools[0].FullName }
         }
     }
-    $cmd = Get-Command 'makepkg2.exe', 'makepkg.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+    $cmd = Get-Command 'makepkg.exe', 'makepkg2.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($cmd) { return $cmd.Source }
 
     # The ZIP contains MSI installers, not a ready-to-use bin directory. Keep
@@ -147,7 +151,7 @@ function Get-MakePkgTool {
     }
     $tools = @(Get-ChildItem -LiteralPath $extractRoot -Recurse -File |
         Where-Object { $_.Name -in @('makepkg2.exe', 'makepkg.exe') } |
-        Sort-Object @{ Expression = { if ($_.Name -eq 'makepkg2.exe') { 0 } else { 1 } } }, FullName)
+        Sort-Object @{ Expression = { if ($_.Name -eq 'makepkg.exe') { 0 } else { 1 } } }, FullName)
     if (-not $tools.Count) { throw 'GDK MSI extraction produced no makepkg tool.' }
     Write-Host "Located Microsoft package tool: $($tools[0].FullName)"
     return $tools[0].FullName
@@ -206,6 +210,7 @@ if ($Format -in @('both', 'msixvc')) {
         $xmlLines.Add("    PublisherDisplayName=""$PublisherDisplayName""")
         $xmlLines.Add('    StoreLogo="Assets\StoreLogo.png"')
         $xmlLines.Add('    Square150x150Logo="Assets\Square150x150Logo.png"')
+        if (Test-Path (Join-Path $assetsDst 'Square480x480Logo.png')) { $xmlLines.Add('    Square480x480Logo="Assets\Square480x480Logo.png"') }
         $xmlLines.Add('    Square44x44Logo="Assets\Square44x44Logo.png"')
         $xmlLines.Add('    Description="An offline cultivation adventure."')
         $xmlLines.Add('    BackgroundColor="#17212A"')

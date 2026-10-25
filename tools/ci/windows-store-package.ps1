@@ -215,6 +215,11 @@ if ($Format -in @('both', 'msixvc')) {
         $xmlLines.Add('    Description="An offline cultivation adventure."')
         $xmlLines.Add('    BackgroundColor="#17212A"')
         $xmlLines.Add('    SplashScreenImage="Assets\SplashScreenImage.png" />')
+        $xmlLines.Add('  <DesktopRegistration>')
+        $xmlLines.Add('    <DependencyList>')
+        $xmlLines.Add('      <KnownDependency Name="VC14" />')
+        $xmlLines.Add('    </DependencyList>')
+        $xmlLines.Add('  </DesktopRegistration>')
         $xmlLines.Add('</Game>')
         $gameConfig = $xmlLines -join "`n"
 

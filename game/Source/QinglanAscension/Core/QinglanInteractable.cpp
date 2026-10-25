@@ -17,6 +17,7 @@
 #include "AI/QinglanEncounterDirector.h"
 #include "Combat/QinglanCharacter.h"
 #include "Combat/QinglanCombatComponent.h"
+#include "Components/CapsuleComponent.h"
 #include "Components/SphereComponent.h"
 #include "Core/QinglanTrialDirector.h"
 #include "Core/QinglanTrialAdmission.h"
@@ -26,6 +27,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerStart.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Misc/Crc.h"
 #include "Narrative/QinglanStoryDataTypes.h"
@@ -849,7 +851,56 @@ AQinglanInteractable::AQinglanInteractable()
 	SetRootComponent(Sphere);
 	InteractionSphere = Sphere;
 
-	PrimaryActorTick.bCanEverTick = false;
+	// Only synthesized realm doors enable this tick. Other station/document
+	// actors remain event-driven with no per-frame work.
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bStartWithTickEnabled = false;
+	PrimaryActorTick.TickGroup = TG_PostPhysics; // check the final movement position for this frame
+}
+
+void AQinglanInteractable::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	if (!InteractionId.ToString().StartsWith(TEXT("door."))) { return; }
+	UGameInstance* Instance = GetGameInstance();
+	UQinglanRunSubsystem* Run = Instance ? Instance->GetSubsystem<UQinglanRunSubsystem>() : nullptr;
+	if (!Run || !Run->IsInExpedition() || Run->NeedsCheckpointResume()) { return; }
+	const int32 Room = Run->GetCurrentRoomIndex();
+	if (InteractionId != FName(*FString::Printf(TEXT("door.%d_%d"), Room, Room + 1))) { return; }
+	AQinglanCharacter* Player = nullptr;
+	for (TActorIterator<AQinglanCharacter> It(GetWorld()); It; ++It)
+	{
+		if (It->IsPlayerControlled()) { Player = *It; break; }
+	}
+	if (!Player) { return; }
+	const FVector Location = Player->GetActorLocation();
+	const float Radius = Player->GetCapsuleComponent()->GetScaledCapsuleRadius();
+	const float InsideX = GetActorLocation().X - Radius - 5.f;
+	if (Location.X < InsideX) { return; }
+
+	// Crossing the authored corridor mouth is the same authoritative action
+	// as pressing E. Do not leave players walking into rooms with no wave
+	// because they missed an invisible interaction point. Existing encounter
+	// and mandatory-blessing rules in ExecuteInteraction remain authoritative.
+	UQinglanStorySubsystem* Story = Instance->GetSubsystem<UQinglanStorySubsystem>();
+	const bool bInCorridor = FMath::Abs(Location.Y - GetActorLocation().Y) <= 400.f - Radius;
+	if (bInCorridor && !IsAnyEncounterActive(GetWorld()) && Player->CanStartAction(EQinglanActionKind::Move)
+		&& (!Story || !Story->IsScenePlaying()))
+	{
+		ExecuteInteraction(Player);
+		if (Run->GetCurrentRoomIndex() != Room) { return; }
+	}
+
+	// A live encounter, menu, dialogue, or blessing keeps the player inside
+	// the current room. Preserve lateral/backward movement so this is a
+	// boundary, rather than an input freeze or a forced teleport to spawn.
+	FVector Inside = Location;
+	Inside.X = InsideX;
+	Player->SetActorLocation(Inside, false, nullptr, ETeleportType::TeleportPhysics);
+	if (UCharacterMovementComponent* Movement = Player->GetCharacterMovement())
+	{
+		Movement->Velocity.X = FMath::Min(0.f, Movement->Velocity.X);
+	}
 }
 
 void AQinglanInteractable::ExecuteInteraction(AQinglanCharacter* Player)
@@ -1106,6 +1157,14 @@ void AQinglanInteractable::ExecuteInteraction(AQinglanCharacter* Player)
 		const bool bCh01Done = Story->HasFlag(GCh01CompleteFlag);
 		if (!bCh00Done)
 		{
+			// Record departure only once the route is actually available. An
+			// early gate press must neither complete CH00 nor leave a proof
+			// event that an unrelated later action can reuse to skip departure.
+			if (!Story->HasFlag(FName(TEXT("mq_ch00_route_read"))))
+			{
+				if (Player) { Player->ShowGameMessage(QinglanGuardMissingText()); }
+				return;
+			}
 			// AUD-11: the gate press is the authored departure confirmation.
 			QinglanStoryRuntime::NotifyGameplayEvent(Story, FName(TEXT("interact.departure_confirmed")), {});
 			// First departure: the CH00_S04 gate scene runs instead of travel.

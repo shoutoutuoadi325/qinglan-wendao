@@ -284,7 +284,32 @@ void UQinglanInteractionSpawner::SynthesizeRealmDoors(UWorld* World)
 		const FVector Location(
 			FromRoom * QinglanRoomLayout::RoomSpacingCm + QinglanRoomLayout::RoomSpacingCm * 0.5f - QinglanDoorForwardOffset,
 			0.f, QinglanDoorHeight);
-		SpawnInteractableAt(World, DoorId, Location);
+		if (AQinglanInteractable* Door = SpawnInteractableAt(World, DoorId, Location))
+		{
+			Door->SetActorTickEnabled(true);
+			// Open corridors still use an explicit interaction so a live fight
+			// or pending blessing cannot be bypassed. Make that interaction
+			// visible from the room instead of hiding it in an empty corridor.
+			Door->DisplayNameKey = FName(TEXT("action.continue"));
+			UStaticMesh* FrameMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+			struct FFramePart { const TCHAR* Name; FVector Offset; FVector Scale; };
+			const FFramePart Parts[] = {
+				{ TEXT("DoorFrameLeft"), FVector(0.f, -260.f, 30.f), FVector(0.4f, 0.4f, 3.6f) },
+				{ TEXT("DoorFrameRight"), FVector(0.f, 260.f, 30.f), FVector(0.4f, 0.4f, 3.6f) },
+				{ TEXT("DoorFrameHeader"), FVector(0.f, 0.f, 210.f), FVector(0.4f, 5.6f, 0.4f) },
+			};
+			for (const FFramePart& Part : Parts)
+			{
+				UStaticMeshComponent* Frame = NewObject<UStaticMeshComponent>(Door, FName(Part.Name));
+				Door->AddInstanceComponent(Frame);
+				Frame->SetupAttachment(Door->GetRootComponent());
+				Frame->SetStaticMesh(FrameMesh);
+				Frame->SetRelativeLocation(Part.Offset);
+				Frame->SetRelativeScale3D(Part.Scale);
+				Frame->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+				Frame->RegisterComponent();
+			}
+		}
 	}
 	if (Realm && Realm->RealmId == FName(UQinglanEconomyLibrary::TutorialRealmIdText))
 	{

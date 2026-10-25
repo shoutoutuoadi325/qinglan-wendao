@@ -34,6 +34,7 @@ class QINGLANASCENSION_API AQinglanInteractable : public AActor
 
 public:
 	AQinglanInteractable();
+	virtual void Tick(float DeltaSeconds) override;
 
 	/** Anchor key this actor dispatches on (e.g. "hub.bamboo_gate", "door.0_1"). */
 	UPROPERTY(EditInstanceOnly, Category = "Qinglan|Interaction") FName InteractionId = NAME_None;

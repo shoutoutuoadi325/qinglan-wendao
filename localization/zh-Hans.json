@@ -264,5 +264,20 @@
   "inspection.locked": "请先完成此处对话并清除附近敌人，再进行检查。",
   "inspection.shutter_closed": "检查闸板：已关闭（开关测试完成后保持关闭）",
   "inspection.shutter_open": "检查闸板：已打开——再按 E 关闭",
-  "interact.bamboo.tutorial_return": "返回山门"
+  "interact.bamboo.tutorial_return": "返回山门",
+  "guide.interact": "沿金色标记前进。WASD／左摇杆移动，鼠标／右摇杆转动视角。靠近后按 E／Y 互动。",
+  "guide.dialogue": "按 E／Y 继续对话。出现选项时，用上下键和 Enter／A 确认，或点击回答。",
+  "guide.training_hits": "面向金色标记处的练习木靶，用鼠标左键／J／X 命中三次。挥空时请再靠近。",
+  "guide.training_dodge": "按空格／A 闪避一次。练习木靶不会攻击，现在即可闪避。",
+  "guide.training_arc": "按 1／方向键上施放玉锋剑气。",
+  "guide.training_ward": "按 2／方向键右施放流泉护体。",
+  "guide.recover": "前往金色标记处的圣所灵龛，靠近后按 E／Y 恢复。",
+  "guide.read": "阅读金色标记处的文书：靠近后按 E／Y。按 Esc／菜单键关闭文书后继续。",
+  "guide.exit": "使用金色标记处的房间出口：靠近后按 E／Y 进入下一间。",
+  "guide.fight": "击败本房间的敌人，再使用标记出口。鼠标左键／J／X 挥剑，空格／A 闪避。",
+  "guide.blessing": "离开前选择一项祝福。上下键选择、Enter／A 确认，或点击选项。如选项已关闭，请与房间出口互动。",
+  "guide.shutter": "测试金色标记处的检查闸：按 E／Y 打开，关闭文书，再次互动将闸关闭。",
+  "guide.return": "使用金色标记处的灵龛返回圣所：靠近后按 E／Y。",
+  "guide.destination": "任务地点",
+  "guide.marker": "◆ {name} · {meters} 米"
 }

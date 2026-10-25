@@ -1019,6 +1019,18 @@ void AQinglanCharacter::InputSwordAttack(const FInputActionValue& /*Value*/)
 
 void AQinglanCharacter::InputDodge(const FInputActionValue& /*Value*/)
 {
+	// A shares the gameplay dodge action, but confirms native menu/choice
+	// selections while those overlays own input. Check the physical gamepad
+	// key so Space keeps its separate ending-warning acknowledgment behavior.
+	const APlayerController* PC = Cast<APlayerController>(Controller);
+	const bool bEndingOpen = EndingWidget.IsValid() && EndingWidget->IsInViewport();
+	if (PC && PC->IsInputKeyDown(EKeys::Gamepad_FaceButton_Bottom)
+		&& (bMenuOpen || !PendingSceneChoices.IsEmpty() || !PendingBlessingChoices.IsEmpty()
+			|| !PendingShopChoices.IsEmpty() || bEndingOpen))
+	{
+		ConfirmMenuSelection();
+		return;
+	}
 	if (EndingWidget.IsValid() && EndingWidget->IsInViewport()) { return; }
 	TryDodge();
 }

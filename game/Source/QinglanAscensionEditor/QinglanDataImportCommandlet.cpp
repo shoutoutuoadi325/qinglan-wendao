@@ -1789,7 +1789,7 @@ UQinglanDataImportCommandlet::UQinglanDataImportCommandlet()
 	LogToConsole = true;
 	// UE 5.8 UCommandlet help fields (HelpToRunCmdlet no longer exists).
 	HelpDescription = TEXT("Regenerates ST_Game, DT_Localization (en-US + zh-Hans), DA_StoryRegistry, DA_Tech_<id>, and DA_Realm_<id> from the repository data directory.");
-	HelpUsage = TEXT("QinglanDataImport -data=<repo data dir> [-loc=<localization dir>]");
+	HelpUsage = TEXT("QinglanDataImport -data=<repo data dir> [-loc=<localization dir>] [-localizationonly]");
 }
 
 int32 UQinglanDataImportCommandlet::Main(const FString& Params)
@@ -1913,6 +1913,18 @@ int32 UQinglanDataImportCommandlet::Main(const FString& Params)
 	// AUD-48: the runtime service reads this bilingual table; keep it in the
 	// same regeneration pass so it can never drift from ST_Game's key set.
 	if (!ImportBilingualTable(Locales, Errors)) { bAllSaved = false; }
+	// Release builds can refresh text without replacing technique assets whose
+	// montage/cue references are authored by later bootstrap passes.
+	if (FParse::Param(*Params, TEXT("localizationonly")))
+	{
+		for (const FString& Error : Errors)
+		{
+			UE_LOG(LogQinglanEditor, Error, TEXT("%s"), *Error);
+		}
+		UE_LOG(LogQinglanEditor, Display, TEXT("QinglanDataImport localization-only complete: %s"),
+			bAllSaved && Errors.IsEmpty() ? TEXT("success") : TEXT("failed"));
+		return bAllSaved && Errors.IsEmpty() ? 0 : 1;
+	}
 	if (!ImportStoryRegistry(StoryFiles, Errors)) { bAllSaved = false; }
 
 	{

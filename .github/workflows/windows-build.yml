@@ -211,7 +211,7 @@ jobs:
           GDK_ARCHIVE_URL: ${{ secrets.GDK_ARCHIVE_URL }}
         run: |
           ./tools/ci/windows-package.ps1 `
-            -SkipEditorBuild `
+            -UseCachedEditorTools `
             -StorePackage:$([bool]('${{ inputs.store_package }}' -ne 'false')) `
             -StoreFormat '${{ inputs.store_package_format || 'both' }}' `
             -IdentityName ($env:STORE_IDENTITY_NAME) `

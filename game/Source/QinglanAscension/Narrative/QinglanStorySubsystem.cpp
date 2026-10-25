@@ -1155,6 +1155,41 @@ FName UQinglanStorySubsystem::GetCurrentSceneId() const
 	return Session ? Session->CurrentSceneId : NAME_None;
 }
 
+FName UQinglanStorySubsystem::GetTrackedMainSceneId() const
+{
+	const UQinglanStoryRegistry* Registry = GetRegistry();
+	if (!Registry) { return NAME_None; }
+	// The first HUD query can precede any playback/session mutation. Treat it
+	// as a fresh narrative without creating state as a side effect of drawing.
+	const FQinglanStorySession EmptySession;
+	const FQinglanStorySession* Existing = FindStorySession(this);
+	const FQinglanStorySession& Session = Existing ? *Existing : EmptySession;
+	auto CanTrack = [&Session](const FQinglanRegistryScene* Scene)
+	{
+		return Scene && !Session.CompletedMainScenes.Contains(Scene->SceneId)
+			&& ::HasAllFlags(Session, Scene->Prerequisites);
+	};
+	// A scene can have earned its gameplay proof but still require an explicit
+	// dialogue choice. Keep it visible until that whole transaction commits.
+	if (CanTrack(Registry->FindMainScene(Session.CurrentSceneId)))
+	{
+		return Session.CurrentSceneId;
+	}
+	for (const FQinglanRegistryChapter& Chapter : Registry->Chapters)
+	{
+		for (FName SceneId : Chapter.SceneIds)
+		{
+			if (CanTrack(Registry->FindMainScene(SceneId))) { return SceneId; }
+		}
+	}
+	// Preserve guidance for imported/legacy registries without chapter lists.
+	for (const FQinglanRegistryScene& Scene : Registry->MainScenes)
+	{
+		if (CanTrack(&Scene)) { return Scene.SceneId; }
+	}
+	return NAME_None;
+}
+
 void UQinglanStorySubsystem::SkipScene()
 {
 	// Skipping text applies mandatory journal/objective updates but never
@@ -1834,7 +1869,10 @@ namespace QinglanStoryRuntime
 		auto CompleteSatisfiedObjectives = [Story, &Session](const FQinglanRegistryScene& Scene, bool bSide)
 		{
 			const TSet<FName>& CompletedScenes = bSide ? Session.CompletedSideStages : Session.CompletedMainScenes;
-			if (CompletedScenes.Contains(Scene.SceneId))
+			// A shared gameplay event can satisfy several guards, but only
+			// scenes currently unlocked by the authored chain may commit. In
+			// particular an early visit to a gate must not skip the tutorial.
+			if (CompletedScenes.Contains(Scene.SceneId) || !::HasAllFlags(Session, Scene.Prerequisites))
 			{
 				return;
 			}
@@ -1861,6 +1899,7 @@ namespace QinglanStoryRuntime
 		}
 		for (const FQinglanRegistrySideQuest& Quest : Registry->SideQuests)
 		{
+			if (!::HasAllFlags(Session, Quest.Availability)) { continue; }
 			for (const FQinglanRegistryScene& Stage : Quest.Stages)
 			{
 				CompleteSatisfiedObjectives(Stage, /*bSide=*/true);

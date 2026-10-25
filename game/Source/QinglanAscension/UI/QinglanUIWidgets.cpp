@@ -17,11 +17,14 @@
 #include "Abilities/QinglanTechniqueTypes.h"
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetTree.h" // UWidgetTree for named-element lookup/creation
+#include "Blueprint/WidgetLayoutLibrary.h"
 #include "Combat/QinglanCharacter.h"
 #include "Combat/QinglanCombatComponent.h"
 #include "Combat/QinglanTalismanComponent.h"
 #include "Combat/QinglanTechniqueComponent.h"
 #include "Core/QinglanLocalizationService.h"
+#include "Core/QinglanObjectiveGuide.h"
+#include "Core/QinglanInteractable.h"
 #include "Components/ProgressBar.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
@@ -2111,6 +2114,15 @@ void UQinglanHUDWidget::BindNamedElements()
 	// AUD-51: the bootstrap authored objective/talisman/bark placeholders; the
 	// trial row is created here when absent so no bootstrap rebuild is needed.
 	ObjectiveText = Tree->FindWidget<UTextBlock>(TEXT("Txt_Objective"));
+	GuideText = EnsureNamedText(TEXT("Txt_ObjectiveGuide"), FVector2D(40.f, 145.f), FVector2D(760.f, 100.f), 18);
+	ObjectiveMarker = EnsureNamedText(TEXT("Txt_ObjectiveMarker"), FVector2D::ZeroVector, FVector2D(320.f, 80.f), 18);
+	if (GuideText) { GuideText->SetVisibility(ESlateVisibility::HitTestInvisible); }
+	if (ObjectiveMarker)
+	{
+		ObjectiveMarker->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.85f, 0.3f)));
+		ObjectiveMarker->SetJustification(ETextJustify::Center);
+		ObjectiveMarker->SetVisibility(ESlateVisibility::HitTestInvisible);
+	}
 	TrialText = EnsureNamedText(TEXT("Txt_Trial"), FVector2D(40.f, 100.f), FVector2D(700.f, 40.f), 18);
 	BarkText = Tree->FindWidget<UTextBlock>(TEXT("Txt_Bark"));
 	TalismanTexts.Reset();
@@ -2263,12 +2275,13 @@ void UQinglanHUDWidget::RefreshLiveInfo(AQinglanCharacter* Player)
 	UQinglanStorySubsystem* Story = Instance ? Instance->GetSubsystem<UQinglanStorySubsystem>() : nullptr;
 	UQinglanProfileSubsystem* Profile = Instance ? Instance->GetSubsystem<UQinglanProfileSubsystem>() : nullptr;
 
-	// Objective: the playing scene's first incomplete authored objective wins;
-	// otherwise keep the last completed-objective broadcast as context.
+	// Playback ends before gameplay proof. Track the pending authored scene
+	// across dialogue closure, fresh profile creation, travel and reload.
 	FText Objective;
+	const FQinglanObjectiveGuide Guide = QinglanObjectiveGuide::Resolve(Player);
 	if (Story)
 	{
-		const FName SceneId = Story->GetCurrentSceneId();
+		const FName SceneId = Guide.SceneId;
 		if (const FQinglanRegistryScene* Scene = QinglanUIFindScene(Story->GetRegistry(), SceneId))
 		{
 			for (const FQinglanRegistryObjective& Entry : Scene->Objectives)
@@ -2282,11 +2295,11 @@ void UQinglanHUDWidget::RefreshLiveInfo(AQinglanCharacter* Player)
 					break;
 				}
 			}
+			if (Objective.IsEmpty() && !Scene->Objectives.IsEmpty())
+			{
+				Objective = UQinglanHUDStatics::GameText(Scene->Objectives[0].TextKey);
+			}
 		}
-	}
-	if (Objective.IsEmpty())
-	{
-		Objective = CachedObjectiveText;
 	}
 	if (ObjectiveText)
 	{
@@ -2299,6 +2312,43 @@ void UQinglanHUDWidget::RefreshLiveInfo(AQinglanCharacter* Player)
 			FFormatNamedArguments Args;
 			Args.Add(TEXT("text"), Objective);
 			ObjectiveText->SetText(QinglanUIFormat(FName(TEXT("hud.objective")), Args));
+		}
+	}
+	if (GuideText)
+	{
+		GuideText->SetText(Guide.HintKey.IsNone() ? FText::GetEmpty() : UQinglanHUDStatics::GameText(Guide.HintKey));
+	}
+	if (ObjectiveMarker)
+	{
+		ObjectiveMarker->SetVisibility(Guide.Target ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+		APlayerController* PC = GetOwningPlayer();
+		if (Guide.Target && PC)
+		{
+			FText Name = UQinglanHUDStatics::GameText(TEXT("guide.destination"));
+			if (const AQinglanInteractable* Anchor = Cast<AQinglanInteractable>(Guide.Target);
+				Anchor && UQinglanHUDStatics::HasGameText(Anchor->DisplayNameKey))
+			{
+				Name = UQinglanHUDStatics::GameText(Anchor->DisplayNameKey);
+			}
+			FFormatNamedArguments Args;
+			Args.Add(TEXT("name"), Name);
+			Args.Add(TEXT("meters"), FText::AsNumber(FMath::RoundToInt(FVector::Dist2D(Player->GetActorLocation(), Guide.Target->GetActorLocation()) / 100.f)));
+			ObjectiveMarker->SetText(QinglanUIFormat(TEXT("guide.marker"), Args));
+			FVector2D Screen;
+			const FVector TargetLocation = Guide.Target->GetActorLocation() + FVector(0.f, 0.f, 180.f);
+			const bool bInFront = UWidgetLayoutLibrary::ProjectWorldLocationToWidgetPosition(PC, TargetLocation, Screen, true);
+			const FVector2D View = UWidgetLayoutLibrary::GetViewportSize(this) / UWidgetLayoutLibrary::GetViewportScale(this);
+			if (!bInFront)
+			{
+				FVector Eye; FRotator Rotation; PC->GetPlayerViewPoint(Eye, Rotation);
+				const float Side = FVector::DotProduct(FRotationMatrix(Rotation).GetUnitAxis(EAxis::Y), TargetLocation - Eye);
+				Screen = FVector2D(Side < 0.f ? 180.f : View.X - 180.f, View.Y * 0.45f);
+			}
+			if (UCanvasPanelSlot* Slot = Cast<UCanvasPanelSlot>(ObjectiveMarker->Slot))
+			{
+				Slot->SetPosition(FVector2D(FMath::Clamp(Screen.X - 160.f, 20.f, FMath::Max(20.f, View.X - 340.f)),
+					FMath::Clamp(Screen.Y - 40.f, 260.f, FMath::Max(260.f, View.Y - 180.f))));
+			}
 		}
 	}
 

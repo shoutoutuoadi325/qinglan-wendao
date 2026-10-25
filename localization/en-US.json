@@ -264,5 +264,20 @@
   "inspection.locked": "Finish the scene and clear the nearby encounter before inspecting.",
   "inspection.shutter_closed": "Inspection shutter: closed (test complete after closing)",
   "inspection.shutter_open": "Inspection shutter: open — press E again to close",
-  "interact.bamboo.tutorial_return": "Return to Sanctuary"
+  "interact.bamboo.tutorial_return": "Return to Sanctuary",
+  "guide.interact": "Follow the gold marker. Move with WASD / left stick; look with the mouse / right stick. Approach and press E / Y to interact.",
+  "guide.dialogue": "Press E / Y to continue the conversation. When choices appear, use Up/Down and Enter / A, or click a response.",
+  "guide.training_hits": "Face the practice post at the gold marker and land three sword hits: left mouse / J / X. Move closer if a swing misses.",
+  "guide.training_dodge": "Dodge once with Space / A. The practice post does not attack; you can dodge now.",
+  "guide.training_arc": "Cast Jade Sword Arc with 1 / D-pad Up.",
+  "guide.training_ward": "Cast Flowing Ward with 2 / D-pad Right.",
+  "guide.recover": "Recover at the sanctuary shrine marked in gold. Approach and press E / Y.",
+  "guide.read": "Read the marked document: approach and press E / Y. Close the record with Esc / Menu to continue.",
+  "guide.exit": "Use the marked room gateway: approach and press E / Y to enter the next room.",
+  "guide.fight": "Defeat the enemies in this room, then use the marked gateway. Sword: left mouse / J / X. Dodge: Space / A.",
+  "guide.blessing": "Choose one blessing before leaving. Use Up/Down and Enter / A, or click an option. If the offer is closed, interact with the room gateway.",
+  "guide.shutter": "Test the marked inspection shutter: press E / Y to open it, close the record, then interact again to shut it.",
+  "guide.return": "Return to the sanctuary using the marked shrine: approach and press E / Y.",
+  "guide.destination": "Objective",
+  "guide.marker": "◆ {name} · {meters} m"
 }

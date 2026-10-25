@@ -59,6 +59,10 @@ public:
 	UFUNCTION(BlueprintCallable) bool SelectChoice(FName ChoiceId);
 	UFUNCTION(BlueprintPure) bool IsScenePlaying() const;
 	UFUNCTION(BlueprintPure) FName GetCurrentSceneId() const;
+	/** Main-story guidance is independent of dialogue playback. Returns the
+	 *  active unresolved main scene, then the first eligible unfinished scene
+	 *  in authored chapter order. This query never starts or completes scenes. */
+	UFUNCTION(BlueprintPure) FName GetTrackedMainSceneId() const;
 	/** Skips remaining lines; still applies journal/objective updates. */
 	UFUNCTION(BlueprintCallable) void SkipScene();
 

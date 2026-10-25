@@ -1,0 +1,277 @@
+// Real runtime resolver + player delegates + world-spawned interaction actors.
+// Proof history/checkpoints are explicit fixture inputs; these are guidance
+// regressions, not a substitute for input/combat or rendered playthroughs.
+#include "Combat/QinglanCharacter.h"
+#include "Combat/QinglanTrainingTarget.h"
+#include "Core/QinglanInteractable.h"
+#include "Core/QinglanObjectiveGuide.h"
+#include "Engine/Engine.h"
+#include "Engine/GameInstance.h"
+#include "Engine/TargetPoint.h"
+#include "Engine/World.h"
+#include "EngineUtils.h"
+#include "Misc/AutomationTest.h"
+#include "Misc/Guid.h"
+#include "Narrative/QinglanStoryDataTypes.h"
+#include "Narrative/QinglanStoryRuntime.h"
+#include "Narrative/QinglanStorySubsystem.h"
+#include "Progression/QinglanEconomyLibrary.h"
+#include "Progression/QinglanRunSubsystem.h"
+#include "UObject/Package.h"
+
+#if WITH_DEV_AUTOMATION_TESTS
+namespace
+{
+	struct FObjectiveGuideWorld
+	{
+		UWorld* World = nullptr;
+		UGameInstance* Instance = nullptr;
+		AQinglanCharacter* Player = nullptr;
+		explicit FObjectiveGuideWorld(const TCHAR* Map)
+		{
+			if (!GEngine) { return; }
+			const FString Name = FString(Map) + TEXT("_Guide_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			Instance = NewObject<UGameInstance>(GEngine);
+			Instance->InitializeStandalone(FName(*Name), CreatePackage(*(TEXT("/Temp/") + Name)));
+			World = Instance->GetWorld();
+		}
+		~FObjectiveGuideWorld()
+		{
+			if (World) { World->EndPlay(EEndPlayReason::Quit); }
+			if (Instance) { Instance->Shutdown(); }
+			if (World)
+			{
+				if (GEngine) { GEngine->DestroyWorldContext(World); }
+				World->DestroyWorld(false);
+			}
+		}
+		void AddAnchor(FName Id, FVector Location)
+		{
+			FActorSpawnParameters Params;
+			Params.Name = Id;
+			Params.NameMode = FActorSpawnParameters::ESpawnActorNameMode::Requested;
+			if (ATargetPoint* Point = World->SpawnActor<ATargetPoint>(ATargetPoint::StaticClass(), Location, FRotator::ZeroRotator, Params))
+			{
+				Point->Tags.Add(Id);
+			}
+		}
+		void BeginPlay()
+		{
+			World->InitializeActorsForPlay(FURL());
+			World->BeginPlay(); // Runs the production spawner and physical plates.
+			FActorSpawnParameters Params;
+			Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+			Player = World->SpawnActor<AQinglanCharacter>(AQinglanCharacter::StaticClass(), FVector(0.f, 0.f, 700.f), FRotator::ZeroRotator, Params);
+			World->SetBegunPlay(true);
+			if (Player) { Player->DispatchBeginPlay(); }
+		}
+		AQinglanInteractable* Find(FName Id) const
+		{
+			for (TActorIterator<AQinglanInteractable> It(World); It; ++It) { if (It->InteractionId == Id) { return *It; } }
+			return nullptr;
+		}
+	};
+
+	FQinglanNarrativeState BeforeScene(const UQinglanStoryRegistry* Registry, FName SceneId)
+	{
+		FQinglanNarrativeState State;
+		for (const FQinglanRegistryChapter& Chapter : Registry->Chapters)
+		{
+			for (FName PreviousId : Chapter.SceneIds)
+			{
+				if (PreviousId == SceneId) { return State; }
+				if (const FQinglanRegistryScene* Previous = Registry->FindMainScene(PreviousId))
+				{
+					State.CompletedScenes.Add(PreviousId);
+					State.Flags.Append(Previous->SetsFlags);
+				}
+			}
+		}
+		return State;
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanHubObjectiveGuide,
+	"Qinglan.Narrative.HubObjectiveGuideTargetsPendingProof",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FQinglanHubObjectiveGuide::RunTest(const FString& Parameters)
+{
+	FObjectiveGuideWorld Fixture(TEXT("L_Hub"));
+	if (!TestNotNull(TEXT("Private game world"), Fixture.World)) { return false; }
+	Fixture.AddAnchor(TEXT("hub.courtyard"), FVector(0.f, 0.f, 600.f));
+	Fixture.AddAnchor(TEXT("hub.training_yard"), FVector(3000.f, 2500.f, 600.f));
+	Fixture.AddAnchor(TEXT("hub.shrine"), FVector(0.f, 3200.f, 600.f));
+	Fixture.AddAnchor(TEXT("hub.bamboo_gate"), FVector(0.f, -4800.f, 600.f));
+	Fixture.BeginPlay();
+	UQinglanStorySubsystem* Story = Fixture.Instance->GetSubsystem<UQinglanStorySubsystem>();
+	if (!TestNotNull(TEXT("Production player"), Fixture.Player) || !TestNotNull(TEXT("Story subsystem"), Story)) { return false; }
+	const UQinglanStoryRegistry* Registry = Story->GetRegistry();
+	if (!TestNotNull(TEXT("Imported narrative"), Registry)) { return false; }
+	FQinglanObjectiveGuide Guide = QinglanObjectiveGuide::Resolve(Fixture.Player);
+	TestEqual(TEXT("Fresh game tracks the courtyard scene"), Guide.SceneId, FName(TEXT("CH00_S01")));
+	TestEqual(TEXT("Fresh game points at the actual courtyard actor"), Guide.Target, static_cast<AActor*>(Fixture.Find(TEXT("hub.courtyard"))));
+	TestEqual(TEXT("Fresh game teaches interaction"), Guide.HintKey, FName(TEXT("guide.interact")));
+	TestFalse(TEXT("Guidance did not begin dialogue"), Story->IsScenePlaying());
+
+	QinglanStoryRuntime::ImportNarrativeState(Story, BeforeScene(Registry, TEXT("CH00_S02")));
+	if (!TestTrue(TEXT("Training dialogue starts"), Story->BeginScene(TEXT("CH00_S02")))) { return false; }
+	Guide = QinglanObjectiveGuide::Resolve(Fixture.Player);
+	TestEqual(TEXT("Playing dialogue teaches continue"), Guide.HintKey, FName(TEXT("guide.dialogue")));
+	Story->SkipScene();
+	TestTrue(TEXT("Player received real script exhaustion delegates"), Fixture.Player->HasSceneScriptExhaustedForInspection(TEXT("CH00_S02")));
+	Guide = QinglanObjectiveGuide::Resolve(Fixture.Player);
+	TestEqual(TEXT("Training asks for missing sword hits first"), Guide.HintKey, FName(TEXT("guide.training_hits")));
+	TestNotNull(TEXT("Sword guidance finds the real spawned training post"), Cast<AQinglanTrainingTarget>(Guide.Target));
+	for (int32 Hit = 0; Hit < 3; ++Hit) { QinglanStoryRuntime::NotifyGameplayEvent(Story, TEXT("combat.sword_hit"), {}); }
+	TestEqual(TEXT("Completed sword proof changes next hint to dodge"), QinglanObjectiveGuide::Resolve(Fixture.Player).HintKey, FName(TEXT("guide.training_dodge")));
+	QinglanStoryRuntime::NotifyGameplayEvent(Story, TEXT("combat.dodge"), {});
+	TestEqual(TEXT("Dodge proof changes next hint to Arc"), QinglanObjectiveGuide::Resolve(Fixture.Player).HintKey, FName(TEXT("guide.training_arc")));
+	QinglanStoryRuntime::NotifyGameplayEvent(Story, TEXT("cast.jade_sword_arc"), {});
+	TestEqual(TEXT("Arc proof changes next hint to Ward"), QinglanObjectiveGuide::Resolve(Fixture.Player).HintKey, FName(TEXT("guide.training_ward")));
+	QinglanStoryRuntime::NotifyGameplayEvent(Story, TEXT("cast.flowing_ward"), {});
+	Guide = QinglanObjectiveGuide::Resolve(Fixture.Player);
+	TestEqual(TEXT("Training finally directs recovery"), Guide.HintKey, FName(TEXT("guide.recover")));
+	TestEqual(TEXT("Recovery points at shrine, not the old training station"), Guide.Target, static_cast<AActor*>(Fixture.Find(TEXT("hub.shrine"))));
+	FQinglanNarrativeState Before, After;
+	QinglanStoryRuntime::ExportNarrativeState(Story, Before);
+	for (int32 Frame = 0; Frame < 5; ++Frame) { QinglanObjectiveGuide::Resolve(Fixture.Player); }
+	QinglanStoryRuntime::ExportNarrativeState(Story, After);
+	TestTrue(TEXT("Guidance does not manufacture missing recovery proof"), Before.FiredEventLog == After.FiredEventLog);
+	TestFalse(TEXT("Guidance does not finish training"), Story->IsSceneCompleted(TEXT("CH00_S02")));
+	QinglanStoryRuntime::NotifyGameplayEvent(Story, TEXT("shrine.recovery_used"), {});
+	if (!TestTrue(TEXT("Next route-letter dialogue starts"), Story->BeginScene(TEXT("CH00_S03")))) { return false; }
+	Story->SkipScene();
+	Guide = QinglanObjectiveGuide::Resolve(Fixture.Player);
+	TestEqual(TEXT("Exhausted route-letter dialogue teaches physical reading"), Guide.HintKey, FName(TEXT("guide.read")));
+	TestNotNull(TEXT("Production spawner created the physical route letter"), Fixture.Find(TEXT("inspect.route_letter")));
+	TestEqual(TEXT("Reading targets the document plate rather than replaying the shrine dialogue"), Guide.Target, static_cast<AActor*>(Fixture.Find(TEXT("inspect.route_letter"))));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanTutorialObjectiveGuide,
+	"Qinglan.Narrative.TutorialObjectiveGuideTracksDoorsShutterAndReturn",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FQinglanTutorialObjectiveGuide::RunTest(const FString& Parameters)
+{
+	FObjectiveGuideWorld Fixture(TEXT("L_BambooHollow"));
+	if (!TestNotNull(TEXT("Private tutorial game world"), Fixture.World)) { return false; }
+	Fixture.AddAnchor(TEXT("bamboo.room_0"), FVector(0.f, 0.f, 150.f));
+	Fixture.AddAnchor(TEXT("bamboo.room_1_2_guided"), FVector(5500.f, 0.f, 150.f));
+	UQinglanRunSubsystem* Run = Fixture.Instance->GetSubsystem<UQinglanRunSubsystem>();
+	if (!TestNotNull(TEXT("Run subsystem"), Run)) { return false; }
+	FQinglanCheckpoint Checkpoint;
+	Checkpoint.RealmId = FName(UQinglanEconomyLibrary::TutorialRealmIdText);
+	Checkpoint.RealmSeed = 73;
+	Checkpoint.RoomIndex = 0;
+	// The expedition exists before map BeginPlay in production, so the real
+	// world spawner authors the short route and its room-three return station.
+	Run->ImportCheckpoint(Checkpoint);
+	Fixture.BeginPlay();
+	UQinglanStorySubsystem* Story = Fixture.Instance->GetSubsystem<UQinglanStorySubsystem>();
+	if (!TestNotNull(TEXT("Production player"), Fixture.Player) || !TestNotNull(TEXT("Story subsystem"), Story)) { return false; }
+	const UQinglanStoryRegistry* Registry = Story->GetRegistry();
+	if (!TestNotNull(TEXT("Imported narrative"), Registry)) { return false; }
+	QinglanStoryRuntime::ImportNarrativeState(Story, BeforeScene(Registry, TEXT("CH01_S01")));
+	if (!TestTrue(TEXT("Inspection dialogue begins"), Story->BeginScene(TEXT("CH01_S01")))) { return false; }
+	Story->SkipScene();
+	FQinglanObjectiveGuide Guide = QinglanObjectiveGuide::Resolve(Fixture.Player);
+	TestEqual(TEXT("First unread document is water marks"), Guide.Target, static_cast<AActor*>(Fixture.Find(TEXT("inspect.water_marks"))));
+	TestEqual(TEXT("Inspection teaches reading"), Guide.HintKey, FName(TEXT("guide.read")));
+	QinglanStoryRuntime::NotifyGameplayEvent(Story, TEXT("record.opened.water_marks"), {});
+	Guide = QinglanObjectiveGuide::Resolve(Fixture.Player);
+	TestEqual(TEXT("After water marks next unread document is delivery note"), Guide.Target, static_cast<AActor*>(Fixture.Find(TEXT("inspect.delivery_note"))));
+	QinglanStoryRuntime::NotifyGameplayEvent(Story, TEXT("record.opened.delivery_note"), {});
+	if (!TestTrue(TEXT("Guided encounters dialogue begins"), Story->BeginScene(TEXT("CH01_S02")))) { return false; }
+	Story->SkipScene();
+	Run->ImportCheckpoint(Checkpoint);
+	Guide = QinglanObjectiveGuide::Resolve(Fixture.Player);
+	TestNotNull(TEXT("Production spawner created entrance door"), Fixture.Find(TEXT("door.0_1")));
+	TestEqual(TEXT("Entrance points forward to actual door"), Guide.Target, static_cast<AActor*>(Fixture.Find(TEXT("door.0_1"))));
+	Checkpoint.RoomIndex = 1;
+	Run->ImportCheckpoint(Checkpoint);
+	Guide = QinglanObjectiveGuide::Resolve(Fixture.Player);
+	TestEqual(TEXT("Room one guidance follows the next door"), Guide.Target, static_cast<AActor*>(Fixture.Find(TEXT("door.1_2"))));
+	TestTrue(TEXT("Room guidance does not keep stale scene-station target"), Guide.Target != Fixture.Find(TEXT("bamboo.room_1_2_guided")));
+	Checkpoint.RoomIndex = 2;
+	Checkpoint.PendingBlessingRoom = 2;
+	Checkpoint.PendingBlessingOffer = {FName(TEXT("b_sharp_edge")), FName(TEXT("b_quiet_current")), FName(TEXT("b_jade_shell"))};
+	Run->ImportCheckpoint(Checkpoint);
+	TestEqual(TEXT("Pending actual blessing offer takes guidance priority"), QinglanObjectiveGuide::Resolve(Fixture.Player).HintKey, FName(TEXT("guide.blessing")));
+	Checkpoint.PendingBlessingRoom = INDEX_NONE;
+	Checkpoint.PendingBlessingOffer.Reset();
+	Run->ImportCheckpoint(Checkpoint);
+	QinglanStoryRuntime::NotifyGameplayEvent(Story, TEXT("encounter.room_cleared.tutorial.1"), {});
+	QinglanStoryRuntime::NotifyGameplayEvent(Story, TEXT("encounter.room_cleared.tutorial.2"), {});
+	QinglanStoryRuntime::NotifyGameplayEvent(Story, TEXT("blessing.taken"), {});
+	Guide = QinglanObjectiveGuide::Resolve(Fixture.Player);
+	TestEqual(TEXT("After blessing the missing shutter proof is explained"), Guide.HintKey, FName(TEXT("guide.shutter")));
+	TestNotNull(TEXT("Production spawner created the inspection shutter"), Fixture.Find(TEXT("device.inspection_shutter")));
+	TestEqual(TEXT("Shutter hint targets the physical device"), Guide.Target, static_cast<AActor*>(Fixture.Find(TEXT("device.inspection_shutter"))));
+	QinglanStoryRuntime::NotifyGameplayEvent(Story, TEXT("device.shutter_tested"), {});
+	Checkpoint.RoomIndex = 3;
+	Run->ImportCheckpoint(Checkpoint);
+	Guide = QinglanObjectiveGuide::Resolve(Fixture.Player);
+	TestEqual(TEXT("Return room teaches return"), Guide.HintKey, FName(TEXT("guide.return")));
+	TestNotNull(TEXT("Production spawner created the short-route return station"), Fixture.Find(TEXT("bamboo.tutorial_return")));
+	TestEqual(TEXT("Return hint points at actual station instead of a nonexistent fourth door"), Guide.Target, static_cast<AActor*>(Fixture.Find(TEXT("bamboo.tutorial_return"))));
+	QinglanStoryRuntime::ImportNarrativeState(Story, BeforeScene(Registry, TEXT("CH01_S03")));
+	Guide = QinglanObjectiveGuide::Resolve(Fixture.Player);
+	TestEqual(TEXT("Completed guided objective tracks the sanctuary banking scene"), Guide.SceneId, FName(TEXT("CH01_S03")));
+	TestEqual(TEXT("Banking objective still teaches return while standing at shrine three"), Guide.HintKey, FName(TEXT("guide.return")));
+	TestEqual(TEXT("Cross-map banking guidance retains the actual tutorial return station"), Guide.Target, static_cast<AActor*>(Fixture.Find(TEXT("bamboo.tutorial_return"))));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanCatalogObjectiveGuide,
+	"Qinglan.Narrative.LateObjectiveGuideUsesUnreadCatalogDocuments",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FQinglanCatalogObjectiveGuide::RunTest(const FString& Parameters)
+{
+	FObjectiveGuideWorld Fixture(TEXT("L_AshenVerge"));
+	if (!TestNotNull(TEXT("Private Ashen game world"), Fixture.World)) { return false; }
+	// Use production scene-station positions; the production spawner derives
+	// each physical plate's distinct position from the real inspection catalog.
+	Fixture.AddAnchor(TEXT("ashen.approach_1_2"), FVector(8250.f, 0.f, 100.f));
+	Fixture.AddAnchor(TEXT("ashen.archive_3"), FVector(16500.f, 0.f, 100.f));
+	UQinglanRunSubsystem* Run = Fixture.Instance->GetSubsystem<UQinglanRunSubsystem>();
+	if (!TestNotNull(TEXT("Run subsystem"), Run)) { return false; }
+	FQinglanCheckpoint Checkpoint;
+	Checkpoint.RealmId = FName(UQinglanEconomyLibrary::AshenRealmIdText);
+	Checkpoint.RealmSeed = 73;
+	Checkpoint.RoomIndex = 2;
+	Run->ImportCheckpoint(Checkpoint);
+	Fixture.BeginPlay();
+	UQinglanStorySubsystem* Story = Fixture.Instance->GetSubsystem<UQinglanStorySubsystem>();
+	if (!TestNotNull(TEXT("Production player"), Fixture.Player) || !TestNotNull(TEXT("Story subsystem"), Story)) { return false; }
+	const UQinglanStoryRegistry* Registry = Story->GetRegistry();
+	if (!TestNotNull(TEXT("Imported narrative"), Registry)) { return false; }
+	QinglanStoryRuntime::ImportNarrativeState(Story, BeforeScene(Registry, TEXT("CH04_S01")));
+	if (!TestTrue(TEXT("Ashen inspection dialogue begins"), Story->BeginScene(TEXT("CH04_S01")))) { return false; }
+	Story->SkipScene();
+	// Explicit completed-combat fixture inputs keep this test focused on the
+	// two distinct physical documents sharing the event_count alias "scale".
+	QinglanStoryRuntime::NotifyGameplayEvent(Story, TEXT("encounter.room_cleared.ashen.1"), {});
+	QinglanStoryRuntime::NotifyGameplayEvent(Story, TEXT("encounter.room_cleared.ashen.2"), {});
+	FQinglanObjectiveGuide Guide = QinglanObjectiveGuide::Resolve(Fixture.Player);
+	TestNotNull(TEXT("Production catalog spawns first scale plate"), Fixture.Find(TEXT("inspect.scale_1")));
+	TestNotNull(TEXT("Production catalog spawns second scale plate"), Fixture.Find(TEXT("inspect.scale_2")));
+	TestEqual(TEXT("First unread late-chapter plate is the actual target"), Guide.Target, static_cast<AActor*>(Fixture.Find(TEXT("inspect.scale_1"))));
+	TestEqual(TEXT("Late-chapter catalog document teaches reading"), Guide.HintKey, FName(TEXT("guide.read")));
+	QinglanStoryRuntime::NotifyGameplayEvent(Story, TEXT("record.opened.scale"), {FName(TEXT("inspection.read.scale_1"))});
+	Guide = QinglanObjectiveGuide::Resolve(Fixture.Player);
+	TestEqual(TEXT("Shared alias count advances to the second unread physical plate"), Guide.Target, static_cast<AActor*>(Fixture.Find(TEXT("inspect.scale_2"))));
+	TestEqual(TEXT("Second plate retains reading guidance"), Guide.HintKey, FName(TEXT("guide.read")));
+	TestFalse(TEXT("One scale cannot satisfy the two-document requirement"), Story->IsSceneCompleted(TEXT("CH04_S01")));
+	QinglanStoryRuntime::NotifyGameplayEvent(Story, TEXT("record.opened.scale"), {FName(TEXT("inspection.read.scale_2"))});
+	TestTrue(TEXT("Both distinct documents complete the authored inspected approach"), Story->IsSceneCompleted(TEXT("CH04_S01")));
+	Guide = QinglanObjectiveGuide::Resolve(Fixture.Player);
+	TestEqual(TEXT("Completed approach tracks the next archive scene"), Guide.SceneId, FName(TEXT("CH04_S02")));
+	TestNotNull(TEXT("Production spawner creates the next room door"), Fixture.Find(TEXT("door.2_3")));
+	TestEqual(TEXT("Distant next scene routes through the current room exit"), Guide.Target, static_cast<AActor*>(Fixture.Find(TEXT("door.2_3"))));
+	TestEqual(TEXT("Door guidance replaces the old document instruction"), Guide.HintKey, FName(TEXT("guide.exit")));
+	return true;
+}
+#endif

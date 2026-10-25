@@ -9,7 +9,10 @@ param(
     [string]$PublisherDisplayName = '',
     [string]$StoreId = '',
     [string]$Version = '0.1.0.0',
-    [switch]$SkipEditorBuild
+    # The legacy switch name is accepted for callers, but only engine tools
+    # may be reused. Project editor modules must match this checkout.
+    [Alias('SkipEditorBuild')]
+    [switch]$UseCachedEditorTools
 )
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
@@ -46,14 +49,17 @@ foreach ($dir in $ubtDirs) {
 
 $build = Join-Path $engine 'Engine/Build/BatchFiles/Build.bat'
 
-if (-not $SkipEditorBuild) {
-    Write-Host "=========================================================="
-    Write-Host "   Compiling QinglanAscensionEditor (Win64 Development)   "
-    Write-Host "=========================================================="
-    & $build QinglanAscensionEditor Win64 Development "-Project=$project" -WaitMutex -NoUBA -MaxParallelActions=3 2>&1 |
-        Tee-Object (Join-Path $reports 'editor-build.log')
-    if ($LASTEXITCODE) { throw "Win64 editor build failed ($LASTEXITCODE)." }
+# Engine binaries/tools can be restored from another run; its project DLLs
+# cannot be used as this checkout's cooker or regression-test module. Always
+# let UBT bring the current Editor target up to date before testing/cooking.
+Write-Host "=========================================================="
+Write-Host "   Compiling current QinglanAscensionEditor (Win64)       "
+Write-Host "=========================================================="
+& $build QinglanAscensionEditor Win64 Development "-Project=$project" -WaitMutex -NoUBA -MaxParallelActions=3 2>&1 |
+    Tee-Object (Join-Path $reports 'editor-build.log')
+if ($LASTEXITCODE) { throw "Win64 editor build failed ($LASTEXITCODE)." }
 
+if (-not $UseCachedEditorTools) {
     Write-Host "`n=========================================================="
     Write-Host "   Compiling Tools: ShaderCompileWorker (Win64 Development)"
     Write-Host "=========================================================="
@@ -68,8 +74,58 @@ if (-not $SkipEditorBuild) {
         Tee-Object -Append (Join-Path $reports 'editor-build.log')
     if ($LASTEXITCODE) { throw "UnrealPak build failed ($LASTEXITCODE)." }
 } else {
-    Write-Host "Skipping standalone Editor & Tools build (-SkipEditorBuild specified); relying on restored editor binaries."
+    foreach ($tool in @('ShaderCompileWorker.exe', 'UnrealPak.exe')) {
+        if (-not (Test-Path (Join-Path $engine "Engine/Binaries/Win64/$tool"))) {
+            throw "Restored editor tools are missing $tool."
+        }
+    }
+    Write-Host 'Reusing cached engine tools; current project Editor modules were rebuilt above.'
 }
+
+$editor = Join-Path $engine 'Engine/Binaries/Win64/UnrealEditor-Cmd.exe'
+Write-Host "`n==> Importing current bilingual text before tests and Shipping cook..."
+# UE can discover existing generated tables partially loaded and save stale
+# keys. Start these two disposable generated assets fresh; retain technique
+# assets and their authored montage/cue references.
+$textAssets = @('ST_Game.uasset', 'DT_Localization.uasset') | ForEach-Object {
+    Join-Path $repo "game/Content/Qinglan/Data/$_"
+}
+foreach ($asset in $textAssets) {
+    if (Test-Path -LiteralPath $asset) { Remove-Item -LiteralPath $asset -Force }
+}
+& $editor $project '-run=QinglanAscensionEditor.QinglanDataImport' `
+    "-data=$(Join-Path $repo 'data')" '-localizationonly' `
+    -unattended -nop4 -nosplash -nullrhi -stdout -FullStdOutLogOutput 2>&1 |
+    Tee-Object (Join-Path $reports 'localization-import.log')
+if ($LASTEXITCODE) { throw "Bilingual text import failed ($LASTEXITCODE)." }
+foreach ($asset in $textAssets) {
+    if (-not (Test-Path -LiteralPath $asset) -or (Get-Item -LiteralPath $asset).Length -eq 0) {
+        throw "Bilingual text import produced no asset: $asset"
+    }
+}
+
+Write-Host "`n==> Running current Qinglan regression tests before Shipping cook..."
+$testReport = Join-Path $reports 'automation'
+$previousCampaignSetting = $env:QINGLAN_RUN_CAMPAIGN
+try {
+    # Heavy journey specs run separately in native acceptance. This Windows
+    # gate covers every regular registration, including fresh-start regressions.
+    $env:QINGLAN_RUN_CAMPAIGN = '0'
+    & $editor $project '-ExecCmds=Automation RunTests Qinglan.' `
+        '-TestExit=Automation Test Queue Empty' "-ReportExportPath=$testReport" `
+        "-abslog=$(Join-Path $reports 'automation-engine.log')" `
+        '-ini:Engine:[/Script/AutomationController.AutomationControllerSettings]:bPruneLogsOnSuccess=False' `
+        -unattended -nop4 -nosplash -nullrhi -stdout -FullStdOutLogOutput 2>&1 |
+        Tee-Object (Join-Path $reports 'automation.log')
+    if ($LASTEXITCODE) { throw "Windows regression test process failed ($LASTEXITCODE)." }
+} finally {
+    $env:QINGLAN_RUN_CAMPAIGN = $previousCampaignSetting
+}
+# UE process exit zero alone is insufficient: require every source-discovered
+# test to finish successfully, and reject absent/partial/skipped reports.
+& python (Join-Path $PSScriptRoot 'validate_windows_automation.py') `
+    -Project (Join-Path $repo 'game') -Report (Join-Path $testReport 'index.json')
+if ($LASTEXITCODE) { throw 'Windows regression report validation failed.' }
 
 Write-Host "`n=========================================================="
 Write-Host "   Compiling QinglanAscension (Win64 Shipping)            "

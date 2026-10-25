@@ -515,6 +515,8 @@ private:
 
 	/** AUD-51 live rows; Txt_Trial is created when the authored tree lacks it. */
 	UPROPERTY(Transient) TObjectPtr<UTextBlock> ObjectiveText;
+	UPROPERTY(Transient) TObjectPtr<UTextBlock> GuideText;
+	UPROPERTY(Transient) TObjectPtr<UTextBlock> ObjectiveMarker;
 	UPROPERTY(Transient) TObjectPtr<UTextBlock> TrialText;
 	UPROPERTY(Transient) TObjectPtr<UTextBlock> BarkText;
 	UPROPERTY(Transient) TArray<TObjectPtr<UTextBlock>> TalismanTexts;

@@ -1,5 +1,7 @@
 # Qinglan - Path of Ascension
 
+[English](../../docs/store/listing-en-US.md)
+
 ## 简短描述
 
 修习五行术法，探索山间秘境，迎接天劫考验，踏上免费的离线单人修仙之旅。

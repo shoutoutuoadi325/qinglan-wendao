@@ -1,5 +1,7 @@
 # Qinglan - Path of Ascension
 
+[Chinese (Simplified)](../../localization/store/zh-Hans.md)
+
 ## Short description
 
 Master elemental techniques, explore mountain sanctuaries, and face Heavenly

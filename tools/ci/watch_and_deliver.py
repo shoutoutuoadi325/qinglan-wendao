@@ -34,7 +34,7 @@ def main():
         log("ERROR: Run ID must be provided as first argument.")
         sys.exit(1)
 
-    output_dir = Path("dist/store").resolve()
+    output_dir = Path(sys.argv[3]).resolve() if len(sys.argv) > 3 else Path("dist/store-0.1.1.0").resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
     log(f"Starting resilient watcher for Run ID: {run_id} (Repo: {repo})")
@@ -132,7 +132,7 @@ def main():
                 else:
                     log("Warning: verify_store_package.py not found.")
 
-                log("DELIVERY COMPLETE: Microsoft Store package ready in dist/store")
+                log(f"DELIVERY COMPLETE: Microsoft Store package ready in {output_dir}")
                 sys.exit(0)
             else:
                 log("Run completed with failure. Fetching failure details...")

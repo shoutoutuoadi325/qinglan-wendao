@@ -15,7 +15,7 @@ EXPECTED = {
     "publisher_id": "CN=BD412261-9548-4F5A-95C1-24B072A9C1CC",
     "publisher_display_name": "Zhiqi Zhang",
     "package_family_name": "14E33A41.Qinglan-PathofAscension_1c2s66sz70f52",
-    "version": "0.1.0.0"
+    "version": "0.1.1.0"
 }
 
 def verify_store_directory(target_dir: Path) -> bool:

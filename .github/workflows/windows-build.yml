@@ -55,7 +55,7 @@ on:
       editor_cache_run_id:
         description: 'Optional Run ID to reuse compiled editor cache from (e.g. 40100842245)'
         type: string
-        default: '40100842245'
+        default: ''
 
 permissions:
   contents: read

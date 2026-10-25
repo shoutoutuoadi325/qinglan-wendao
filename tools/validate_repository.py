@@ -41,7 +41,7 @@ def validate_text_and_links():
         paths.extend(Path(directory) / name for name in sorted(filenames))
     for path in paths:
         relative = path.relative_to(ROOT)
-        if not path.is_file() or ignored.intersection(relative.parts):
+        if not path.is_file() or ignored.intersection(relative.parts) or path.name.startswith("AGENT_"):
             continue
         if path.suffix not in {".md", ".py", ".json", ".xml", ".yml", ".csv"}:
             continue

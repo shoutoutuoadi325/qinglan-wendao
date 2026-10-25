@@ -2375,9 +2375,9 @@ void UQinglanHUDWidget::RefreshLiveInfo(AQinglanCharacter* Player)
 				const float Side = FVector::DotProduct(FRotationMatrix(Rotation).GetUnitAxis(EAxis::Y), TargetLocation - Eye);
 				Screen = FVector2D(Side < 0.f ? 180.f : View.X - 180.f, View.Y * 0.45f);
 			}
-			if (UCanvasPanelSlot* Slot = Cast<UCanvasPanelSlot>(ObjectiveMarker->Slot))
+			if (UCanvasPanelSlot* MarkerSlot = Cast<UCanvasPanelSlot>(ObjectiveMarker->Slot))
 			{
-				Slot->SetPosition(FVector2D(FMath::Clamp(Screen.X - 160.f, 20.f, FMath::Max(20.f, View.X - 340.f)),
+				MarkerSlot->SetPosition(FVector2D(FMath::Clamp(Screen.X - 160.f, 20.f, FMath::Max(20.f, View.X - 340.f)),
 					FMath::Clamp(Screen.Y - 40.f, 260.f, FMath::Max(260.f, View.Y - 180.f))));
 			}
 		}

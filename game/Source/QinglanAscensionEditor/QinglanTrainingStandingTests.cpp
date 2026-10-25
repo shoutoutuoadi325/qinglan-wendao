@@ -128,6 +128,8 @@ bool FQinglanTrainingStandingAnimatedSwordHits::RunTest(const FString& Parameter
 		}
 	};
 	TickWorld(30); // settle normal standing and the production idle pose
+	TestTrue(TEXT("The real blade has human-scale length after imported bone scaling"),
+		FMath::IsNearlyEqual(FVector::Dist(Mesh->GetSocketLocation(TEXT("sword_base")), Mesh->GetSocketLocation(TEXT("sword_tip"))), 90.0, 1.0));
 	const UCapsuleComponent* TargetCapsule = Cast<UCapsuleComponent>(Target->GetRootComponent());
 	if (!TestNotNull(TEXT("Target collision capsule"), TargetCapsule)) { return false; }
 	const float MinimumSeparation = TargetCapsule->GetScaledCapsuleRadius() + Player->GetCapsuleComponent()->GetScaledCapsuleRadius();
@@ -150,6 +152,11 @@ bool FQinglanTrainingStandingAnimatedSwordHits::RunTest(const FString& Parameter
 		float FurthestAttackMontagePosition = 0.f;
 		TArray<FString> Samples;
 		Player->InputSwordAttack(FInputActionValue(true));
+		UAnimMontage* Attack = Cast<UAnimMontage>(Sword->SwingMontageSoftPaths[Sword->GetComboIndex()].TryLoad());
+		AddInfo(FString::Printf(TEXT("Attack begin: instance=%s active=%s asset=%s length=%.3f rate=%.3f baseTransform=%s"),
+			*Mesh->GetAnimInstance()->GetClass()->GetName(), *GetNameSafe(Mesh->GetAnimInstance()->GetCurrentActiveMontage()),
+			*GetNameSafe(Attack), Attack ? Attack->GetPlayLength() : -1.f, Attack ? Mesh->GetAnimInstance()->Montage_GetPlayRate(Attack) : -1.f,
+			*Mesh->GetSocketTransform(TEXT("sword_base")).ToString()));
 		TestTrue(TEXT("Actual attack input starts a sword swing"), Sword->GetPhase() != EQinglanSwordPhase::Idle);
 		// Independent presses allow the full animation and combo window to end.
 		// We never tick a sword phase, refresh a pose, or move a socket directly.

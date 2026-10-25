@@ -113,6 +113,38 @@ namespace
 		return Montage;
 	}
 
+	bool RepairHumanBladeSocket(USkeleton* Skeleton)
+	{
+		USkeletalMesh* Mesh = LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Qinglan/Characters/Human/SK_Human"));
+		if (!Skeleton || !Mesh) { return false; }
+		const FReferenceSkeleton& Ref = Mesh->GetRefSkeleton();
+		FTransform Hand = FTransform::Identity;
+		for (int32 Bone = Ref.FindBoneIndex(TEXT("RightHand")); Bone != INDEX_NONE; Bone = Ref.GetParentIndex(Bone))
+		{
+			Hand = Hand * Ref.GetRefBonePose()[Bone];
+		}
+		const double NormalizedMeshScale = 88.0 / FMath::Max(1.0, Mesh->GetBounds().BoxExtent.Z);
+		const double HandScale = FMath::Abs(Hand.GetScale3D().X) * NormalizedMeshScale;
+		if (HandScale < UE_SMALL_NUMBER) { return false; }
+		for (USkeletalMeshSocket* Socket : Skeleton->Sockets)
+		{
+			if (Socket && Socket->SocketName == FName(TEXT("sword_tip")))
+			{
+				// Imported hand bones include their FBX scale. Express a 90cm
+				// blade in that space instead of inheriting a 14m socket offset.
+				// The imported grip points down the hand's negative X axis.
+				Socket->RelativeLocation = FVector(-90.0 / HandScale, 0.0, 0.0);
+				Socket->RelativeRotation = FRotator::ZeroRotator;
+				FSavePackageArgs Args;
+				Args.TopLevelFlags = RF_Public | RF_Standalone;
+				Args.SaveFlags = SAVE_NoError;
+				return UPackage::SavePackage(Skeleton->GetOutermost(), Skeleton,
+					*FPackageName::LongPackageNameToFilename(Skeleton->GetOutermost()->GetName(), FPackageName::GetAssetPackageExtension()), Args);
+			}
+		}
+		return false;
+	}
+
 	/**
 	 * AUD-45: after saving, prove the asset can be found by its contract path and
 	 * carries the expected identity. Fails when the package/object names diverge
@@ -898,6 +930,15 @@ UAnimMontage* UQinglanAnimBootstrapCommandlet::BuildComboMontage(const FString& 
 	Segment.LoopingCount = 1;
 	Montage->GetController().SetPlayLength(PlayLength); // UE 5.8: SequenceLength is protected
 	Montage->RateScale = 1.f;
+	if (Montage->CompositeSections.IsEmpty())
+	{
+		Montage->AddAnimCompositeSection(TEXT("Default"), 0.f);
+	}
+	if (MontageName.StartsWith(TEXT("AM_Human_SwordCut_")))
+	{
+		Montage->BlendIn.SetBlendTime(0.05f);
+		Montage->BlendOut.SetBlendTime(0.08f);
+	}
 
 	// Hit-window notifies at the phase boundaries (docs/02 section 4). The
 	// sword component's timers stay authoritative; notifies only tighten the
@@ -935,6 +976,38 @@ int32 UQinglanAnimBootstrapCommandlet::Main(const FString& Params)
 	// rejects placeholders as runtime acceptance evidence.
 	const bool bAuthorProceduralLocomotion = FParse::Param(*Params, TEXT("procedural-locomotion"));
 	USkeleton* const HumanSkeleton = LoadHumanSkeleton();
+	if (FParse::Param(*Params, TEXT("repair-combat-assets")))
+	{
+		// Repair existing assets in place, retaining their original takes and
+		// technique references. No mesh import or AnimBlueprint regeneration.
+		AssetRegistry.Get().SearchAllAssets(true);
+		TArray<FAssetData> Assets;
+		AssetRegistry.Get().GetAssetsByClass(UAnimMontage::StaticClass()->GetClassPathName(), Assets);
+		for (const FAssetData& Asset : Assets)
+		{
+			if (!Asset.PackageName.ToString().StartsWith(TEXT("/Game/Qinglan/Characters/"))) { continue; }
+			UAnimMontage* Montage = Cast<UAnimMontage>(Asset.GetAsset());
+			if (!Montage) { bOk = false; continue; }
+			if (Montage->CompositeSections.IsEmpty()) { Montage->AddAnimCompositeSection(TEXT("Default"), 0.f); }
+			if (Montage->GetName().StartsWith(TEXT("AM_Human_SwordCut_")))
+			{
+				Montage->BlendIn.SetBlendTime(0.05f);
+				Montage->BlendOut.SetBlendTime(0.08f);
+				const int32 Cut = Montage->GetName().EndsWith(TEXT("1")) ? 0 : Montage->GetName().EndsWith(TEXT("2")) ? 1 : 2;
+				const float Windup[] = {0.14f, 0.16f, 0.22f};
+				const float Active[] = {0.10f, 0.10f, 0.12f};
+				const float Total[] = {0.46f, 0.50f, 0.66f};
+				for (FAnimNotifyEvent& Notify : Montage->Notifies)
+				{
+					if (Notify.NotifyName == FName(TEXT("QinglanSwordWindowOpen"))) { Notify.Link(Montage, Montage->GetPlayLength() * Windup[Cut] / Total[Cut]); }
+					if (Notify.NotifyName == FName(TEXT("QinglanSwordWindowClosed"))) { Notify.Link(Montage, Montage->GetPlayLength() * (Windup[Cut] + Active[Cut]) / Total[Cut]); }
+				}
+			}
+			bOk = SaveMontage(Montage, Asset.PackageName.ToString()) != nullptr && bOk;
+		}
+		bOk = RepairHumanBladeSocket(HumanSkeleton) && bOk;
+		return bOk ? 0 : 1;
+	}
 	if (bAuthorProceduralLocomotion && HumanSkeleton)
 	{
 		const TCHAR* const WalkName = TEXT("SK_HumanHuman_Armature_Walk");
@@ -1102,6 +1175,7 @@ int32 UQinglanAnimBootstrapCommandlet::Main(const FString& Params)
 	}
 
 	// --- Discover imported anim sequences by character group. ---
+	bOk = RepairHumanBladeSocket(HumanSkeleton) && bOk;
 	TArray<FAssetData> AllAssets;
 	AssetRegistry.Get().GetAssetsByClass(
 		FTopLevelAssetPath(TEXT("/Script/Engine"), TEXT("AnimSequence")), AllAssets, /*bSearchSubClasses=*/false);
@@ -1247,9 +1321,12 @@ int32 UQinglanAnimBootstrapCommandlet::Main(const FString& Params)
 			{
 				// Visual approximation of docs/02 section 4 phases; later cuts
 				// wind up a little longer to match their longer windup timers.
-				const float CutIndex = Suffix.EndsWith(TEXT("1")) ? 0.f : (Suffix.EndsWith(TEXT("2")) ? 1.f : 2.f);
-				WindupFraction = 0.30f + 0.05f * CutIndex;
-				ActiveFraction = 0.25f;
+				const int32 CutIndex = Suffix.EndsWith(TEXT("1")) ? 0 : (Suffix.EndsWith(TEXT("2")) ? 1 : 2);
+				const float Windup[] = {0.14f, 0.16f, 0.22f};
+				const float Active[] = {0.10f, 0.10f, 0.12f};
+				const float Total[] = {0.46f, 0.50f, 0.66f};
+				WindupFraction = Windup[CutIndex] / Total[CutIndex];
+				ActiveFraction = Active[CutIndex] / Total[CutIndex];
 			}
 			UAnimMontage* Montage = BuildComboMontage(Dir, MontageName, Pair.Value, FMath::Max(WindupFraction, 0.f), ActiveFraction);
 			if (Montage)

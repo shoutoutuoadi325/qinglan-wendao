@@ -2,7 +2,9 @@
 
 Product: Qinglan - Path of Ascension (`9NGLSM7P5CMB`).
 
-This update corrects objective tracking and room progression. The main
+This update corrects objective tracking and room progression. The
+training post accepts ordinary standing sword attacks, with blade collision
+and attack animations synchronized. The main
 objective stays visible after conversations and reloads, and a gold marker
 shows the next destination. Training guidance follows the actions still
 required. Finished instruction panels close so the player can see the scene.

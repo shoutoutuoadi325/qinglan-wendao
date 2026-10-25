@@ -52,6 +52,11 @@ objective precisely.
 - Refresh only the two localization tables before Windows tests and cooking;
   preserve technique assets and their animation references. Rebuild current
   project Editor modules instead of executing older cached project DLLs.
+- Give generated combat montages a valid default section. The previous assets
+  stopped on their first tick because they had no section. Match sword montage
+  playback and notify timing to the committed cut's phase durations, normalize
+  the inherited imported hand scale to a 90 cm blade in the grip direction,
+  and query the full blade segment as well as its endpoint motion.
 
 ## Verification record
 
@@ -61,6 +66,22 @@ headers, generated headers, module PCH and warning settings. Full compile,
 named native regressions, player-input traversal and the replacement Windows
 package are tracked separately in the current build logs. These checks do not
 by themselves identify which objective the reviewer attempted.
+
+The current Mac Editor links successfully after disabling unity for the
+Editor module's file-local importer and fixture helpers. The native report
+`.local/certification-repro/focused-20261025T143234Z/index.json` passes strict
+registration/result validation: 100 named Success entries, comprising 98
+regular regressions and two explicitly opted-out campaign journeys, with no
+failures or not-run entries. Fifteen tests record warnings. The standing
+animated training test uses a possessed pawn, real world and skeletal ticks,
+non-overlapping 110 cm standing separation, and actual attack inputs; all
+three independent swings each yield one accepted target hit and one proof.
+It also verifies the real blade's 90 cm length after inherited bone scaling.
+
+The late catalog fixture explicitly interrupts a pending conversation by
+importing its snapshot to isolate unread-document destination selection.
+It resolves the authored choice before asserting scene completion; document
+reads alone do not imply choice completion.
 
 New native regression registrations cover tracking across dialogue/reload,
 proof-specific guidance, physical inspection destinations, premature gate

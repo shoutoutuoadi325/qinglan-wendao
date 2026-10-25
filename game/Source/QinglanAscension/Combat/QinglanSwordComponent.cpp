@@ -459,6 +459,9 @@ void UQinglanSwordComponent::TickSweep()
 	// per-swing victim set.
 	const FVector TipLocation = GetBladeSocketLocation(BladeTipSocketName);
 	const FVector BaseLocation = GetBladeSocketLocation(BladeStartSocketName);
+	// The full blade can strike a capsule between its endpoints. Sampling
+	// only the hilt and tip leaves a gap through the middle of a standing cut.
+	SweepSocketSegment(BaseLocation, TipLocation);
 	if (bHavePreviousSocketLocations)
 	{
 		SweepSocketSegment(PreviousTipLocation, TipLocation);
@@ -660,7 +663,10 @@ void UQinglanSwordComponent::PlaySwingMontage()
 		// Cosmetic only: phase timers above stay authoritative; notifies refine the window.
 		// Each StartSwing call (including buffered chains into the next cut) plays
 		// the montage for that cut; Montage_Play replaces the previous cut's pose.
-		const float Duration = AnimInstance->Montage_Play(Montage, 1.f);
+		const FQinglanSwordCut& Cut = Cuts[ComboIndex];
+		const float CutDuration = Cut.WindupSeconds + Cut.ActiveSeconds + Cut.RecoverySeconds;
+		const float PlayRate = Montage->GetPlayLength() / FMath::Max(CutDuration, UE_SMALL_NUMBER);
+		const float Duration = AnimInstance->Montage_Play(Montage, PlayRate);
 		if (Duration <= 0.f)
 		{
 			UE_LOG(LogQinglanCombat, Warning, TEXT("Sword montage %s failed to start for %s; phase timers continue"),

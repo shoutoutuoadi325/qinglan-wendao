@@ -258,6 +258,19 @@ bool FQinglanCatalogObjectiveGuide::RunTest(const FString& Parameters)
 	QinglanStoryRuntime::ImportNarrativeState(Story, BeforeScene(Registry, TEXT("CH04_S01")));
 	if (!TestTrue(TEXT("Ashen inspection dialogue begins"), Story->BeginScene(TEXT("CH04_S01")))) { return false; }
 	Story->SkipScene();
+	TestTrue(TEXT("Unresolved authored question retains dialogue ownership"), Story->IsScenePlaying());
+	TestEqual(TEXT("The active question takes priority over physical documents"), QinglanObjectiveGuide::Resolve(Fixture.Player).HintKey, FName(TEXT("guide.dialogue")));
+	// Explicit interruption fixture: importing the pending narrative snapshot
+	// drops playback without choosing or completing this choice-driven scene.
+	// The same pawn retains its observed script line for the resolver's read
+	// guidance seam. This isolates catalog selection; it is not a claim that
+	// ordinary input exits an unresolved question or that these reads gate its
+	// authored choice transaction.
+	FQinglanNarrativeState Interrupted;
+	QinglanStoryRuntime::ExportNarrativeState(Story, Interrupted);
+	QinglanStoryRuntime::ImportNarrativeState(Story, Interrupted);
+	TestFalse(TEXT("Imported pending snapshot has no live playback"), Story->IsScenePlaying());
+	TestFalse(TEXT("Interruption does not complete the inspection scene"), Story->IsSceneCompleted(TEXT("CH04_S01")));
 	// Explicit completed-combat fixture inputs keep this test focused on the
 	// two distinct physical documents sharing the event_count alias "scale".
 	QinglanStoryRuntime::NotifyGameplayEvent(Story, TEXT("encounter.room_cleared.ashen.1"), {});
@@ -271,9 +284,21 @@ bool FQinglanCatalogObjectiveGuide::RunTest(const FString& Parameters)
 	Guide = QinglanObjectiveGuide::Resolve(Fixture.Player);
 	TestEqual(TEXT("Shared alias count advances to the second unread physical plate"), Guide.Target, static_cast<AActor*>(Fixture.Find(TEXT("inspect.scale_2"))));
 	TestEqual(TEXT("Second plate retains reading guidance"), Guide.HintKey, FName(TEXT("guide.read")));
-	TestFalse(TEXT("One scale cannot satisfy the two-document requirement"), Story->IsSceneCompleted(TEXT("CH04_S01")));
+	TestEqual(TEXT("One scale leaves the shared two-document proof missing"),
+		QinglanStoryRuntime::EvaluateObjectiveGuard(Story, TEXT("CH04_S01"), TEXT("s01.objective")).Status,
+		QinglanStoryRuntime::EQinglanGuardStatus::Missing);
 	QinglanStoryRuntime::NotifyGameplayEvent(Story, TEXT("record.opened.scale"), {FName(TEXT("inspection.read.scale_2"))});
-	TestTrue(TEXT("Both distinct documents complete the authored inspected approach"), Story->IsSceneCompleted(TEXT("CH04_S01")));
+	TestEqual(TEXT("Both distinct reads satisfy the objective's authored proof"),
+		QinglanStoryRuntime::EvaluateObjectiveGuard(Story, TEXT("CH04_S01"), TEXT("s01.objective")).Status,
+		QinglanStoryRuntime::EQinglanGuardStatus::Satisfied);
+	TestFalse(TEXT("Document proof does not silently select the pending question"), Story->IsSceneCompleted(TEXT("CH04_S01")));
+	Guide = QinglanObjectiveGuide::Resolve(Fixture.Player);
+	TestTrue(TEXT("Satisfied document proof removes the old read instruction"), Guide.HintKey != FName(TEXT("guide.read")));
+	if (!TestTrue(TEXT("The interrupted authored conversation can restart"), Story->BeginScene(TEXT("CH04_S01")))) { return false; }
+	Story->SkipScene();
+	if (!TestTrue(TEXT("The authored question is resolved explicitly"), Story->SelectChoice(TEXT("s01.ask_water")))) { return false; }
+	Story->SkipScene();
+	TestTrue(TEXT("Resolving the authored conversation completes the inspected approach"), Story->IsSceneCompleted(TEXT("CH04_S01")));
 	Guide = QinglanObjectiveGuide::Resolve(Fixture.Player);
 	TestEqual(TEXT("Completed approach tracks the next archive scene"), Guide.SceneId, FName(TEXT("CH04_S02")));
 	TestNotNull(TEXT("Production spawner creates the next room door"), Fixture.Find(TEXT("door.2_3")));

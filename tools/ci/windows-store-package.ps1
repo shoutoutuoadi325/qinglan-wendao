@@ -107,68 +107,50 @@ Write-Host "Is Test Identity:       $isTestIdentity"
 $packagesCreated = [Collections.Generic.List[PSObject]]::new()
 $warnings = [Collections.Generic.List[string]]::new()
 
-# Helper: Find or acquire makepkg.exe
+# Helper: extract Microsoft's public GDK installers without installing the SDK.
 function Get-MakePkgTool {
-    $potentialPaths = @()
-    if ($env:GameDK) {
-        $potentialPaths += (Join-Path $env:GameDK 'bin\makepkg.exe')
-    }
-    if ($env:GDK_PATH) {
-        $potentialPaths += (Join-Path $env:GDK_PATH 'makepkg.exe')
-        $potentialPaths += (Join-Path $env:GDK_PATH 'bin\makepkg.exe')
-    }
-    $potentialPaths += 'C:\Program Files (x86)\Microsoft GDK\bin\makepkg.exe'
-
-    foreach ($p in $potentialPaths) {
-        if (Test-Path -LiteralPath $p -PathType Leaf) {
-            return $p
+    foreach ($base in @($env:GameDK, $env:GDK_PATH, 'C:\Program Files (x86)\Microsoft GDK')) {
+        if ($base -and (Test-Path -LiteralPath $base -PathType Container)) {
+            $tools = @(Get-ChildItem -LiteralPath $base -Recurse -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -in @('makepkg2.exe', 'makepkg.exe') } |
+                Sort-Object @{ Expression = { if ($_.Name -eq 'makepkg2.exe') { 0 } else { 1 } } }, FullName)
+            if ($tools.Count) { return $tools[0].FullName }
         }
     }
-    $cmd = Get-Command 'makepkg.exe' -ErrorAction SilentlyContinue
-    if ($cmd) {
-        return $cmd.Source
-    }
+    $cmd = Get-Command 'makepkg2.exe', 'makepkg.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($cmd) { return $cmd.Source }
 
-    # Attempt automated acquisition of Microsoft Public GDK
-    Write-Host "makepkg.exe not found on system. Attempting to acquire Microsoft Public GDK..."
-    $gdkDest = Join-Path $env:RUNNER_TEMP 'microsoft-gdk'
-    $localMakePkg = Join-Path $gdkDest 'bin\makepkg.exe'
-    if (Test-Path -LiteralPath $localMakePkg -PathType Leaf) {
-        return $localMakePkg
-    }
-
-    $downloadUrl = if ($env:GDK_ARCHIVE_URL) {
-        $env:GDK_ARCHIVE_URL
-    } else {
-        'https://github.com/microsoft/GDK/releases/download/October-2025-Update-5-v2510.5.6322/GDK_2510.5.6322.zip'
-    }
-
+    # The ZIP contains MSI installers, not a ready-to-use bin directory. Keep
+    # downloads pinned to a verified official Microsoft release and digest.
+    $downloadUrl = 'https://github.com/microsoft/GDK/releases/download/April-2026-Update-5-v2604.5.7903/GDK_2604.5.7903.zip'
+    $expectedHash = '304a4c154c0896dc6c3f66ed237e2360f67e4161f9078a7d10e8c2d8eced1a8a'
+    $downloadRoot = Join-Path $env:RUNNER_TEMP 'gdk-download'
+    $extractRoot = Join-Path $env:RUNNER_TEMP 'gdk-extracted'
     $gdkZip = Join-Path $env:RUNNER_TEMP 'gdk.zip'
-    try {
-        Write-Host "Downloading Microsoft GDK from $downloadUrl ..."
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $gdkZip -MaximumRedirection 5
-        New-Item -ItemType Directory -Force $gdkDest | Out-Null
-        Write-Host "Extracting GDK tools via 7z..."
-        & 7z x $gdkZip "-o$gdkDest" "bin/*" -r -y -bso0 -bsp0
-        if (Test-Path -LiteralPath $localMakePkg -PathType Leaf) {
-            Write-Host "Successfully extracted makepkg.exe at $localMakePkg"
-            return $localMakePkg
-        }
-        & 7z x $gdkZip "-o$gdkDest" "*.exe" "*.dll" -r -y -bso0 -bsp0
-        $found = @(Get-ChildItem -Path $gdkDest -Recurse -File -Filter 'makepkg.exe')
-        if ($found.Count -gt 0) {
-            Write-Host "Successfully found makepkg.exe at $($found[0].FullName)"
-            return $found[0].FullName
-        }
-    } catch {
-        Write-Warning "Could not automatically download or extract GDK: $($_.Exception.Message)"
-    } finally {
-        if (Test-Path -LiteralPath $gdkZip -PathType Leaf) {
-            Remove-Item -LiteralPath $gdkZip -Force -ErrorAction SilentlyContinue
-        }
+    New-Item -ItemType Directory -Force $downloadRoot, $extractRoot | Out-Null
+    Write-Host 'Downloading verified Microsoft GDK April 2026 Update 5.'
+    Invoke-WebRequest -Uri $downloadUrl -OutFile $gdkZip -MaximumRedirection 5
+    if ((Get-FileHash $gdkZip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedHash) {
+        throw 'Microsoft GDK ZIP SHA-256 mismatch.'
     }
-
-    return $null
+    & 7z x $gdkZip "-o$downloadRoot" -y -bso0 -bsp0
+    if ($LASTEXITCODE) { throw "GDK ZIP extraction failed ($LASTEXITCODE)." }
+    Remove-Item -LiteralPath $gdkZip
+    $installers = @(Get-ChildItem -LiteralPath $downloadRoot -Recurse -File -Filter '*.msi')
+    if (-not $installers.Count) { throw 'The verified GDK ZIP contains no MSI packages.' }
+    foreach ($msi in $installers) {
+        Write-Host "Extracting GDK component: $($msi.Name)"
+        $msiLog = Join-Path $ReportsPath ("gdk-extract-" + $msi.BaseName + '.log')
+        $arguments = '/a "{0}" /qn TARGETDIR="{1}" /l*v "{2}"' -f $msi.FullName, $extractRoot, $msiLog
+        $process = Start-Process -FilePath msiexec.exe -ArgumentList $arguments -Wait -PassThru
+        if ($process.ExitCode -notin @(0, 3010)) { throw "GDK MSI extraction failed for $($msi.Name): $($process.ExitCode)." }
+    }
+    $tools = @(Get-ChildItem -LiteralPath $extractRoot -Recurse -File |
+        Where-Object { $_.Name -in @('makepkg2.exe', 'makepkg.exe') } |
+        Sort-Object @{ Expression = { if ($_.Name -eq 'makepkg2.exe') { 0 } else { 1 } } }, FullName)
+    if (-not $tools.Count) { throw 'GDK MSI extraction produced no makepkg tool.' }
+    Write-Host "Located Microsoft package tool: $($tools[0].FullName)"
+    return $tools[0].FullName
 }
 
 # Helper: Find MakeAppx.exe in Windows SDK
@@ -200,13 +182,7 @@ if ($Format -in @('both', 'msixvc')) {
     $makepkg = Get-MakePkgTool
 
     if (-not $makepkg) {
-        $msg = "makepkg.exe is unavailable. GDK MSIXVC packaging skipped."
-        if ($Format -eq 'msixvc') {
-            throw $msg
-        } else {
-            Write-Warning $msg
-            $warnings.Add($msg)
-        }
+        throw 'makepkg.exe is unavailable. The requested GDK package was not produced.'
     } else {
         Write-Host "Using makepkg at: $makepkg"
 
@@ -226,7 +202,7 @@ if ($Format -in @('both', 'msixvc')) {
         $xmlLines.Add('  <ExecutableList>')
         $xmlLines.Add("    <Executable Name=""$exeRelative"" Id=""Game"" TargetDeviceFamily=""PC"" />")
         $xmlLines.Add('  </ExecutableList>')
-        $xmlLines.Add('  <ShellVisuals DefaultDisplayName="Qinglan: Path of Ascension"')
+        $xmlLines.Add('  <ShellVisuals DefaultDisplayName="Qinglan - Path of Ascension"')
         $xmlLines.Add("    PublisherDisplayName=""$PublisherDisplayName""")
         $xmlLines.Add('    StoreLogo="Assets\StoreLogo.png"')
         $xmlLines.Add('    Square150x150Logo="Assets\Square150x150Logo.png"')
@@ -234,9 +210,7 @@ if ($Format -in @('both', 'msixvc')) {
         $xmlLines.Add('    Description="An offline cultivation adventure."')
         $xmlLines.Add('    BackgroundColor="#17212A"')
         $xmlLines.Add('    SplashScreenImage="Assets\SplashScreenImage.png" />')
-        $xmlLines.Add('  <DesktopRegistration>')
-        $xmlLines.Add('    <ProcessorArchitecture>x64</ProcessorArchitecture>')
-        $xmlLines.Add('  </DesktopRegistration>')
+        $xmlLines.Add('  <ProcessorArchitecture>x64</ProcessorArchitecture>')
         $xmlLines.Add('</Game>')
         $gameConfig = $xmlLines -join "`n"
 
@@ -247,19 +221,25 @@ if ($Format -in @('both', 'msixvc')) {
         $msixvcDir = Join-Path $OutputPath 'msixvc'
         New-Item -ItemType Directory -Force $msixvcDir | Out-Null
 
-        Write-Host "Running makepkg pack /d '$StagedPath' /pd '$msixvcDir' /pc ..."
-        & $makepkg pack /d "$StagedPath" /pd "$msixvcDir" /pc 2>&1 |
+        # Remove an old desktop manifest: MicrosoftGame.config is authoritative,
+        # and GDK generates the AppxManifest for the game package itself.
+        Remove-Item (Join-Path $StagedPath 'AppxManifest.xml') -ErrorAction SilentlyContinue
+        $layout = Join-Path $ReportsPath 'layout.xml'
+        & $makepkg genmap /f "$layout" /d "$StagedPath" 2>&1 |
+            Tee-Object (Join-Path $ReportsPath 'makepkg-genmap.log')
+        if ($LASTEXITCODE) { throw "makepkg genmap failed ($LASTEXITCODE)." }
+        # /l creates a unique encrypted submission package and its escrow key
+        # bundle. Do not use a development/test key for a retail submission.
+        Write-Host 'Creating encrypted PC MSIXVC package and submission records.'
+        & $makepkg pack /f "$layout" /d "$StagedPath" /pd "$msixvcDir" /pc /l /validationcritical 2>&1 |
             Tee-Object (Join-Path $ReportsPath 'makepkg-pack.log')
-        if ($LASTEXITCODE -ne 0) {
-            throw "makepkg pack failed with exit code $LASTEXITCODE."
-        }
-
-        Write-Host "Running makepkg validate /d '$StagedPath' /pc ..."
-        & $makepkg validate /d "$StagedPath" /pc 2>&1 |
-            Tee-Object (Join-Path $ReportsPath 'makepkg-validate.log')
+        if ($LASTEXITCODE) { throw "makepkg pack failed ($LASTEXITCODE)." }
+        if (-not (Get-ChildItem $msixvcDir -Recurse -File -Filter '*.msixvc')) { throw 'No MSIXVC package was generated.' }
+        if (-not (Get-ChildItem $msixvcDir -Recurse -File -Filter '*.ekb')) { throw 'No submission EKB was generated.' }
+        if (-not (Get-ChildItem $msixvcDir -Recurse -File -Filter '*.xml')) { throw 'No Submission Validator XML record was generated.' }
 
         # Check produced artifacts
-        $msixvcFiles = @(Get-ChildItem -Path $msixvcDir -File | Where-Object { $_.Extension -in @('.msixvc', '.ekb') })
+        $msixvcFiles = @(Get-ChildItem -Path $msixvcDir -Recurse -File | Where-Object { $_.Extension -in @('.msixvc', '.ekb', '.xml', '.zip') })
         foreach ($f in $msixvcFiles) {
             $packagesCreated.Add([PSObject]@{
                 format = 'msixvc'
@@ -371,7 +351,7 @@ if (Test-Path -LiteralPath $manifestSrc -PathType Leaf) {
 }
 
 # 7. Write evidence and Partner Center upload instructions
-$commit = (& git -C $repoRoot rev-parse HEAD).Trim()
+$commit = if ($env:STORE_SOURCE_PROJECT_COMMIT) { $env:STORE_SOURCE_PROJECT_COMMIT } else { (& git -C $repoRoot rev-parse HEAD).Trim() }
 $evidence = [ordered]@{
     timestamp_utc = [DateTime]::UtcNow.ToString('o')
     project_commit = $commit

@@ -1,0 +1,91 @@
+name: Store repack
+
+on:
+  push:
+    branches: [fix/audit-repairs]
+    paths:
+      - '.github/workflows/store-repack.yml'
+      - 'tools/ci/windows-store-package.ps1'
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: 'Successful Windows build run to repackage without rebuilding'
+        type: string
+        default: '40124296511'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: store-repack
+  cancel-in-progress: false
+
+jobs:
+  repackage:
+    if: github.event.repository.private == false
+    runs-on: windows-2022
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_RUN_ID: ${{ inputs.source_run_id || '40124296511' }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          lfs: false
+      - name: Download existing Shipping build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:SOURCE_RUN_ID -notmatch '^\d+$') { throw 'Invalid source run ID.' }
+          $run = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:SOURCE_RUN_ID" | ConvertFrom-Json
+          if ($LASTEXITCODE -or $run.conclusion -ne 'success') { throw 'Source run must have succeeded.' }
+          gh run download $env:SOURCE_RUN_ID --repo $env:GITHUB_REPOSITORY --name "Qinglan-Win64-Shipping-$env:SOURCE_RUN_ID" --dir "$env:RUNNER_TEMP/payload"
+          if ($LASTEXITCODE) { throw 'Could not retrieve source Shipping artifact.' }
+          $exe = @(Get-ChildItem "$env:RUNNER_TEMP/payload" -Recurse -File -Filter 'QinglanAscension-Win64-Shipping.exe' | Where-Object { $_.FullName -match '\\Binaries\\Win64\\' })
+          if ($exe.Count -ne 1) { throw 'Expected exactly one staged Shipping executable.' }
+          $stage = $exe[0].Directory.Parent.Parent.Parent.FullName
+          foreach ($name in @('BUILD-STATUS.txt', 'build-evidence.json')) {
+            Remove-Item (Join-Path $stage $name) -ErrorAction SilentlyContinue
+          }
+          "STORE_STAGE=$stage" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "STORE_SOURCE_PROJECT_COMMIT=$($run.head_sha)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/repack-reports" | Out-Null
+          @{ source_run_id = $env:SOURCE_RUN_ID; source_project_commit = $run.head_sha; repack_commit = $env:GITHUB_SHA } | ConvertTo-Json | Set-Content "$env:RUNNER_TEMP/repack-reports/source.json"
+      - name: Package the existing game for its reserved GDK product
+        shell: pwsh
+        run: |
+          ./tools/ci/windows-store-package.ps1 `
+            -StagedPath $env:STORE_STAGE `
+            -OutputPath "$env:RUNNER_TEMP/store" `
+            -ReportsPath "$env:RUNNER_TEMP/repack-reports" `
+            -Format msixvc `
+            -IdentityName '14E33A41.Qinglan-PathofAscension' `
+            -PublisherId 'CN=BD412261-9548-4F5A-95C1-24B072A9C1CC' `
+            -PublisherDisplayName 'Zhiqi Zhang' `
+            -StoreId '9NGLSM7P5CMB' `
+            -Version '0.1.0.0'
+      - name: Save MSIXVC package and submission files
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: Qinglan-GDK-Store-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/store/msixvc/*.msixvc
+            ${{ runner.temp }}/store/msixvc/*.ekb
+            ${{ runner.temp }}/store/msixvc/*.xml
+            ${{ runner.temp }}/store/msixvc/*.zip
+            ${{ runner.temp }}/store/MicrosoftGame.config
+            ${{ runner.temp }}/store/store-package-evidence.json
+            ${{ runner.temp }}/store/PARTNER-CENTER-UPLOAD-INSTRUCTIONS.txt
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
+      - name: Save repack diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: store-repack-diagnostics-${{ github.run_id }}
+          path: ${{ runner.temp }}/repack-reports/**
+          retention-days: 3
+          if-no-files-found: warn

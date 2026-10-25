@@ -173,6 +173,13 @@ bool FQinglanTutorialObjectiveGuide::RunTest(const FString& Parameters)
 	if (!TestNotNull(TEXT("Production player"), Fixture.Player) || !TestNotNull(TEXT("Story subsystem"), Story)) { return false; }
 	const UQinglanStoryRegistry* Registry = Story->GetRegistry();
 	if (!TestNotNull(TEXT("Imported narrative"), Registry)) { return false; }
+	FQinglanNarrativeState LegacyDeparture;
+	LegacyDeparture.Flags.Add(TEXT("mq_ch00_complete"));
+	LegacyDeparture.CompletedScenes.Add(TEXT("CH00_S04"));
+	QinglanStoryRuntime::ImportNarrativeState(Story, LegacyDeparture);
+	TestEqual(TEXT("Legacy early departure still has unfinished sanctuary work"), Story->GetTrackedMainSceneId(), FName(TEXT("CH00_S01")));
+	TestEqual(TEXT("An active legacy expedition guides its reachable entrance objective"), QinglanObjectiveGuide::Resolve(Fixture.Player).SceneId, FName(TEXT("CH01_S01")));
+	TestFalse(TEXT("Reachable expedition guidance does not manufacture the skipped courtyard proof"), Story->IsSceneCompleted(TEXT("CH00_S01")));
 	QinglanStoryRuntime::ImportNarrativeState(Story, BeforeScene(Registry, TEXT("CH01_S01")));
 	if (!TestTrue(TEXT("Inspection dialogue begins"), Story->BeginScene(TEXT("CH01_S01")))) { return false; }
 	Story->SkipScene();

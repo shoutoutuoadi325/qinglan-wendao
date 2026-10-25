@@ -38,6 +38,9 @@ objective precisely.
   A locked room boundary retains sideways and backward movement.
 - Require scene prerequisites before automatic guarded completion, and reject
   a premature departure event before the sanctuary route has been read.
+- In an active expedition, keep reachable chapter guidance for older profiles
+  that used the premature departure path. This does not grant their missing
+  sanctuary objectives or rewrite earned progress.
 - Route the gamepad A button to menu/choice confirmation while those views own
   input, retaining dodge in gameplay and Space's ending acknowledgment behavior.
 - Close finished scene subtitles independently of objective completion. Keep

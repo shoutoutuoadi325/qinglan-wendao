@@ -22,6 +22,30 @@ FQinglanObjectiveGuide QinglanObjectiveGuide::Resolve(AQinglanCharacter* Player)
 	if (!Story || !Player->GetWorld()) { return Guide; }
 	Guide.SceneId = Story->GetTrackedMainSceneId();
 	const UQinglanStoryRegistry* Registry = Story->GetRegistry();
+	if (Registry && Run && Run->IsInExpedition() && !Story->IsScenePlaying())
+	{
+		const FString Map = Player->GetWorld()->GetMapName();
+		const FString Prefix = Map.Contains(TEXT("Bamboo")) ? TEXT("bamboo.")
+			: Map.Contains(TEXT("Ashen")) ? TEXT("ashen.") : TEXT("");
+		const FQinglanRegistryScene* Tracked = Registry->FindMainScene(Guide.SceneId);
+		const UQinglanRealmDataAsset* Realm = Run->GetCurrentRealm();
+		if (Realm && !Prefix.IsEmpty() && (!Tracked || !Tracked->Location.ToString().StartsWith(Prefix)))
+		{
+			// Older profiles could depart before the sanctuary chain finished.
+			// Guide the active expedition's real pending work, rather than send
+			// its player toward an unreachable hub objective. No proof is granted.
+			const TArray<FName> Chapters = QinglanInteraction::ChaptersForRealm(Realm->RealmId);
+			for (FName Id : Story->GetPlayableMainScenes())
+			{
+				const FQinglanRegistryScene* Candidate = Registry->FindMainScene(Id);
+				if (Candidate && Chapters.Contains(Candidate->ChapterId) && Candidate->Location.ToString().StartsWith(Prefix))
+				{
+					Guide.SceneId = Id;
+					break;
+				}
+			}
+		}
+	}
 	const FQinglanRegistryScene* Scene = Registry ? Registry->FindMainScene(Guide.SceneId) : nullptr;
 	if (!Scene) { return Guide; }
 	auto FindAnchor = [Player](FName Id) -> AActor*

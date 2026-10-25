@@ -351,6 +351,7 @@ void UQinglanDialogueWidget::SetSourceKind(EQinglanSourceKind SourceKind)
 bool UQinglanDialogueWidget::SetCurrentLine(const FText& InSpeakerName, const FText& InLineText, int32 FontSize)
 {
 	bShowingScenePlayback = false;
+	bShowingRecord = false;
 	CurrentSpeaker = InSpeakerName;
 	CurrentLineText = InLineText;
 	if (SpeakerText)
@@ -522,7 +523,17 @@ bool UQinglanDialogueWidget::ShowRecordEntry(const FText& Title, const FText& Bo
 		Text->SetText(CurrentSourceLabel);
 	}
 	// Records reuse the line presenter: the title reads as the speaker slot.
-	return SetCurrentLine(Title, Body, BodyFontSize);
+	const bool bPresented = SetCurrentLine(Title, Body, BodyFontSize);
+	bShowingRecord = true;
+	return bPresented;
+}
+
+bool UQinglanDialogueWidget::DismissRecord()
+{
+	if (!bShowingRecord) { return false; }
+	SetCurrentLine(FText::GetEmpty(), FText::GetEmpty());
+	RemoveFromParent();
+	return true;
 }
 
 // ---------------------------------------------------------------------------

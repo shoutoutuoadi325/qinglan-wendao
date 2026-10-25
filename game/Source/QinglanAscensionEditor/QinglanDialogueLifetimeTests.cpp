@@ -73,6 +73,10 @@ bool FQinglanDialoguePlaybackLifetime::RunTest(const FString& Parameters)
 	Widget->RefreshScenePlayback(false);
 	TestEqual(TEXT("Independent document remains readable after playback"), Panel->GetVisibility(), ESlateVisibility::Visible);
 	TestEqual(TEXT("Document body is preserved"), Line->GetText().ToString(), FString(TEXT("Document body")));
+	TestTrue(TEXT("Back/pause can dismiss the physical document"), Widget->DismissRecord());
+	TestEqual(TEXT("Document dismissal releases the gameplay view"), Panel->GetVisibility(), ESlateVisibility::Collapsed);
+	TestTrue(TEXT("Dismissed document leaves no stale body"), Line->GetText().IsEmpty());
+	TestFalse(TEXT("A second dismissal does not consume normal pause input"), Widget->DismissRecord());
 	Widget->SetCurrentLine(FText::GetEmpty(), FText::FromString(TEXT("Interaction notice")));
 	Widget->RefreshScenePlayback(false);
 	TestEqual(TEXT("Independent notice is not mistaken for an expired subtitle"), Line->GetText().ToString(), FString(TEXT("Interaction notice")));

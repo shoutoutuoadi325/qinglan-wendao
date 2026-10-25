@@ -943,8 +943,8 @@ void AQinglanCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCo
 	BindMenuKey(EKeys::Gamepad_DPad_Down, [this]() { MoveMenuSelection(1); });
 	BindMenuKey(EKeys::Enter, [this]() { ConfirmMenuSelection(); });
 	BindMenuKey(EKeys::BackSpace, [this]() { CancelMenu(); });
-	// AUD-51: Escape is the explicit menu back/close key (journal included).
-	BindMenuKey(EKeys::Escape, [this]() { CancelMenu(); });
+	// Escape is handled once by IA_Pause, including menu/document dismissal.
+	// A second raw binding would compete with the Enhanced Input action.
 	BindMenuKey(EKeys::Gamepad_FaceButton_Right, [this]() { CancelMenu(); });
 	BindMenuKey(EKeys::Gamepad_Special_Left, [this]() { CancelMenu(); });
 	BindMenuKey(EKeys::SpaceBar, [this]()
@@ -1173,6 +1173,8 @@ void AQinglanCharacter::InputInteract(const FInputActionValue& /*Value*/)
 
 void AQinglanCharacter::InputPause(const FInputActionValue& /*Value*/)
 {
+	if (UQinglanDialogueWidget* Dialogue = Cast<UQinglanDialogueWidget>(DialogueWidget.Get());
+		Dialogue && Dialogue->DismissRecord()) { return; }
 	if (EndingWidget.IsValid() && EndingWidget->IsInViewport())
 	{
 		CancelMenu();
@@ -2312,6 +2314,8 @@ void AQinglanCharacter::ConfirmMenuSelection()
 
 void AQinglanCharacter::CancelMenu()
 {
+	if (UQinglanDialogueWidget* Dialogue = Cast<UQinglanDialogueWidget>(DialogueWidget.Get());
+		Dialogue && Dialogue->DismissRecord()) { return; }
 	if (UQinglanEndingWidget* Ending = EndingWidget.Get(); Ending && Ending->IsInViewport())
 	{
 		Ending->CancelPreview();

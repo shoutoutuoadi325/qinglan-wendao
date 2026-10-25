@@ -43,6 +43,9 @@ objective precisely.
 - Close finished scene subtitles independently of objective completion. Keep
   document/notice content independent, and present gameplay notices through
   the ordinary Shipping HUD instead of the engine debug-message fallback.
+- Give physical document panels an explicit Back/Pause dismissal path. Handle
+  Escape through the pause input action once, rather than competing raw-key
+  and Enhanced Input bindings.
 - Refresh only the two localization tables before Windows tests and cooking;
   preserve technique assets and their animation references. Rebuild current
   project Editor modules instead of executing older cached project DLLs.

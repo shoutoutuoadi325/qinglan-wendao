@@ -441,6 +441,8 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Qinglan|Dialogue")
 	bool ShowRecordEntry(const FText& Title, const FText& Body, int32 BodyFontSize = 0);
+	/** Closes a physical document viewer without opening the pause menu. */
+	bool DismissRecord();
 
 	UPROPERTY(BlueprintReadOnly, Category = "Qinglan|Dialogue") FText CurrentSpeaker;
 	UPROPERTY(BlueprintReadOnly, Category = "Qinglan|Dialogue") FText CurrentLineText;
@@ -472,6 +474,7 @@ private:
 	UPROPERTY(Transient) TArray<TObjectPtr<UQinglanDialogueChoiceClickRelay>> ChoiceClickRelays;
 	int32 SelectedChoiceIndex = INDEX_NONE;
 	bool bShowingScenePlayback = false;
+	bool bShowingRecord = false;
 };
 
 /** Combat HUD: vitals, techniques+cooldowns, talisman charges, objectives. */

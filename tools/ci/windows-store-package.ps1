@@ -189,6 +189,20 @@ if ($Format -in @('both', 'msixvc')) {
         throw 'makepkg.exe is unavailable. The requested GDK package was not produced.'
     } else {
         Write-Host "Using makepkg at: $makepkg"
+        # The SDK ships an older validator. Microsoft requires the current
+        # signed release at submission even when the packaging SDK is supported.
+        $subvalUrl = 'https://developer.microsoft.com/content/dam/microsoftgamedev/subval/SubmissionValidator2610.309.15000.0.zip'
+        $subvalHash = 'cbe4a3657ab7a3833106c8f164e05e394e2f29db93653f8c3013d03b5d53beed'
+        $subvalZip = Join-Path $env:RUNNER_TEMP 'submission-validator.zip'
+        Invoke-WebRequest -Uri $subvalUrl -OutFile $subvalZip -MaximumRedirection 5
+        if ((Get-FileHash $subvalZip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $subvalHash) {
+            throw 'Current Microsoft Submission Validator ZIP SHA-256 mismatch.'
+        }
+        $toolDirectory = Split-Path -Parent $makepkg
+        & 7z x $subvalZip "-o$toolDirectory" -y -bso0 -bsp0
+        if ($LASTEXITCODE) { throw "Submission Validator extraction failed ($LASTEXITCODE)." }
+        Remove-Item $subvalZip
+        Write-Host "Submission Validator: $((Get-Item (Join-Path $toolDirectory 'SubmissionValidator.dll')).VersionInfo.FileVersion)"
 
         # Generate MicrosoftGame.config
         $xmlLines = [Collections.Generic.List[string]]::new()

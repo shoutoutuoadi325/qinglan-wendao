@@ -815,6 +815,7 @@ void AQinglanCharacter::PossessedBy(AController* NewController)
 void AQinglanCharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	RefreshFinishedSceneDialogue();
 
 	// AUD-32: paused-game-time action clock; DeltaSeconds stops while paused.
 	ActionClock += DeltaSeconds;
@@ -1133,6 +1134,7 @@ void AQinglanCharacter::InputInteract(const FInputActionValue& /*Value*/)
 	if (Story && Story->IsScenePlaying())
 	{
 		UQinglanHUDStatics::AdvanceDialogueLine(this);
+		RefreshFinishedSceneDialogue();
 		return;
 	}
 	if (AQinglanInteractable* const Interactable = QinglanFindAimedInteractable(this))
@@ -1866,6 +1868,16 @@ void AQinglanCharacter::EnsureHudCreated()
 	}
 }
 
+void AQinglanCharacter::RefreshFinishedSceneDialogue()
+{
+	if (UQinglanDialogueWidget* Dialogue = Cast<UQinglanDialogueWidget>(DialogueWidget.Get()))
+	{
+		const UGameInstance* Instance = GetGameInstance();
+		const UQinglanStorySubsystem* Story = Instance ? Instance->GetSubsystem<UQinglanStorySubsystem>() : nullptr;
+		Dialogue->RefreshScenePlayback(Story && Story->IsScenePlaying());
+	}
+}
+
 UUserWidget* AQinglanCharacter::EnsureDialogueWidget()
 {
 	if (UUserWidget* Widget = DialogueWidget.Get())
@@ -2389,7 +2401,7 @@ void AQinglanCharacter::HandleSceneLine(const FQinglanScriptLine& Line)
 		if (UQinglanDialogueWidget* Dialogue = Cast<UQinglanDialogueWidget>(Widget))
 		{
 			Dialogue->SetSourceKind(Line.SourceKind);
-			if (Dialogue->SetCurrentLine(Line.SpeakerName, Line.Text))
+			if (Dialogue->SetScenePlaybackLine(Line.SpeakerName, Line.Text))
 			{
 				return; // rendered into Txt_Speaker/Txt_Line
 			}
@@ -2893,6 +2905,14 @@ void AQinglanCharacter::PresentShopOffer(const TArray<FQinglanShopOfferEntry>& E
 
 void AQinglanCharacter::ShowGameMessage(const FText& Message)
 {
+	// Shipping builds do not draw the engine's debug-message fallback. Keep
+	// interaction and blocked-action notices in the normal HUD, without
+	// reopening a finished conversation over the player's view.
+	if (UQinglanHUDWidget* HUD = Cast<UQinglanHUDWidget>(HudWidget.Get()))
+	{
+		HUD->ShowBarkLine(FText::GetEmpty(), Message);
+		return;
+	}
 	if (UUserWidget* Widget = DialogueWidget.Get())
 	{
 		if (Widget->IsInViewport())

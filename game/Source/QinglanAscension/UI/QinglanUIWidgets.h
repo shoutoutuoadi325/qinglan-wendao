@@ -390,7 +390,7 @@ private:
 
 /** Dialogue subtitle + choices presenter; drives via StorySubsystem events. */
 UCLASS(Abstract)
-class UQinglanDialogueWidget : public UUserWidget
+class QINGLANASCENSION_API UQinglanDialogueWidget : public UUserWidget
 {
 	GENERATED_BODY()
 public:
@@ -415,6 +415,10 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Qinglan|Dialogue")
 	bool SetCurrentLine(const FText& SpeakerName, const FText& LineText, int32 FontSize = 0);
+	/** Scene subtitles expire when playback finishes; notices/records do not. */
+	bool SetScenePlaybackLine(const FText& SpeakerName, const FText& LineText);
+	/** Clears only finished scene subtitles, leaving gameplay proof pending. */
+	void RefreshScenePlayback(bool bScenePlaying);
 	/** Present the authored live/letter/paper/system/memory/recorded classification. */
 	void SetSourceKind(EQinglanSourceKind SourceKind);
 	/**
@@ -467,6 +471,7 @@ private:
 	UPROPERTY(Transient) TArray<TObjectPtr<UButton>> ChoiceButtons;
 	UPROPERTY(Transient) TArray<TObjectPtr<UQinglanDialogueChoiceClickRelay>> ChoiceClickRelays;
 	int32 SelectedChoiceIndex = INDEX_NONE;
+	bool bShowingScenePlayback = false;
 };
 
 /** Combat HUD: vitals, techniques+cooldowns, talisman charges, objectives. */

@@ -269,6 +269,8 @@ protected:
 	void EnsureHudCreated();
 	/** Creates (once) and returns the dialogue presenter; null until first shown. */
 	UUserWidget* EnsureDialogueWidget();
+	/** Dialogue visibility ends with playback, independently of objective proof. */
+	void RefreshFinishedSceneDialogue();
 	UQinglanEndingWidget* EnsureEndingWidget();
 	/** AUD-51: lazily created native menu/journal widgets. */
 	UQinglanMenuWidget* EnsureMenuWidget();

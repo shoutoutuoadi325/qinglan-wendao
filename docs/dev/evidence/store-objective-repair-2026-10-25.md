@@ -15,6 +15,16 @@ on 2026-10-25 reproduces a blank starting task display: "No active
 objective" after creating an empty profile. The local screenshot is
 `.local/certification-repro/baseline-no-objective.png`.
 
+A separate packaged Mac Shipping session reproduced two further symptoms
+through ordinary keyboard input: after ringing the opening bell, the HUD
+changes to the unrelated "Read both returned signatures" objective; after
+finishing the six training lines, the large dialogue panel remains visible
+while movement is already enabled. Captures are
+`.local/certification-repro/baseline-bell-wrong-objective.png` and
+`.local/certification-repro/baseline-training-panel-stale.png`. These are Mac
+runtime observations; the certification report does not identify its Windows
+objective precisely.
+
 ## Changes
 
 - Track the earliest unfinished available main scene independently of the
@@ -30,6 +40,9 @@ objective" after creating an empty profile. The local screenshot is
   a premature departure event before the sanctuary route has been read.
 - Route the gamepad A button to menu/choice confirmation while those views own
   input, retaining dodge in gameplay and Space's ending acknowledgment behavior.
+- Close finished scene subtitles independently of objective completion. Keep
+  document/notice content independent, and present gameplay notices through
+  the ordinary Shipping HUD instead of the engine debug-message fallback.
 - Refresh only the two localization tables before Windows tests and cooking;
   preserve technique assets and their animation references. Rebuild current
   project Editor modules instead of executing older cached project DLLs.

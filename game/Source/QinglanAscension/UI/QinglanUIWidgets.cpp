@@ -350,6 +350,7 @@ void UQinglanDialogueWidget::SetSourceKind(EQinglanSourceKind SourceKind)
 
 bool UQinglanDialogueWidget::SetCurrentLine(const FText& InSpeakerName, const FText& InLineText, int32 FontSize)
 {
+	bShowingScenePlayback = false;
 	CurrentSpeaker = InSpeakerName;
 	CurrentLineText = InLineText;
 	if (SpeakerText)
@@ -375,6 +376,25 @@ bool UQinglanDialogueWidget::SetCurrentLine(const FText& InSpeakerName, const FT
 			? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
 	}
 	return SpeakerText || LineText;
+}
+
+bool UQinglanDialogueWidget::SetScenePlaybackLine(const FText& SpeakerName, const FText& Line)
+{
+	const bool bPresented = SetCurrentLine(SpeakerName, Line);
+	bShowingScenePlayback = true;
+	return bPresented;
+}
+
+void UQinglanDialogueWidget::RefreshScenePlayback(bool bScenePlaying)
+{
+	if (bShowingScenePlayback && !bScenePlaying && CurrentChoices.IsEmpty())
+	{
+		// Choice-free conversations end before their combat/inspection proof.
+		// Release the large subtitle panel so the player can see and perform
+		// that proof. Independent record/notice content keeps its own lifetime.
+		SetCurrentLine(FText::GetEmpty(), FText::GetEmpty());
+		RemoveFromParent();
+	}
 }
 
 bool UQinglanDialogueWidget::SetChoiceEntries(const TArray<FQinglanSceneChoice>& Choices)

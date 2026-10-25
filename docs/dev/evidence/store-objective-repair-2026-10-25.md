@@ -83,6 +83,35 @@ importing its snapshot to isolate unread-document destination selection.
 It resolves the authored choice before asserting scene completion; document
 reads alone do not imply choice completion.
 
+A second current-source report, with `QINGLAN_RUN_CAMPAIGN=1`, also passes
+the strict validator with all 100 named tests successful and neither campaign
+opted out: `.local/certification-repro/focused-20261025T145403Z/index.json`
+(SHA-256 `65d6e14ef11513e1e6dd1ebcfba48ab452757f9465261e9830c4862c4031d5e7`).
+Its native journey manifests are 30/30 main scenes and 24/24 side stages,
+zero blocked. These harness journeys use their documented fixture inputs;
+they are not an ordinary-input combat playthrough. Seventeen tests record
+warnings, with zero failures/errors in the validated report.
+
+Rendered Mac input observations on current gameplay source `5647399`:
+new profile immediately shows the courtyard objective; finishing its response
+tracks training rather than an unrelated side quest; training instructions
+close; ordinary near-post J presses produce three accepted hits and advance
+the hint to dodge; Space, 1, 2 and shrine E complete training; reading the
+physical route letter advances to the gate and Esc dismisses it; entering
+Bamboo, reading both entrance plates, and walking across the first room edge
+advance the objective and start the actual encounter. A read-only `showdebug`
+overlay was used briefly to inspect position/direction during door traversal,
+then reset. No position/proof/attribute cheat was used. Leaving the player
+stationary during the encounter causes normal defeat; restart retains the
+earned narrative progress and correct next objective. Captures live under
+`.local/certification-repro/fixed-*.png`.
+
+Replacement Windows package run: `40202871030`, gameplay source
+`56473995a28a231f9e5e2620c2ab32ecd60a3c87`, requested Store version 0.1.1.0.
+It uses the previous licensed UE 5.8.3 source/cache and GDK MSIXVC route.
+Preflight and cache restoration succeeded; native Windows test and package
+completion evidence must come from this run's final artifacts.
+
 New native regression registrations cover tracking across dialogue/reload,
 proof-specific guidance, physical inspection destinations, premature gate
 rejection, visible exits, walking transitions and encounter/dialogue locks,

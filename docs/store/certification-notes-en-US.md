@@ -29,7 +29,7 @@ is required. There are no advertisements, subscriptions or in-app purchases.
    finish. Follow the marker to the sanctuary shrine and interact to recover.
 5. Finish the route-letter conversation. Read the marked physical letter
    with E/Y; Esc/Menu closes its record viewer. Go to the marked bamboo gate
-   and interact to confirm departure, then interact to enter Bamboo Hollow.
+   and interact to enter Bamboo Hollow.
 6. Read the marked water marks and delivery note after the entrance
    conversation. Proceed through the marked gateways to the two guided
    encounters, defeat the enemies, and select a blessing when offered.

@@ -215,7 +215,6 @@ if ($Format -in @('both', 'msixvc')) {
         $xmlLines.Add('    Description="An offline cultivation adventure."')
         $xmlLines.Add('    BackgroundColor="#17212A"')
         $xmlLines.Add('    SplashScreenImage="Assets\SplashScreenImage.png" />')
-        $xmlLines.Add('  <ProcessorArchitecture>x64</ProcessorArchitecture>')
         $xmlLines.Add('</Game>')
         $gameConfig = $xmlLines -join "`n"
 

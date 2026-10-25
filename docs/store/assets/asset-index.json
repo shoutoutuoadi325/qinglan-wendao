@@ -1,0 +1,80 @@
+[
+  {
+    "source": "docs/store/assets/source/Qinglan-Emblem.svg",
+    "output": "packaging/windows/assets/Square44x44Logo.png",
+    "width": 44,
+    "height": 44
+  },
+  {
+    "source": "docs/store/assets/source/Qinglan-Emblem.svg",
+    "output": "packaging/windows/assets/StoreLogo.png",
+    "width": 100,
+    "height": 100
+  },
+  {
+    "source": "docs/store/assets/source/Qinglan-Emblem.svg",
+    "output": "packaging/windows/assets/Square150x150Logo.png",
+    "width": 150,
+    "height": 150
+  },
+  {
+    "source": "docs/store/assets/source/Qinglan-Emblem.svg",
+    "output": "packaging/windows/assets/Square300x300Logo.png",
+    "width": 300,
+    "height": 300
+  },
+  {
+    "source": "docs/store/assets/source/Qinglan-Emblem.svg",
+    "output": "packaging/windows/assets/Square480x480Logo.png",
+    "width": 480,
+    "height": 480
+  },
+  {
+    "source": "docs/store/assets/source/Qinglan-Emblem.svg",
+    "output": "packaging/windows/assets/Square1080x1080Logo.png",
+    "width": 1080,
+    "height": 1080
+  },
+  {
+    "source": "docs/store/assets/source/Qinglan-Landscape-Cover.svg",
+    "output": "packaging/windows/assets/SplashScreenImage.png",
+    "width": 1920,
+    "height": 1080
+  },
+  {
+    "source": "docs/store/assets/source/Qinglan-Landscape-Cover.svg",
+    "output": "docs/store/assets/Qinglan-Landscape-1920x1080.png",
+    "width": 1920,
+    "height": 1080
+  },
+  {
+    "source": "docs/store/assets/source/Qinglan-Portrait-Cover.svg",
+    "output": "docs/store/assets/Qinglan-Portrait-768x1152.png",
+    "width": 768,
+    "height": 1152
+  },
+  {
+    "source": "docs/store/assets/source/Qinglan-Portrait-Cover.svg",
+    "output": "docs/store/assets/Qinglan-Poster-720x1080.png",
+    "width": 720,
+    "height": 1080
+  },
+  {
+    "source": "docs/store/assets/source/Qinglan-Portrait-Cover.svg",
+    "output": "docs/store/assets/Qinglan-Portrait-1440x2160.png",
+    "width": 1440,
+    "height": 2160
+  },
+  {
+    "source": "docs/store/assets/source/Qinglan-Square-Cover.svg",
+    "output": "docs/store/assets/Qinglan-Square-Cover-1080.png",
+    "width": 1080,
+    "height": 1080
+  },
+  {
+    "source": "docs/store/assets/source/Qinglan-Superhero.svg",
+    "output": "docs/store/assets/Qinglan-Superhero-1920x1080.png",
+    "width": 1920,
+    "height": 1080
+  }
+]

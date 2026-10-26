@@ -2,20 +2,33 @@
 
 A completely free, offline, single-player **3D xianxia action game** for Windows and Apple Silicon macOS. Explore mountain sanctuaries, master the Five Elements, and survive Heavenly Tribulations with grounded materials and cinematic, scalable spell effects.
 
-## Play the macOS alpha
+## Download & Play (Windows & macOS)
 
-> **Early unsigned alpha.** The macOS build is not signed with an Apple
-> Developer ID and is not notarized. macOS will warn on first launch; the
-> steps below explain the per-app override. Only download from this
-> repository's [Releases](https://github.com/shoutoutuoadi325/qinglan-wendao/releases).
+> **Release v0.1.1.** Binaries are available for Windows 64-bit and Apple
+> Silicon macOS. On macOS, the build is ad-hoc signed and Gatekeeper will
+> show an initial prompt; follow the install steps below. On Windows, a
+> standalone direct-play archive is available, and the Microsoft Store package
+> (v0.1.1.0) is currently in the Store certification review pipeline.
+> Only download from this repository's [Releases](https://github.com/shoutoutuoadi325/qinglan-wendao/releases).
 
 | Platform | Download | Requirements |
 | --- | --- | --- |
-| macOS (Apple Silicon) | [Releases](https://github.com/shoutoutuoadi325/qinglan-wendao/releases) | macOS 14.0+, M1 or newer, about 2 GB free disk |
+| **Windows 64-bit** (Direct) | [Releases](https://github.com/shoutoutuoadi325/qinglan-wendao/releases) (`Qinglan-0.1.1-Windows-x64.zip`) | Windows 10/11 64-bit, DirectX 12 GPU, VC++ 2015-2022 x64, ~2 GB free disk |
+| **Windows** (Microsoft Store) | [Microsoft Store](https://partner.microsoft.com/en-us/dashboard/products/9NGLSM7P5CMB/overview) | Store package v0.1.1.0 (Store ID: 9NGLSM7P5CMB, in certification) |
+| **macOS (Apple Silicon)** | [Releases](https://github.com/shoutoutuoadi325/qinglan-wendao/releases) (`Qinglan-0.1.1-macOS-arm64.dmg`) | macOS 14.0+, Apple Silicon (M1 or newer), ~2 GB free disk |
 
-**Install**
+### Windows Installation & Play
 
-1. Download `Qinglan-0.1.0-alpha.2-macOS-arm64.dmg` and `SHA256SUMS` from the
+1. Download `Qinglan-0.1.1-Windows-x64.zip` and `SHA256SUMS` from the release.
+2. Verify checksum: `shasum -a 256 -c SHA256SUMS` (or use CertUtil in PowerShell: `Get-FileHash Qinglan-0.1.1-Windows-x64.zip`).
+3. Extract the ZIP archive to a folder of your choice (e.g. `C:\Games\Qinglan`).
+4. Run `Launch-Qinglan.bat` or `QinglanAscension\Binaries\Win64\QinglanAscension-Win64-Shipping.exe`.
+
+**Windows Save data:** `%LOCALAPPDATA%\QinglanAscension\Saved\SaveGames\`.
+
+### macOS Installation & Play
+
+1. Download `Qinglan-0.1.1-macOS-arm64.dmg` and `SHA256SUMS` from the
    release into the same folder.
 2. Verify the download: `shasum -a 256 -c SHA256SUMS`.
 3. Open the DMG and drag **Qinglan - Path of Ascension** into **Applications**.
@@ -26,15 +39,16 @@ A completely free, offline, single-player **3D xianxia action game** for Windows
    `xattr -dr com.apple.quarantine "/Applications/Qinglan - Path of Ascension.app"`.
 
 Never run `sudo spctl --master-disable` and never disable Gatekeeper globally.
-The build is ad-hoc signed, not Developer ID signed or notarized; see the
+The macOS build is ad-hoc signed, not Developer ID signed or notarized; see the
 [distribution guide](docs/09-distribution.md) for the release policy.
 
-**Save data:** `~/Library/Containers/io.github.shoutoutuoadi325.qinglan/Data/`.
+**macOS Save data:** `~/Library/Containers/io.github.shoutoutuoadi325.qinglan/Data/`.
 
-**Current limits:** early alpha; the full campaign is not yet interactively
+**Current limits:** early release; the full campaign is not yet interactively
 verified end to end, gamepad support is unverified, there is no auto-update,
-and save compatibility across versions is not guaranteed. Windows builds are
-not included. See the [v0.1.0-alpha.2 release notes](docs/releases/v0.1.0-alpha.2.md).
+and save compatibility across versions is not guaranteed. See the [v0.1.1 release notes](docs/releases/v0.1.1.md).
+
+**Windows CI & Store Packaging (2026-10-26):** automated GitHub Actions CI pipeline produces both standalone Win64 Shipping and Microsoft Store MSIXVC packages. Windows regression suite is green at **100/100 tests**, GDK SubmissionValidator confirms 0 failures and 0 warnings, and package v0.1.1.0 has been submitted to Microsoft Partner Center for Store certification.
 
 **Project status (2026-10-20):** in active development on Linux (UE 5.8 source build). The `game/` Unreal project contains C++ implementations for combat, abilities, AI, progression, persistence, narrative, trials, UI, and a headless content pipeline (maps, materials, characters, montages, string tables, Niagara cue systems). Current recorded results: editor build green; automation **70/70**; functional new-profile journeys **30/30 main scenes** and **24/24 side stages**; clean content regeneration `rc_all=0`; Linux Shipping package `rc=0` with a verified IoStore inventory; rendered packaged boots in English, Simplified Chinese, and Low + low-flash; packaged keyboard/mouse movement, cold-start slot selection, and a real `kill -9`/relaunch at the hub boundary. **These results establish compilation, scripted subsystem behavior, packaging, and targeted rendered evidence; they do not establish a complete interactive playthrough.** Windows DX12 and Apple Silicon Metal builds/devices, a full keyboard/gamepad playthrough, and target-hardware performance captures remain open. See [docs/dev/build-and-run.md](docs/dev/build-and-run.md), [docs/dev/test-report.md](docs/dev/test-report.md), and the [owner runbook](docs/dev/remaining-acceptance-runbook.md).
 

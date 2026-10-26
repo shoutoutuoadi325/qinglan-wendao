@@ -14,7 +14,7 @@ A completely free, offline, single-player **3D xianxia action game** for Windows
 | Platform | Download | Requirements |
 | --- | --- | --- |
 | **Windows 64-bit** (Direct) | [Releases](https://github.com/shoutoutuoadi325/qinglan-wendao/releases) (`Qinglan-0.1.1-Windows-x64.zip`) | Windows 10/11 64-bit, DirectX 12 GPU, VC++ 2015-2022 x64, ~2 GB free disk |
-| **Windows** (Microsoft Store) | [Microsoft Store](https://apps.microsoft.com/detail/9NGLSM7P5CMB) | Store ID: `9NGLSM7P5CMB` (v0.1.1.0 in certification; public listing goes live upon review approval) |
+| **Windows** (Microsoft Store) | [Microsoft Store](https://apps.microsoft.com/detail/9NGLSM7P5CMB) | Store ID: `9NGLSM7P5CMB` (Official store package v0.1.1.0, In the Microsoft Store) |
 | **macOS (Apple Silicon)** | [Releases](https://github.com/shoutoutuoadi325/qinglan-wendao/releases) (`Qinglan-0.1.1-macOS-arm64.dmg`) | macOS 14.0+, Apple Silicon (M1 or newer), ~2 GB free disk |
 
 ### Windows Installation & Play
@@ -48,7 +48,7 @@ The macOS build is ad-hoc signed, not Developer ID signed or notarized; see the
 verified end to end, gamepad support is unverified, there is no auto-update,
 and save compatibility across versions is not guaranteed. See the [v0.1.1 release notes](docs/releases/v0.1.1.md).
 
-**Windows CI & Store Packaging (2026-10-26):** automated GitHub Actions CI pipeline produces both standalone Win64 Shipping and Microsoft Store MSIXVC packages. Windows regression suite is green at **100/100 tests**, GDK SubmissionValidator confirms 0 failures and 0 warnings, and package v0.1.1.0 has been submitted to Microsoft Partner Center for Store certification.
+**Windows CI & Store Packaging (2026-10-26):** automated GitHub Actions CI pipeline produces both standalone Win64 Shipping and Microsoft Store MSIXVC packages. Windows regression suite is green at **100/100 tests**, GDK SubmissionValidator confirms 0 failures and 0 warnings, and package v0.1.1.0 has been certified and published to the Microsoft Store (`Status: In the Microsoft Store`).
 
 **Project status (2026-10-20):** in active development on Linux (UE 5.8 source build). The `game/` Unreal project contains C++ implementations for combat, abilities, AI, progression, persistence, narrative, trials, UI, and a headless content pipeline (maps, materials, characters, montages, string tables, Niagara cue systems). Current recorded results: editor build green; automation **70/70**; functional new-profile journeys **30/30 main scenes** and **24/24 side stages**; clean content regeneration `rc_all=0`; Linux Shipping package `rc=0` with a verified IoStore inventory; rendered packaged boots in English, Simplified Chinese, and Low + low-flash; packaged keyboard/mouse movement, cold-start slot selection, and a real `kill -9`/relaunch at the hub boundary. **These results establish compilation, scripted subsystem behavior, packaging, and targeted rendered evidence; they do not establish a complete interactive playthrough.** Windows DX12 and Apple Silicon Metal builds/devices, a full keyboard/gamepad playthrough, and target-hardware performance captures remain open. See [docs/dev/build-and-run.md](docs/dev/build-and-run.md), [docs/dev/test-report.md](docs/dev/test-report.md), and the [owner runbook](docs/dev/remaining-acceptance-runbook.md).
 

@@ -14,7 +14,7 @@ A completely free, offline, single-player **3D xianxia action game** for Windows
 | Platform | Download | Requirements |
 | --- | --- | --- |
 | **Windows 64-bit** (Direct) | [Releases](https://github.com/shoutoutuoadi325/qinglan-wendao/releases) (`Qinglan-0.1.1-Windows-x64.zip`) | Windows 10/11 64-bit, DirectX 12 GPU, VC++ 2015-2022 x64, ~2 GB free disk |
-| **Windows** (Microsoft Store) | [Microsoft Store](https://partner.microsoft.com/en-us/dashboard/products/9NGLSM7P5CMB/overview) | Store package v0.1.1.0 (Store ID: 9NGLSM7P5CMB, in certification) |
+| **Windows** (Microsoft Store) | [Microsoft Store](https://apps.microsoft.com/detail/9NGLSM7P5CMB) | Store ID: `9NGLSM7P5CMB` (v0.1.1.0 in certification; public listing goes live upon review approval) |
 | **macOS (Apple Silicon)** | [Releases](https://github.com/shoutoutuoadi325/qinglan-wendao/releases) (`Qinglan-0.1.1-macOS-arm64.dmg`) | macOS 14.0+, Apple Silicon (M1 or newer), ~2 GB free disk |
 
 ### Windows Installation & Play

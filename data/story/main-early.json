@@ -121,7 +121,15 @@
         {
           "id": "CH00_S01_OBJECTIVE",
           "text_key": "story.ch00.s01.objective",
-          "completion": "Bell pulled; mandatory exchange completed or skipped; one response explicitly selected; safe courtyard checkpoint saved"
+          "completion": "Bell pulled; mandatory exchange completed or skipped; one response explicitly selected; safe courtyard checkpoint saved",
+          "proof": {
+            "all_of": [
+              {
+                "kind": "event",
+                "event": "interact.bell_pulled"
+              }
+            ]
+          }
         }
       ],
       "sets_flags": [
@@ -206,7 +214,32 @@
         {
           "id": "CH00_S02_OBJECTIVE",
           "text_key": "story.ch00.s02.objective",
-          "completion": "Training sword hits, one telegraphed dodge, Jade Sword Arc cast, Flowing Ward cast, and shrine recovery registered; safe shrine checkpoint saved"
+          "completion": "Training sword hits, one telegraphed dodge, Jade Sword Arc cast, Flowing Ward cast, and shrine recovery registered; safe shrine checkpoint saved",
+          "proof": {
+            "all_of": [
+              {
+                "kind": "event_count",
+                "event": "combat.sword_hit",
+                "count": 3
+              },
+              {
+                "kind": "event",
+                "event": "combat.dodge"
+              },
+              {
+                "kind": "event",
+                "event": "cast.jade_sword_arc"
+              },
+              {
+                "kind": "event",
+                "event": "cast.flowing_ward"
+              },
+              {
+                "kind": "event",
+                "event": "shrine.recovery_used"
+              }
+            ]
+          }
         }
       ],
       "sets_flags": [
@@ -291,7 +324,15 @@
         {
           "id": "CH00_S03_OBJECTIVE",
           "text_key": "story.ch00.s03.objective",
-          "completion": "Dated route letter opened or mandatory text skipped into journal; Lan exchange completed; safe shrine checkpoint saved"
+          "completion": "Dated route letter opened or mandatory text skipped into journal; Lan exchange completed; safe shrine checkpoint saved",
+          "proof": {
+            "all_of": [
+              {
+                "kind": "event",
+                "event": "record.opened.route_letter"
+              }
+            ]
+          }
         }
       ],
       "sets_flags": [
@@ -371,7 +412,15 @@
         {
           "id": "CH00_S04_OBJECTIVE",
           "text_key": "story.ch00.s04.objective",
-          "completion": "Gate conversation completed or skipped; player confirms guided route; Bamboo entrance safe checkpoint saved"
+          "completion": "Gate conversation completed or skipped; player confirms guided route; Bamboo entrance safe checkpoint saved",
+          "proof": {
+            "all_of": [
+              {
+                "kind": "event",
+                "event": "interact.departure_confirmed"
+              }
+            ]
+          }
         }
       ],
       "sets_flags": [
@@ -445,7 +494,19 @@
         {
           "id": "CH01_S01_OBJECTIVE",
           "text_key": "story.ch01.s01.objective",
-          "completion": "Water marks and current-season delivery note examined; mandatory dialogue completed or skipped; entrance checkpoint saved"
+          "completion": "Water marks and current-season delivery note examined; mandatory dialogue completed or skipped; entrance checkpoint saved",
+          "proof": {
+            "all_of": [
+              {
+                "kind": "event",
+                "event": "record.opened.water_marks"
+              },
+              {
+                "kind": "event",
+                "event": "record.opened.delivery_note"
+              }
+            ]
+          }
         }
       ],
       "sets_flags": [
@@ -520,7 +581,31 @@
         {
           "id": "CH01_S02_OBJECTIVE",
           "text_key": "story.ch01.s02.objective",
-          "completion": "Guided encounters cleared; blessing selected; inspection shutter tested; safe room-3 shrine reached"
+          "completion": "Guided encounters cleared; blessing selected; inspection shutter tested; safe room-3 shrine reached",
+          "proof": {
+            "all_of": [
+              {
+                "kind": "event",
+                "event": "encounter.room_cleared.tutorial.1"
+              },
+              {
+                "kind": "event",
+                "event": "encounter.room_cleared.tutorial.2"
+              },
+              {
+                "kind": "event",
+                "event": "blessing.taken"
+              },
+              {
+                "kind": "event",
+                "event": "device.shutter_tested"
+              },
+              {
+                "kind": "event",
+                "event": "shrine.room3_reached"
+              }
+            ]
+          }
         }
       ],
       "sets_flags": [
@@ -625,7 +710,15 @@
         {
           "id": "CH01_S03_OBJECTIVE",
           "text_key": "story.ch01.s03.objective",
-          "completion": "Guided rewards banked; mandatory ledger exchange completed or skipped; response chosen; hub checkpoint saved"
+          "completion": "Guided rewards banked; mandatory ledger exchange completed or skipped; response chosen; hub checkpoint saved",
+          "proof": {
+            "all_of": [
+              {
+                "kind": "event",
+                "event": "bank.reward_banked"
+              }
+            ]
+          }
         }
       ],
       "sets_flags": [
@@ -696,7 +789,19 @@
         {
           "id": "CH02_S01_OBJECTIVE",
           "text_key": "story.ch02.s01.objective",
-          "completion": "Loadout confirmed; pressure dial inspected; expedition entrance checkpoint saved"
+          "completion": "Loadout confirmed; pressure dial inspected; expedition entrance checkpoint saved",
+          "proof": {
+            "all_of": [
+              {
+                "kind": "event",
+                "event": "loadout.confirmed"
+              },
+              {
+                "kind": "event",
+                "event": "record.opened.pressure_dial"
+              }
+            ]
+          }
         }
       ],
       "sets_flags": [
@@ -772,7 +877,15 @@
         {
           "id": "CH02_S02_OBJECTIVE",
           "text_key": "story.ch02.s02.objective",
-          "completion": "Bamboo Guardian defeated; boss clear/proof and pending reward transaction committed at safe reward screen; currency/materials bank only on sanctuary return"
+          "completion": "Bamboo Guardian defeated; boss clear/proof and pending reward transaction committed at safe reward screen; currency/materials bank only on sanctuary return",
+          "proof": {
+            "all_of": [
+              {
+                "kind": "event",
+                "event": "encounter.boss_defeated.bamboo"
+              }
+            ]
+          }
         }
       ],
       "sets_flags": [
@@ -870,7 +983,15 @@
         {
           "id": "CH02_S03_OBJECTIVE",
           "text_key": "story.ch02.s03.objective",
-          "completion": "Single reconnection animation and mandatory living-voice exchange completed or skipped; anchor state and story flag atomically saved at safe controls"
+          "completion": "Single reconnection animation and mandatory living-voice exchange completed or skipped; anchor state and story flag atomically saved at safe controls",
+          "proof": {
+            "all_of": [
+              {
+                "kind": "event",
+                "event": "exit.reconnect_ack"
+              }
+            ]
+          }
         }
       ],
       "sets_flags": [
@@ -1064,7 +1185,19 @@
         {
           "id": "CH03_S01_OBJECTIVE",
           "text_key": "story.ch03.s01.objective",
-          "completion": "Mandatory preparation exchange complete; profile has all three Qi Refining ranks and Bamboo first-clear proof; trial admission confirmed at shrine checkpoint"
+          "completion": "Mandatory preparation exchange complete; profile has all three Qi Refining ranks and Bamboo first-clear proof; trial admission confirmed at shrine checkpoint",
+          "proof": {
+            "all_of": [
+              {
+                "kind": "event",
+                "event": "cultivation.qi_rank_3"
+              },
+              {
+                "kind": "event",
+                "event": "trial.admission_confirmed"
+              }
+            ]
+          }
         }
       ],
       "sets_flags": [
@@ -1116,6 +1249,7 @@
         {
           "speaker": "Apprentice",
           "text_key": "story.ch03.s02.line_03",
+          "trigger": "trial.lightning_wave_1",
           "speaker_key": "story.speaker.apprentice",
           "source_kind": "live",
           "source_kind_key": "story.speaker.source.live"
@@ -1123,6 +1257,7 @@
         {
           "speaker": "Apprentice",
           "text_key": "story.ch03.s02.line_04",
+          "trigger": "trial.lightning_wave_2",
           "speaker_key": "story.speaker.apprentice",
           "source_kind": "live",
           "source_kind_key": "story.speaker.source.live"
@@ -1130,6 +1265,7 @@
         {
           "speaker": "Apprentice",
           "text_key": "story.ch03.s02.line_05",
+          "trigger": "trial.lightning_wave_3",
           "speaker_key": "story.speaker.apprentice",
           "source_kind": "live",
           "source_kind_key": "story.speaker.source.live"
@@ -1154,7 +1290,15 @@
         {
           "id": "CH03_S02_OBJECTIVE",
           "text_key": "story.ch03.s02.objective",
-          "completion": "All three lightning waves survived and final elite construct defeated; Foundation unlock and normal stat/technique rewards atomically banked at safe reward checkpoint"
+          "completion": "All three lightning waves survived and final elite construct defeated; Foundation unlock and normal stat/technique rewards atomically banked at safe reward checkpoint",
+          "proof": {
+            "all_of": [
+              {
+                "kind": "event",
+                "event": "trial.survived.foundation"
+              }
+            ]
+          }
         }
       ],
       "sets_flags": [

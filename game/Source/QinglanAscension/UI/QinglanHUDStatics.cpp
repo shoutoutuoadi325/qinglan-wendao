@@ -1,17 +1,19 @@
 // HUD/UI static helpers implementation.
 //
-// Text: every FText originates from the string table
-// /Game/Qinglan/Data/ST_Game via FText::FromStringTable (code-contracts.md
-// "Localization keys"; docs/11-english-style-and-ui.md section on keys and
-// formatting). Numbers: FText::AsNumber/AsPercent route through the active
-// culture, so en-US and zh-Hans both format correctly after a live language
-// switch (docs/11: live switching without restart).
+// Text: GameText resolves through FQinglanLocalizationService (AUD-48: the
+// packaged en-US + zh-Hans DT_Localization table) and falls back to the
+// /Game/Qinglan/Data/ST_Game source strings via FText::FromStringTable
+// (code-contracts.md "Localization keys"; docs/11-english-style-and-ui.md
+// section on keys and formatting). Numbers: FText::AsNumber/AsPercent route
+// through the active culture, so en-US and zh-Hans both format correctly after
+// a live language switch (docs/11: live switching without restart).
 #include "UI/QinglanHUDStatics.h"
 
 #include "Blueprint/UserWidget.h"
 #include "Combat/QinglanCharacter.h"
 #include "Combat/QinglanCombatComponent.h"
 #include "Combat/QinglanTechniqueComponent.h"
+#include "Core/QinglanLocalizationService.h"
 #include "Core/QinglanTrialDirector.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
@@ -31,7 +33,12 @@ DEFINE_LOG_CATEGORY(LogQinglanUI);
 namespace
 {
 	// String table asset id (code-contracts.md "Localization keys").
-	const TCHAR* GGameStringTablePath = TEXT("/Game/Qinglan/Data/ST_Game");
+	// UE registers a string table under its OBJECT path (UStringTable::
+	// PostLoad sets StringTableId = GetPathName(), e.g.
+	// "/Game/Qinglan/Data/ST_Game.ST_Game"). FText::FromStringTable resolves by
+	// that id, so the package-only path silently returns the missing marker for
+	// every key. Keep the object path here; FSoftObjectPath loads either form.
+	const TCHAR* GGameStringTablePath = TEXT("/Game/Qinglan/Data/ST_Game.ST_Game");
 
 	// Cooldown display keeps one fractional digit (authored HUD readability).
 	constexpr int32 CooldownFractionDigits = 1;
@@ -114,18 +121,40 @@ FName UQinglanHUDStatics::GameStringTableId()
 
 FText UQinglanHUDStatics::GameText(FName Key)
 {
-	// FText::FromStringTable is the single sanctioned resolution path
+	// A corrupted/uninitialized FName would crash inside FName::ToString.
+	// Treat it as a missing key and keep the HUD alive (observed once in a
+	// Development HUD refresh; the fallback makes the failure diagnosable).
+	if (!Key.IsValid())
+	{
+		UE_LOG(LogQinglanUI, Warning, TEXT("GameText: invalid FName key; using placeholder"));
+		return FText::FromString(TEXT("<invalid text key>"));
+	}
+	// AUD-48: the runtime bilingual service (packaged DT_Localization) is the
+	// primary resolver; it follows the active culture and falls back en-US.
+	// ST_Game remains the final fallback so a missing/unqueued importer output
+	// never turns player-facing text blank.
+	FText Result;
+	if (FQinglanLocalizationService::TryResolve(Key, Result))
+	{
+		return Result;
+	}
+
+	// FText::FromStringTable is the sanctioned source-string path
 	// (code-contracts.md); it logs internally for malformed table ids.
-	FText Result = FText::FromStringTable(GGameStringTablePath, Key.ToString());
+	Result = FText::FromStringTable(GGameStringTablePath, Key.ToString());
 	if (Result.IsEmpty())
 	{
-		UE_LOG(LogQinglanUI, Warning, TEXT("GameText: string table has no key '%s'"), *Key.ToString());
+		UE_LOG(LogQinglanUI, Warning, TEXT("GameText: no runtime translation or string table key '%s'"), *Key.ToString());
 	}
 	return Result;
 }
 
 bool UQinglanHUDStatics::HasGameText(FName Key)
 {
+	if (FQinglanLocalizationService::HasKey(Key))
+	{
+		return true;
+	}
 	if (UStringTable* Table = LoadGameStringTable())
 	{
 		const TSharedPtr<FStringTable> Root = Table->GetMutableStringTable();
@@ -135,25 +164,67 @@ bool UQinglanHUDStatics::HasGameText(FName Key)
 	return false;
 }
 
+namespace
+{
+	/**
+	 * Named-placeholder substitution that does not depend on the pattern's
+	 * FText history. Bulletproof: the runtime translation source returns plain
+	 * strings, while the string table returns format-enabled text; UE renders
+	 * an unsubstituted named argument as "(name)", which surfaced on the HUD
+	 * barrier label in the packaged build. Substituting manually works for both
+	 * sources and falls back to the FText formatter when no braces remain.
+	 */
+	FText FormatNamedPattern(const FText& Pattern, const FFormatNamedArguments& Args)
+	{
+		FString Text = Pattern.ToString();
+		for (const TPair<FString, FFormatArgumentValue>& Pair : Args)
+		{
+			FString Replacement;
+			switch (Pair.Value.GetType())
+			{
+			case EFormatArgumentType::Text:
+				Replacement = Pair.Value.GetTextValue().ToString();
+				break;
+			case EFormatArgumentType::Int:
+				Replacement = FText::AsNumber(Pair.Value.GetIntValue()).ToString();
+				break;
+			case EFormatArgumentType::UInt:
+				Replacement = FText::AsNumber(Pair.Value.GetUIntValue()).ToString();
+				break;
+			case EFormatArgumentType::Float:
+				Replacement = FText::AsNumber(Pair.Value.GetFloatValue()).ToString();
+				break;
+			case EFormatArgumentType::Double:
+				Replacement = FText::AsNumber(Pair.Value.GetDoubleValue()).ToString();
+				break;
+			default:
+				continue;
+			}
+			Text = Text.Replace(*FString::Printf(TEXT("{%s}"), *Pair.Key), *Replacement);
+		}
+		return FText::FromString(Text);
+	}
+}
+
 FText UQinglanHUDStatics::FormatGameTextWithNumber(FName Key, FName ArgName, int32 Value)
 {
 	FFormatNamedArguments Args;
 	Args.Add(ArgName.ToString(), FText::AsNumber(Value));
-	return FText::Format(GameText(Key), Args);
+	return FormatNamedPattern(GameText(Key), Args);
 }
 
 FText UQinglanHUDStatics::FormatGameTextWithInt64(FName Key, FName ArgName, int64 Value)
 {
 	FFormatNamedArguments Args;
 	Args.Add(ArgName.ToString(), FText::AsNumber(Value));
-	return FText::Format(GameText(Key), Args);
+	return FormatNamedPattern(GameText(Key), Args);
 }
 
 FText UQinglanHUDStatics::FormatGameTextWithText(FName Key, FName ArgName, const FText& Value)
 {
 	FFormatNamedArguments Args;
 	Args.Add(ArgName.ToString(), Value);
-	return FText::Format(GameText(Key), Args);
+	return FormatNamedPattern(GameText(Key), Args);
 }
 
 FText UQinglanHUDStatics::FormatNumber(int32 Value)
@@ -261,6 +332,14 @@ UUserWidget* UQinglanHUDStatics::CreateWidgetById(const UObject* WorldContextObj
 		? GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::LogAndReturnNull)
 		: nullptr;
 	APlayerController* OwningPlayer = World ? World->GetFirstPlayerController() : nullptr;
+	// UMG widgets only accept a local player controller as their owner. Server-
+	// side and headless automation worlds can hold a controller that is not
+	// local; creating with it logs a PIE error and yields no usable widget, so
+	// treat "no local player" as "no presentation" instead.
+	if (!OwningPlayer || !OwningPlayer->IsLocalPlayerController())
+	{
+		return nullptr;
+	}
 	// Create takes a mutable context (world resolution only); the const here just pins the lookup.
 	return UWidgetBlueprintLibrary::Create(const_cast<UObject*>(WorldContextObject), Class, OwningPlayer);
 }
@@ -321,10 +400,12 @@ bool UQinglanHUDStatics::GetTrialRemainingSeconds(const UObject* WorldContextObj
 {
 	// One trial director per arena world (spawned by the trial anchor's proof
 	// press); absent everywhere else - the query is a clean false, never a log.
+	// AUD-20: the countdown reads as the timed survival phase only; once the
+	// clock expires the required-kill fight is its own beat with no timer UI.
 	OutRemainingSeconds = 0.f;
 	AQinglanTrialDirector* Director = Cast<AQinglanTrialDirector>(
 		UGameplayStatics::GetActorOfClass(WorldContextObject, AQinglanTrialDirector::StaticClass()));
-	if (Director == nullptr || !Director->IsTrialActive())
+	if (Director == nullptr || !Director->IsTimedSurvivalActive())
 	{
 		return false;
 	}

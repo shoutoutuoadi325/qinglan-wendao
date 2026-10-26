@@ -114,7 +114,7 @@ Unlock order: Jade Sword Arc + Flowing Ward (tutorial, CH00_S02), Ember Lance (p
 
 ## 3. Data Contracts (JSON the C++ must parse)
 
-All files exist in-repo under `data/examples/` and `data/story/` (schema_version 1 everywhere). `data/examples` are contract illustrations, not production serialization.
+All files exist in-repo under `data/examples/` and `data/story/` (story/data schemas v1; the profile save schema is v2). `data/examples` are contract illustrations, not production serialization.
 
 **`data/examples/techniques.json`** — `{schema_version, content_version, techniques[]}`; technique = `{id, name_key, element, energy_cost, cooldown_seconds, power_coefficient, flat_damage}`. C++ data asset additionally carries: display text key, cast phases, targeting, magnitude, animation soft ref, cue soft ref, unlock rule; all refs validated during cook; selection/reward-affecting changes require `content_version` bump.
 
@@ -128,7 +128,7 @@ All files exist in-repo under `data/examples/` and `data/story/` (schema_version
 
 **`data/story/lore.json`** — records L01–L24: `{id, location, required_flags[], date_label, clue, title_key, body_key, date_key, inspect_key, collection_flag, player_text_keys[]}`.
 **`data/story/barks.json`** — B01–B40: `{id, speaker, location, required_flags[], forbidden_flags[], text_key, cooldown_seconds:180, max_per_visit:1, suppress_during_combat:true, player_text_keys[], speaker_key, source_kind, source_kind_key}`.
-**Localization** — `localization/en-US.json`, `localization/zh-Hans.json`, `localization/story/{en-US,zh-Hans}/{CH00–CH07, SQ01–SQ08, LORE01–04, BARKS, SPEAKERS}.json`: flat key→string maps; identical keys/placeholders both locales; imported into String Tables via documented workflow (mechanism undecided). `assets/asset-manifest.csv`: exactly 13 fields (`asset_id,category,source_url,author,license_id,license_url,acquired_version,free_use_verified,game_distribution_allowed,source_redistribution_allowed,attribution,public_path,notes`), enums yes/no/pending.
+**Localization** — `localization/en-US.json`, `localization/zh-Hans.json`, `localization/story/{en-US,zh-Hans}/{CH00–CH07, SQ01–SQ08, LORE01–04, BARKS, SPEAKERS}.json`: flat key→string maps; identical keys/placeholders both locales; imported into `ST_Game`/`DT_Localization` by `UQinglanDataImportCommandlet`. `assets/asset-manifest.csv`: exactly 13 fields (`asset_id,category,source_url,author,license_id,license_url,acquired_version,free_use_verified,game_distribution_allowed,source_redistribution_allowed,attribution,public_path,notes`), enums yes/no/pending.
 Validation gate: `python3 tools/export_story_reading.py` → `python3 tools/validate_repository.py` → `export_story_reading.py --check` (checks keys, placeholders, transitions, chapter scope, ending confirmation, every string referenced).
 
 ---
@@ -167,27 +167,30 @@ Validation gate: `python3 tools/export_story_reading.py` → `python3 tools/vali
 8. Objective `completion` fields are English prose, not machine predicates; a dispatcher convention mapping prose → gameplay events is unspecified.
 9. Story timing consistency risk: CH02 uses the full 7-room Bamboo instance while the M2 slice has 4 rooms — scene data and slice scope must not be conflated.
 
-**Genuine gaps (unauthored content):**
-- 12 blessings: no names/effects/stack-cap list exists anywhere (only 4×3 grouping + cap rule); slice's 4 blessings also unnamed.
-- Relic bonuses/tradeoffs: 6 names only; which 2 are in the slice unspecified.
-- Which 3 of 8 passives are slice passives; which 4 of 12 slice blessings.
-- Ranged-attack concurrency budget: "its own budget" with no number.
-- Stream-state serialization shape (3 streams, field format) undefined.
-- `content_version` increment trigger is qualitative; needs a review checklist.
-- Tooltip data contract for xianxia term explainers (mandatory accessibility feature) is undefined.
-- Localization import mechanism undecided (direct String Table import vs documented script).
-- Bark `required_barks_this_visit` appears on 1 of 40 barks; semantics unconfirmed.
-- MSIXVC2 (Oct 2026 GDK) adoption pending; store identity/signing/support contact/privacy URL all owner-pending; 8 GB Mac classification pending evidence.
+**Implementation gaps (superseded):** the pre-implementation gap list that
+previously lived here (unnamed blessings/relics, undefined passives, localization
+import mechanism, stream serialization, tooltip contract, etc.) has been
+resolved in code and content. Current evidence and the few remaining
+acceptance items are tracked in `docs/dev/test-report.md`,
+`docs/dev/completion-audit-todo.md`, and
+`docs/dev/remaining-acceptance-runbook.md`.
 
 ---
 
-## 6. Top Risks for a Linux-Headless Dev Environment
+## 6. Current status and remaining risks (2026-10-20)
 
-1. **Zero local build/run capability (highest):** targets are Win64-GDK + macOS-arm64 only; UE cannot cross-compile either from Linux (Win64 needs MSVC/Windows, Mac needs Xcode/macOS), and GDK/Metal are unavailable. Every M0/M1 gate (packaged builds, VFXBenchmark, hit-window/dodge FPS automation, save failure injection on-device) requires remote Windows + macOS machines or CI runners — procure these before writing gameplay code, or all acceptance evidence stalls.
-2. **Engine not acquired:** no Epic EULA accepted, engine fetched via owner account, kept out of repo (~40+ GB). Nothing engine-dependent can even begin locally; on Linux only docs/data/tooling work is real.
-3. **Unverifiable contract drift:** C++ parsers and JSON registries authored without runtime import validation invite schema rot. Mitigation: author JSON Schemas for all §3 contracts now, run `tools/validate_repository.py` + `tools/validate_story.py` + locale key/placeholder parity + asset-manifest lint as required CI on Linux; generate String Table fixture manifests from locale JSONs to freeze key formats (`story.chNN.sMM.line_XX`, `technique.<id>.name`).
-4. **All GPU/VFX/performance evidence unobtainable:** p95/p99 frame-time, Metal captures, Shader Complexity/Quad Overdraw, hero-effect checklist, 15-min benchmark and fanless-Mac sustained runs need actual GPUs on supported OSes; editor-FPS is explicitly invalid evidence. Budget remote hardware time early; never let headless-passing docs CI be mistaken for release authorization.
-5. **Signing/store pipelines blocked:** GDK packaging, Partner Center identity, MSIXVC, Apple Developer ID, notarization/stapling, and clean-machine quarantine tests all require Windows/macOS + owner credentials; unsigned Mac builds must never be labeled final.
-6. **Automation-test assumptions:** UE automation tests require an editor/game process on a supported OS (often a graphics context); plan which tests (damage math, rank transactions, save migration, checkpoint serialization) can eventually run headless via commandlet on the Windows/macOS CI vs. which need rendering.
-7. **Binary asset workflow partially available:** Blender, fonttools (CJK glyph coverage), and audio tooling run on Linux, but FBX retarget/interoperability, animation notify, and LFS-tracked .uasset verification all need editor sessions; keep original placeholder assets manifest-verified from Linux.
-8. **Locale/formatting tests deferred:** 100/125/150% layout, Retina DPI, live language switch, and CJK rendering cannot be screenshot-verified headless — schedule bilingual capture sessions on real hardware as a standing M1/M4 task rather than a trailing one.
+- **Local build/run capability exists:** UE 5.8.3 is present beside the repo;
+  the Linux editor builds, the 70-case suite runs headless, the functional
+  journeys pass 30/30 and 24/24, content regenerates, and a Linux Shipping
+  package builds with a verified IoStore inventory.
+- **Rendering:** packaged Vulkan rendering works under Xvfb; rendered evidence
+  covers English, zh-Hans, Low + low-flash, the cold-start slot UI, keyboard/
+  mouse movement, a hub-boundary `SIGKILL`, and Low/low-flash trial hazards.
+- **Remaining risks are environment-bound:** a full interactive keyboard/
+  gamepad playthrough (the container denies `/dev/uinput`), DX12/Metal captures
+  and Win64/macOS builds (no SDK/device), hand-art/UV work, and target-hardware
+  performance capture (`-csvprofile`/`-fpschart` abort in the cluster GPU
+  contention; editor `-game` aborts in `TextLocalizationManager.cpp:629`).
+- **Contract drift mitigation is in place:** `tools/validate_repository.py`,
+  `tools/validate_story.py`, bilingual key/placeholder parity, asset-manifest
+  checks, and the automation suite run on Linux.

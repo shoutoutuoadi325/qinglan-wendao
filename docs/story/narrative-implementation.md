@@ -4,11 +4,11 @@
 
 The narrative bible defines immutable world rules. Main registries define required scenes and choices; the side-quest registry defines optional stages; lore/bark registries define repeatable presentation. Locale resources hold exact English and Simplified Chinese player copy. English prose production notes are not displayed in-game.
 
-These are authored specifications, not an implemented narrative engine. No current resource is loaded automatically by Unreal. M0/M1 establishes a small importer or equivalent Unreal data-asset workflow before content assembly.
+These documents are the authored specifications. They are now implemented: `UQinglanDataImportCommandlet` builds `DA_StoryRegistry`/`ST_Game`/`DT_Localization`, and `UQinglanStorySubsystem` plays scenes, guards, choices, deliveries and endings. The functional journeys execute all 30 main scenes and 24 side stages; the remaining gate is an interactive playthrough on a display machine.
 
 ## 2. Required narrative state
 
-Add a versioned `narrative` section to the future profile save: completed scenes, monotonic main chapter flags, side-quest stage IDs, choice decisions, evidence read IDs, ending-preview state, mutually exclusive confirmed ending, delivered-letter transitions, and one-time reward transaction IDs.
+The profile save (schema v2) carries a versioned `narrative` section: completed scenes, monotonic main chapter flags, side-quest stage IDs, choice decisions, evidence read IDs, ending-preview state, mutually exclusive confirmed ending, delivered-letter transitions, and one-time reward transaction IDs.
 
 Keep dialogue progress separate from gameplay completion. Skipping text still applies required journal/objective updates, but cannot award an unearned boss clear or silently select a consequential choice. Main chapter completion implies all mandatory gameplay and scene requirements, not merely that a player opened a dialogue window.
 

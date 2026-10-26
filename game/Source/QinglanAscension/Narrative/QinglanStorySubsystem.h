@@ -34,7 +34,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQinglanObjectiveUpdated, FName, Ob
  * Never freezes the player while enemies are active; defers playback instead.
  */
 UCLASS()
-class UQinglanStorySubsystem : public UGameInstanceSubsystem
+class QINGLANASCENSION_API UQinglanStorySubsystem : public UGameInstanceSubsystem
 {
 	GENERATED_BODY()
 
@@ -59,6 +59,10 @@ public:
 	UFUNCTION(BlueprintCallable) bool SelectChoice(FName ChoiceId);
 	UFUNCTION(BlueprintPure) bool IsScenePlaying() const;
 	UFUNCTION(BlueprintPure) FName GetCurrentSceneId() const;
+	/** Main-story guidance is independent of dialogue playback. Returns the
+	 *  active unresolved main scene, then the first eligible unfinished scene
+	 *  in authored chapter order. This query never starts or completes scenes. */
+	UFUNCTION(BlueprintPure) FName GetTrackedMainSceneId() const;
 	/** Skips remaining lines; still applies journal/objective updates. */
 	UFUNCTION(BlueprintCallable) void SkipScene();
 
@@ -66,6 +70,8 @@ public:
 	UFUNCTION(BlueprintPure) bool IsSceneCompleted(FName SceneId) const;
 	UFUNCTION(BlueprintPure) bool HasFlag(FName Flag) const;
 	UFUNCTION(BlueprintPure) FName GetChoiceDecision(FName ChoiceId) const;
+	/** Explicit scene ownership; legacy bare queries return none when ambiguous. */
+	UFUNCTION(BlueprintPure) FName GetSceneChoiceDecision(FName SceneId, FName ChoiceId) const;
 	UFUNCTION(BlueprintPure) bool IsEndingConfirmed() const;
 	UFUNCTION(BlueprintPure) EQinglanEnding GetConfirmedEnding() const;
 
@@ -74,6 +80,8 @@ public:
 	UFUNCTION(BlueprintPure) bool IsEndingAvailable(FName EndingId, FText& OutRequirementText) const;
 	/** Enters preview; creates no ending flag. */
 	UFUNCTION(BlueprintCallable) bool PreviewEnding(FName EndingId);
+	/** Close preview/confirmation scratch without changing any permanent story state. */
+	UFUNCTION(BlueprintCallable) void CancelEndingPreview();
 	/** Atomic one-time commit; requires prior preview + warning acknowledgment. */
 	UFUNCTION(BlueprintCallable) bool ConfirmEnding(FName EndingId, bool bWarningAcknowledged, FText& OutError);
 
@@ -84,6 +92,8 @@ public:
 
 	// --- Objective / journal bridge ---
 	UFUNCTION(BlueprintCallable) void NotifyObjectiveCompleted(FName ObjectiveId);
+	/** Gameplay proof must name the owning scene; true means accepted (including replay), not necessarily scene complete. */
+	UFUNCTION(BlueprintCallable) bool NotifySceneObjectiveCompleted(FName SceneId, FName ObjectiveId);
 
 	UPROPERTY(BlueprintAssignable) FQinglanSceneLine OnSceneLine;
 	UPROPERTY(BlueprintAssignable) FQinglanChoicesPresented OnChoicesPresented;

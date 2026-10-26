@@ -1,0 +1,21 @@
+{
+  "configuration": "Shipping",
+  "hardware": "MacBook Air Mac16,12, Apple M4 (10 CPU/10 GPU cores), 32 GB unified memory",
+  "os": "macOS 27.0.1 (26A434)",
+  "rhi": "Metal (HUD reports Metal, Composed; package contains SF_METAL_SM5/SM6)",
+  "resolution": [
+    1280,
+    720
+  ],
+  "quality": "windowed; first-launch detected preset (Low), 30 FPS cap, dynamic resolution on, VSync off",
+  "route": "hub courtyard, 60 s continuous WASD movement with mouse camera rotation; warm-up ~30 s after slot load; menus/loading excluded",
+  "capture_seconds": 60,
+  "engine_revision": "396c9f059903aed5fec78ecd3d437a40c6415368",
+  "project_revision": "8fe547a033fa9266494e82fd1e81a8ede139f8b4 (working tree with HUD/GC fixes)",
+  "package_client_sha256": "308cb9781784abf4ef146ae8f9608d7d6c075854cca1ae9bf824aa747b20c985",
+  "package_pak_sha256": "d61163ca28045cf6b78eddce50af9876f44cb02baec699db523525fd64cd6b3c",
+  "measurement_source": "Apple Metal Performance HUD per-frame log (MTL_HUD_ENABLED=1, MTL_HUD_LOG_ENABLED=1); external Metal telemetry, not Unreal game/render-thread counters",
+  "hud_report_html": "not produced (MTL_HUD_REPORT_URL sets the output path; the HUD menu was not used to generate a report)",
+  "display": "unlocked during measurement",
+  "input": "keyboard (W/A/S/D) and synthetic relative mouse motion"
+}

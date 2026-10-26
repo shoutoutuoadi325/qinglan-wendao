@@ -1,0 +1,132 @@
+[
+  {
+    "file": "packaging/windows/assets/Square44x44Logo.png",
+    "dimensions": [
+      44,
+      44
+    ],
+    "mode": "RGBA",
+    "bytes": 3266,
+    "sha256": "8441c8606cda859d6307bd420eba23650776a4befd7ba0191ed27d34c876e540"
+  },
+  {
+    "file": "packaging/windows/assets/StoreLogo.png",
+    "dimensions": [
+      100,
+      100
+    ],
+    "mode": "RGBA",
+    "bytes": 9870,
+    "sha256": "7b73da5aa02ba0750cb4433448fdebe70c9477cf1b8c8fba60c4ae1cf0485341"
+  },
+  {
+    "file": "packaging/windows/assets/Square150x150Logo.png",
+    "dimensions": [
+      150,
+      150
+    ],
+    "mode": "RGBA",
+    "bytes": 16649,
+    "sha256": "1908471e5690d93c7109211a0c94566bd60c4a566febec792f7b172dc9e5e2ee"
+  },
+  {
+    "file": "packaging/windows/assets/Square300x300Logo.png",
+    "dimensions": [
+      300,
+      300
+    ],
+    "mode": "RGBA",
+    "bytes": 39409,
+    "sha256": "bd2b5799f626869ff5c7d13080ebec3f19dc85218df27e88389fc16a20961c2d"
+  },
+  {
+    "file": "packaging/windows/assets/Square480x480Logo.png",
+    "dimensions": [
+      480,
+      480
+    ],
+    "mode": "RGBA",
+    "bytes": 66794,
+    "sha256": "c9a9017c10e6ecb5b5746a220b3b92dced67fa46fc751917ab72de1cc6c33d1d"
+  },
+  {
+    "file": "packaging/windows/assets/Square1080x1080Logo.png",
+    "dimensions": [
+      1080,
+      1080
+    ],
+    "mode": "RGBA",
+    "bytes": 172565,
+    "sha256": "45eaa652903c422e8374a94f837908d1a1ad02dadd0d6e45a59883a291c3064f"
+  },
+  {
+    "file": "packaging/windows/assets/SplashScreenImage.png",
+    "dimensions": [
+      1920,
+      1080
+    ],
+    "mode": "RGBA",
+    "bytes": 268601,
+    "sha256": "5da584f6f87919955f7462a1ecea86546733a600023713b1f3e37e46fadb3014"
+  },
+  {
+    "file": "docs/store/assets/Qinglan-Landscape-1920x1080.png",
+    "dimensions": [
+      1920,
+      1080
+    ],
+    "mode": "RGBA",
+    "bytes": 268601,
+    "sha256": "5da584f6f87919955f7462a1ecea86546733a600023713b1f3e37e46fadb3014"
+  },
+  {
+    "file": "docs/store/assets/Qinglan-Portrait-768x1152.png",
+    "dimensions": [
+      768,
+      1152
+    ],
+    "mode": "RGBA",
+    "bytes": 179534,
+    "sha256": "8e069f45ed5db9e75feb5d7edc4e20c338aea478cebe506d45d087c768067b9d"
+  },
+  {
+    "file": "docs/store/assets/Qinglan-Poster-720x1080.png",
+    "dimensions": [
+      720,
+      1080
+    ],
+    "mode": "RGBA",
+    "bytes": 164965,
+    "sha256": "93386512f9564f07aab340f6dc7e5b14fc45823c98fbdabd426362236cbef1d8"
+  },
+  {
+    "file": "docs/store/assets/Qinglan-Portrait-1440x2160.png",
+    "dimensions": [
+      1440,
+      2160
+    ],
+    "mode": "RGBA",
+    "bytes": 376788,
+    "sha256": "9054b0e9a707113d13995e1505be5dd9aaa959a1cded96b19eda66a29c54e60e"
+  },
+  {
+    "file": "docs/store/assets/Qinglan-Square-Cover-1080.png",
+    "dimensions": [
+      1080,
+      1080
+    ],
+    "mode": "RGBA",
+    "bytes": 199895,
+    "sha256": "138f5948b3acef34723070bfc83ba7aa037b37b52a1e8a9c032ce12453b7dd86"
+  },
+  {
+    "file": "docs/store/assets/Qinglan-Superhero-1920x1080.png",
+    "dimensions": [
+      1920,
+      1080
+    ],
+    "mode": "RGBA",
+    "bytes": 252329,
+    "sha256": "61c47cf6fdb510c8e2f6e23351e3cbbf8b59b62f278b2fabb791ce2ddcc4c172"
+  }
+]

@@ -7,9 +7,11 @@ in a trailing comment, e.g. `float DodgeDuration = 0.45f; // docs/02 §2`.
 ## Layout
 
 Single runtime module `QinglanAscension` (folders are physical only) plus
-editor module `QinglanAscensionEditor`. Cross-folder includes are allowed;
-keep them one-way where possible: Core <- Combat/Abilities/AI <- Progression/
-Narrative/Persistence <- UI/Platform.
+editor module `QinglanAscensionEditor`. Current folders include `Core`,
+`Combat`, `Abilities`, `AI`, `Progression`, `Narrative`, `Persistence`, `UI`,
+`Platform`, and `VFX`. Cross-folder includes are allowed; keep them one-way
+where possible: Core <- Combat/Abilities/AI/VFX <- Progression/Narrative/
+Persistence <- UI/Platform.
 
 ## Conventions
 
@@ -39,10 +41,11 @@ runtime code only references keys.
 
 ## Save semantics (summary)
 
-Schema v1 fields mirror `data/examples/save.json` exactly
-(`UQinglanSaveGame`). Writes follow the six-step durable protocol; a failed
-write never deletes the last valid primary; 3 slots x 2 backups; migration
-functions `MigrateV1_ToV2` pattern; reject newer schema.
+Schema **v2** fields mirror `data/examples/save.json` exactly
+(`UQinglanSaveGame`); v1 saves migrate through `MigrateV1_ToV2` (courier
+deliveries and hub clock are v2 additions). Writes follow the six-step durable
+protocol; a failed write never deletes the last valid primary; 3 slots x 2
+backups; reject newer schemas.
 
 ## Combat semantics (summary)
 
@@ -65,7 +68,9 @@ ending preview reads effective only.
 
 ## Testing hooks
 
-Each subsystem exposes state-query functions usable by automation specs
-(`QinglanAscensionEditor/Tests/…`): damage math, hit-key dedupe, rank costs,
-banking multipliers, agreement versioning, ending gating. Specs must be
-deterministic and headless (`-nullrhi` compatible).
+Each subsystem exposes state-query functions usable by automation specs in
+`game/Source/QinglanAscensionEditor/Qinglan*Tests.cpp` (there is no `Tests/`
+subdirectory): damage math, hit-key dedupe, rank costs, banking multipliers,
+agreement versioning, ending gating, save fault injection, story guards,
+trials, animation/VFX/content/input contracts. Specs must be deterministic and
+headless (`-nullrhi` compatible); the suite currently runs **70** cases.

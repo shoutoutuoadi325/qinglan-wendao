@@ -69,7 +69,7 @@ namespace
 	{
 		// UE 5.8: UWidget has no SetObjectName; widgets are named at construction.
 		UTextBlock* Text = Tree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), Name);
-		Text->Text = Label;
+		Text->SetText(Label);
 		// TODO pass font size when the default font asset chain is wired; scale via render transform.
 		Text->SetRenderScale(FVector2D(FontSize / 18.f, FontSize / 18.f));
 		if (UCanvasPanelSlot* Slot = Cast<UCanvasPanelSlot>(Parent->AddChild(Text)))
@@ -117,7 +117,11 @@ namespace
 		}
 
 		UPackage* Package = WBP->GetOutermost();
-		Package->FullyLoad(); // discovery can leave packages half-open; saves refuse those
+		// MakeWidgetBlueprint already forced a full load (or created a fresh
+		// package). Re-running FullyLoad here on a package that now holds the
+		// just-compiled blueprint objects re-enters async loading with dirty
+		// in-memory exports and fatals in UE 5.8; the load above is the only
+		// place that needs it.
 		const FString FileName = FPackageName::LongPackageNameToFilename(
 			Package->GetName(), FPackageName::GetAssetPackageExtension());
 		FSavePackageArgs Args;
@@ -186,8 +190,11 @@ int32 UQinglanUIBootstrapCommandlet::Main(const FString& Params)
 		AddText(Tree, Root, FText::FromString(TEXT("Barrier 0")), FVector2D(40, 940), FVector2D(220, 28), 16, TEXT("Txt_Barrier"));
 		for (int32 i = 0; i < 4; ++i)
 		{
+			// Wide enough for a full technique name at 18 px; 150 cm slots and
+			// 20 px overflowed into the neighbouring label ("Jade Sword Arc"
+			// rendered across slot 2 in the first packaged screenshot).
 			AddText(Tree, Root, FText::FromString(FString::Printf(TEXT("[Skill %d]"), i + 1)),
-				FVector2D(700 + i * 150, 980), FVector2D(140, 44), 20, *FString::Printf(TEXT("Txt_Skill%d"), i));
+				FVector2D(360 + i * 220, 980), FVector2D(210, 44), 14, *FString::Printf(TEXT("Txt_Skill%d"), i));
 		}
 		for (int32 i = 0; i < 2; ++i)
 		{

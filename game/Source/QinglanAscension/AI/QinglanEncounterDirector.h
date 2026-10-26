@@ -28,6 +28,8 @@ public:
 
 	/** Begins the encounter for the current room (wave list from the realm template). */
 	void BeginEncounter(const TArray<UQinglanEnemyDataAsset*>& Wave, int32 RoomIndex, bool bIsBossRoom);
+	/** Realm floor center; confines portal placements to this room. Set before BeginEncounter. */
+	void SetRoomOrigin(const FVector& Origin);
 	/** Simultaneous last-kill opens the door + reward exactly once. */
 	UFUNCTION(BlueprintCallable) void NotifyEnemyDied(AQinglanEnemyCharacter* Enemy);
 	UFUNCTION(BlueprintPure) bool IsEncounterActive() const { return bActive; }

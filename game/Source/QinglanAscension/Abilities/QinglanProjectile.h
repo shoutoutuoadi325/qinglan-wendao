@@ -1,6 +1,7 @@
-// Pooled gameplay-effect actor for the techniques module. Hosts three
+// Pooled gameplay-effect actor for the techniques module. Hosts four
 // tick-driven delivery modes: linear projectile (jade_sword_arc, ember_lance),
-// orbiting pulse aura (orbiting_blades), and heal-over-time (verdant_pulse).
+// orbiting pulse aura (orbiting_blades), heal-over-time (verdant_pulse), and
+// the mist-step Wet trail that follows the owner's actual dodge sweeps.
 // All hit detection is CPU-authoritative swept shape queries each Tick; the
 // collision component never blocks and never generates overlaps as a damage
 // source (code-contracts: "CPU-authoritative damage"; blueprint §1.2 "spawn/
@@ -12,9 +13,12 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Core/QinglanCoreTypes.h"
+#include "Abilities/QinglanTechniqueExecutors.h" // AUD-42 cue context retained on pooled effects
 #include "QinglanProjectile.generated.h"
 
 class USphereComponent;
+class UStaticMeshComponent;
+class UPointLightComponent;
 class UQinglanCombatComponent;
 struct FQinglanBlessingModifiers;
 
@@ -36,7 +40,10 @@ enum class EQinglanEffectMode : uint8
 	/** Pulses around the owning actor on a fixed interval (orbiting_blades). */
 	OrbitPulses,
 	/** Periodic heal ticks on the owning actor (verdant_pulse). */
-	HealOverTime
+	HealOverTime,
+	/** Samples the owner's actual dodge path each tick, applying Wet once per
+	 *  victim (mist_step); ends with the dodge. */
+	WetTrail
 };
 
 /**
@@ -48,7 +55,7 @@ enum class EQinglanEffectMode : uint8
  * directly and cosmetic cues never gate gameplay.
  */
 UCLASS(NotBlueprintable)
-class AQinglanProjectile : public AActor
+class QINGLANASCENSION_API AQinglanProjectile : public AActor // linkage-only export for editor automation specs
 {
 	GENERATED_BODY()
 
@@ -75,9 +82,24 @@ public:
 		float InPulseRadiusCm, int32 InMaxTargetsPerPulse, float RawDamageMultiplier);
 
 	/** Configures heal-over-time on the owner (verdant_pulse: heal 20 over 4 s
-	 *  bounded by max health, docs/02 §6). */
+	 *  bounded by max health, docs/02 §6). The first tick lands after one full
+	 *  interval; total magnitude divides across the authored tick count. */
 	void SetupHealOverTime(const FQinglanCastId& InCastId, FName InTechniqueId,
 		AActor* InOwner, float InTotalHeal, float InDurationSeconds, float HealMultiplier);
+
+	/** Configures the Wet trail behind the owner's active dodge (mist_step):
+	 *  samples the actual swept position each tick with one deduplicated
+	 *  victim set and returns to the pool when the dodge ends. */
+	void SetupWetTrail(const FQinglanCastId& InCastId, FName InTechniqueId,
+		AActor* InOwner, float InTrailRadiusCm, float InWetDurationBonus);
+
+	/** AUD-42: retain the release context so pooled impact cues still carry the
+	 *  technique identity (and can resolve the authored impact Niagara, if any). */
+	void SetCueContext(const FQinglanTechniqueCastContext& InContext);
+
+	/** AUD-42/test seam: builds the impact cue exactly as PublishImpactCue emits
+	 *  it. Public so automation can assert technique identity survives pooling. */
+	FQinglanCueEvent BuildImpactCueEvent(const FVector& Location) const;
 
 	/** Pooling contract: clears timers, victims, owner, tags, collision,
 	 *  lifetime. Called on return to pool; also safe to call repeatedly. */
@@ -93,6 +115,7 @@ protected:
 	void TickLinear(float DeltaSeconds);
 	void TickOrbitPulses(float DeltaSeconds);
 	void TickHealOverTime(float DeltaSeconds);
+	void TickWetTrail(float DeltaSeconds);
 
 	/** Sweeps from PreviousLocation to ProposedLocation in substeps; resolves
 	 *  damage through victim combat components with per-victim hit ordinals
@@ -117,6 +140,11 @@ protected:
 
 	/** Cosmetic impact marker; never gates or cancels gameplay. */
 	void PublishImpactCue(const FVector& Location, AActor* Victim);
+
+	/** AUD-42: creates the engine-shape placeholder body once (BeginPlay for
+	 *  spawned actors, defensively on first launch) and colours it per element. */
+	void EnsureVisualPlaceholders();
+	void RefreshVisualPresentation();
 
 private:
 	// --- Shared identity ---
@@ -145,7 +173,13 @@ private:
 	// --- Heal-over-time state ---
 	float HealRemaining = 0.f;
 	float HealTickInterval = 1.f;      // 4 ticks over 4 s (docs/02 §6: heal 20 over 4 s)
-	float HealTimer = 0.f;
+	float HealPerTick = 0.f;           // total / tick count; final tick carries the remainder
+	float HealTimer = 0.f;             // 0 at setup: no heal at cast time
+
+	// --- Wet-trail state (mist_step) ---
+	float WetTrailRadiusCm = 220.f;    // capsule-side reach along the dodge path; FIXME-CONTRACT: tunable
+	float WetTrailDurationBonus = 0.f; // blessing WetDurationBonus (docs/03 §4)
+	TSet<TWeakObjectPtr<AActor>> WetTrailVictims;
 
 	// --- Lifetime (paused-game-time via Tick DeltaSeconds) ---
 	float LifetimeRemaining = 3.f;     // safety expiry; normal exits are range/pulse/heal completion
@@ -160,6 +194,17 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "Qinglan")
 	TObjectPtr<USphereComponent> CollisionSphere = nullptr;
+
+	/** AUD-42 placeholder body/glow for the otherwise invisible linear shot.
+	 *  Engine basic shapes only; no collision, never a gameplay source. */
+	UPROPERTY(VisibleAnywhere, Category = "Qinglan|VFX")
+	TObjectPtr<UStaticMeshComponent> VisualMesh = nullptr;
+	UPROPERTY(VisibleAnywhere, Category = "Qinglan|VFX")
+	TObjectPtr<UPointLightComponent> VisualLight = nullptr;
+
+	/** Complete release identity for impact cues (AUD-42). Purely cosmetic. */
+	UPROPERTY()
+	FQinglanTechniqueCastContext CueContext;
 
 	friend struct FQinglanProjectilePool;
 };

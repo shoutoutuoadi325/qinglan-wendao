@@ -6,6 +6,10 @@ public class QinglanAscensionEditor : ModuleRules
 	public QinglanAscensionEditor(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
+		// Importers and automation fixtures intentionally have file-local
+		// helper names. Keep their translation units separate on clean builds;
+		// adaptive unity grouping otherwise merges anonymous namespaces.
+		bUseUnity = false;
 
 		PublicDependencyModuleNames.AddRange(new string[]
 		{
@@ -34,7 +38,11 @@ public class QinglanAscensionEditor : ModuleRules
 			"Kismet",
 			"EnhancedInput", // UInputAction/UInputMappingContext bootstrap assets
 			"InputCore", // EKeys bindings authored by the content bootstrap
-			"AudioEditor" // USoundFactory for the audio bootstrap commandlet
+			"AudioEditor", // USoundFactory for the audio bootstrap commandlet
+			"Niagara", // UNiagaraSystem/UNiagaraEmitter assets authored by the content bootstrap
+			"NiagaraCore",
+			"NiagaraEditor", // UNiagaraSystemFactoryNew + FNiagaraEditorUtilities (AUD-42)
+			"ContentBrowser" // NiagaraSystemFactoryNew.h includes FrontendFilterBase.h (private NiagaraEditor dep)
 		});
 	}
 }

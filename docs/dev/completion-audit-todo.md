@@ -4,6 +4,44 @@ Audit date: 2026-10-14 (Asia/Shanghai). Reviewed branch: `develop`.
 Reviewed revision: `e94be12ee39826a6fba73f57534b06bbf0c73db8`, matching
 `origin/develop` after fetch. The working tree was clean before this review.
 
+> **Reading this document (2026-10-20):** the per-item finding text below
+> describes the state *before* the repair waves and is retained as provenance.
+> The authoritative current
+> disposition for all 60 IDs is the **Repair dispositions** table near the end
+> of this file; read that first. Environment-blocked acceptance steps are in
+> `docs/dev/remaining-acceptance-runbook.md`.
+
+## Repair progress log
+
+- 2026-10-21 (native Mac baseline): `tools/build/run-acceptance.sh` passed all
+  six steps in `.local/acceptance/20261021T114346.991305Z/` — editor build,
+  content regeneration, **90/90** regular tests, **30/30** main and **24/24**
+  side campaign journeys, and a Mac arm64 Shipping package. The three previous
+  scene-inspection failures were repaired (PlayerState in the fixtures,
+  playback reset between Ashen anchors, and a local-player guard in
+  `QinglanHUDStatics::CreateWidgetById`). `package-game.sh` now archives the
+  complete staged Mac app because UAT's Mac `-archive` copies only the
+  pre-stage `Binaries/Mac` shell. The startup graphics service now passes
+  `bCheckForCommandLineOverrides=true` to `UGameUserSettings::ApplySettings`,
+  so `-windowed`/`-Res` are honored and the packaged client starts windowed.
+  The packaged Shipping client then produced Metal frames for the cold-start
+  screen and for a trial with two strike telegraphs plus a wave enemy
+  (`docs/dev/evidence/metal-rendering-2026-10-21.md`). The hero palette was
+  repaired at the material level (Metal sampler defaults + SkeletalMesh usage
+  flag), verified by packaged near/normal hand close-ups. A 2 s
+  `-QinglanAutoSlot` capture aid reached the hub and produced the packaged hub
+  frame. The display was then unlocked and a real keyboard pass verified cold
+  start → slot load → hub → `kill -9` (byte-identical save) → relaunch/resume
+  (`docs/dev/evidence/mac-interactive-hub-2026-10-21.md`). The complete
+  playthrough, combat/trial performance segments, gamepad and DX12/Win64 gates
+  remain open. A
+  Development FPS-chart attempt exposed an invalid-FName HUD crash; the root
+  cause was technique loadout `TObjectPtr`s missing `UPROPERTY()`, so GC freed
+  them. Both fields are now `UPROPERTY()`. A 60 s packaged Shipping hub route
+  then completed with external Metal HUD metrics
+  (`docs/dev/evidence/perf-mac-shipping-hub-2026-10-21.md`); combat/trial
+  segments remain open.
+
 ## Decision
 
 **Development is not complete.** The repository has substantial gameplay code
@@ -20,9 +58,9 @@ The current implementation does not meet the version 1.0 acceptance contract in
 | P2 — narrower correctness/completion issues | 20 |
 | Total | 60 |
 
-This document is a repair backlog for the development agent. It changes no game
-code. Every finding below needs a recorded disposition and its acceptance checks;
-compiling modules or passing the existing 12 tests does not close these items.
+This document is a repair backlog for the development agent. The original audit
+changed no game code; subsequent source work is recorded in the progress log above and the dispositions table below. Every finding below needs a recorded disposition and its acceptance checks;
+compiling modules or passing the automation suite does not close these items.
 
 ## Review scope and evidence limits
 
@@ -1005,9 +1043,10 @@ meshes are not used for a finished environment pass. No project Texture2D source
 assets are present under `game/Content`, although the master at 233–242 uses
 texture parameters and the surface importer at 531–548 intends to create them.
 The committed small material instances alone do not deliver the intended
-PolyHaven texture sets. No Niagara systems are committed, and the cue wiring is
-also missing (AUD-42). This does not satisfy the promised realistic 3D surfaces
-and scalable hero-effect presentation.
+PolyHaven texture sets. No Niagara systems were committed at audit time
+(pre-repair finding; `NS_Impact`/`NS_Telegraph`/`NS_Cast` are now authored — see
+the AUD-42 disposition). This did not satisfy the promised realistic 3D
+surfaces and scalable hero-effect presentation.
 
 **Acceptance:** fresh-process shader/material validation with no missing texture
 or default-error materials; rendered walkthroughs of the hub, both realms,
@@ -1030,6 +1069,18 @@ This finding does not assert infringement; the required evidence is missing.
 **Acceptance:** all committed and cooked third-party assets map to documented
 approved sources and license files/credits. Check source redistribution separately
 from permission to ship cooked content; resolve any unknown source before release.
+
+**Resolution (2026-10-19).** The eight unknown-source audio files were replaced
+with project-original WAVs generated by
+`assets-raw/audio/original/generate_original_audio.py` (standard-library
+synthesis; 4 seamless loops + 4 one-shot SFX). The manifest rows now record
+`Project original (all rights reserved)`, and `QinglanAudioBootstrap.cpp`
+imports the new `original/` sources while keeping the `SW_*` target names and
+runtime paths unchanged. `regenerate-content.sh` fails when any of the eight
+sources or imported audio assets are missing, and
+`Qinglan.Content.AudioSourceContract` pins the source/target mapping. Remaining
+acceptance: run regeneration/cook so the committed `SW_*` uassets carry the new
+audio, then perform human listening QA.
 
 ### AUD-57 — P2 — Build and content regeneration depend on one uncommitted environment
 
@@ -1081,7 +1132,7 @@ a complete keyboard/controller new-profile playthrough without debug grants.
 [The existing test report](test-report.md) explicitly leaves Windows/Metal
 builds and interactive play pending. Linux compilation/headless tests and a
 swapchain attempt cannot establish target compatibility. The
-[Windows packaging directory](../../packaging/Windows/README.md) contains an
+[Windows packaging directory](../../packaging/windows/README.md) contains an
 incomplete template rather than a proven package/runbook; no completed Mac
 signing/notarization/install record exists. Release certification/account actions
 are separate owner-controlled steps; this audit request authorizes a TODO and
@@ -1143,3 +1194,182 @@ The release-ready gate additionally requires the target-device, performance,
 asset-rights, and distribution evidence in AUD-53 through AUD-60. Development
 completion and storefront publication are separate decisions. No unresolved P0/P1
 may be hidden behind a passing documentation validator.
+
+## Repair dispositions (2026-10-19)
+
+This section records the disposition of every AUD ID after the 2026-10-19
+repair waves. It does **not** declare development complete: the closure rule
+above still governs. "Fixed" below means the source defect was removed and
+automated coverage exercises the repaired path; "partially fixed" means the
+source work landed but acceptance still needs in-engine, rendered, or
+platform evidence; "open" and "blocked" are recorded as such.
+
+Environment for every automated result: Linux container, UE 5.8.3 source
+build (`tools/build/versions.lock`), headless `-nullrhi`. Evidence logs are in
+`docs/dev/evidence/`. Repair commits: `1c7e3a0` (build repairs, 27 tests),
+`ed02e88` (courier/trials/routing data, 35 tests), `16b1a7b` (proof guard
+runtime, combat/AI/VFX, bilingual runtime, content, 44 tests), `f481f03`
+(exit authority, focus, loadout, action gates, animation/VFX, 49 tests).
+Auxiliary: `ac56e83` (AUD-56 ledger), `368445d` (packaging evidence). Later
+waves: `f438ee1` (player menus/journal, textured surfaces, scene dressing,
+53 tests), `40213bd` (authored Niagara cue systems, Human weapon/cast sockets,
+66 tests), `36e16c5` (enemy presentation object paths, per-rig ABPs, hit-react
+montages, 67 tests), `73d9882` (clean regeneration + Shipping inventory),
+`1c61a3c` (cold-start profile frontend), `b0088cf` (trial hazard presenter +
+QA capture flags), `96a8b7d` (impact SFX, hero-skin binding test), `7aea4d8`
+(map collision contract), `8a0f72d` (keyboard attack J), `885da66`
+(AUD-44 fixed). Final verification: clean content regeneration `rc_all=0`,
+**70/70** automation, main journey 30/30, side quests 24/24, and a Linux
+Shipping package with `NS_*`/`ABP_*` inventory verified. The regenerated
+string table carries 966 keys (199 bilingual JSON keys). Packaging evidence:
+`docs/dev/evidence/package-linux-2026-10-20-wave44.log` and
+`packaging/evidence/linux-shipping-2026-10-20-wave44.txt`.
+
+| AUD | Disposition | Implementation and coverage | Remaining acceptance |
+| --- | --- | --- | --- |
+| AUD-01 | Partially fixed | Hub arrival no longer re-imports slot 0; save-before-travel wrappers; profile replacement clears run state. `ProcessRestartResume` simulates a process exit (new GameInstance/subsystems) and reloads the persisted checkpoint. Selected-slot frontend landed: `UQinglanGameInstance::Init` no longer creates slot 0 on first launch, `AQinglanHubGameMode` defers all arrival work (checkpoint resume, talisman refill, autosave, epilogue entry) until a profile session exists, and `AQinglanCharacter` opens the 3-slot Profile screen (local player controllers only) at cold start; a successful load/create closes it and runs the deferred arrival. The Profile screen cannot be backed out of without a session, and the load/create failures surface `menu.notice.load_failed`/`create_failed`. Verified in the packaged Shipping build with real keyboard input: empty slots render, Return creates slot 1 and enters the hub, Down+Return creates slot 2 — `docs/dev/evidence/rendered/profile-frontend-cold-start-2026-10-19.png`, `interactive-hub-spawn-keyboard-2026-10-19.png`, `profile-frontend-slot-navigation-2026-10-19.png`; save files for both slots are written. | Mac keyboard cold start → slot 1 load → hub render → hub autosave → `kill -9` (save byte-identical) → relaunch/resume was verified on 2026-10-21 (`docs/dev/evidence/mac-interactive-hub-2026-10-21.md`). A full CH00–CH07 playthrough with return/restart at every chapter remains. |
+| AUD-02 | Partially fixed | All promised boundaries request durable saves; realm resume restores room/vitals/encounters/blessings. `SaveRotationFaultInjection`, `SaveTruncatedTempRejected`, and `ProcessRestartResume` (new subsystem instance reload) cover the failure and restart paths. The cold-start frontend surfaces load/create failures as localized notices (`menu.notice.load_failed`/`create_failed`/`profile_required`) and keeps the selector open for retry; hub arrival work runs only after a successful selection. A real `SIGKILL` at the hub boundary was exercised on the packaged build: the slot-0 save hash was byte-identical before and after the kill, and relaunch → slot selection → hub loaded and wrote a new hub autosave (`kill-restart-hub-before-sigkill-2026-10-19.png`, `kill-restart-hub-after-restart-2026-10-19.png`). | The hub boundary was verified interactively on the Mac with a real `kill -9` (`docs/dev/evidence/mac-interactive-hub-2026-10-21.md`). Realm, reward-screen, exit and trial-prep boundaries remain for the full playthrough. |
+| AUD-03 | Fixed (source + real-file fault injection) | Rotation only replaces validated back-ups and never deletes the last valid copy before the new primary commits; a failed dead-backup delete now aborts fail-safe. Tests: `SaveBackupRecoveryChain` (primary+bak1 corrupt, bak2 recovered), `SaveRotationFaultInjection` (one-shot failure at each rotation Move/Delete; last commit stays loadable, retry leaves a validated backup), `SaveTruncatedTempRejected` (torn temp write leaves the old primary byte-identical). Uses test-only save-directory override + one-shot Move/Delete/Write hooks. | Real process-kill / OS-level I/O failure on target hardware. |
+| AUD-04 | Fixed (source) | Profile load/create atomically replaces profile+run, including an explicit empty run; reentrancy rejected. | Profile-switch UI with pawn/world teardown. |
+| AUD-05 | Fixed | Real signed stream state restored; room-wave rebuild reproduces the saved wave. Tests: `RunSignedStreamResume`, `RunUnfinishedRoomResume`. | Engine stream comparison across save/reload on cooked maps. |
+| AUD-06 | Fixed | Pending offer + owning room persisted; restore without reroll; selection saves once. Tests: `RunPendingDraftRoundtrip`, `RunDraftRoomReplay`. | Audio/UI verification of the restored offer. |
+| AUD-07 | Fixed | Journal-sized transaction id search; atomic settlement; allocation/profile/overflow failures retain loot with a notice. Tests: `ExpeditionBankingAtomicity`, `TransactionIdempotency`, `ExactBankingFloor`. | Real 999-entry histories and disk failures. |
+| AUD-08 | Fixed | First/repeat material payout contract and integer retreat/death flooring in production callers. Tests: `BankingMultipliers`, `ExactBankingFloor`. | Full first/repeat/retreat/death runs on cooked content. |
+| AUD-09 | Fixed | Owner-scoped objective/choice identity with ambiguity rejection and legacy migration. Tests: `StoryIdentityResolution`, `ScopedObjectiveRuntime`, `ChoiceSaveScopeMigration`. | CH04–CH07 journey. |
+| AUD-10 | Fixed | 16 late-story locations canonicalized; ledger/correspondence anchors authored and synthesized; trial gate/order and hub chapter scans fixed. `AuthoredCampaignRouting` validates the registry, `HubMapInteractionSpawner` the committed map. The opt-in new-profile journeys complete **30/30 main scenes and 24/24 side stages** through production APIs (`docs/dev/evidence/automation-2026-10-19-{campaign-30of30,sidequests-24of24}.log`). | Interactive keyboard/controller walkthrough on a stable display machine. |
+| AUD-11 | Fixed (guard runtime) | Guard term import + evaluator + ordered reset + anchor/choice gates + production producers for all major authored beats; the 30-scene campaign verifies every authored guard is satisfied by its production action (or the trial director's settlement). Tests: `GuardBlocksDialogueOnlyProgress`, `OrderedGuardReset`, `ConfirmationGuardGate`, `AuthoredCampaignRouting`, campaign 30/30. | The authored device mini-games (shutter/wedge/cooling) are represented by their anchor interactions; a dedicated mini-game pass would deepen them. |
+| AUD-12 | Fixed | Successful selection clears the skip halt. Test: `SkipChoiceResume`. | In-engine skip-before/after-choice QA. |
+| AUD-13 | Fixed | Authored choice groups, required groups, clickable/disabled-aware native choices, keyboard/controller/mouse navigation beyond four. Test: `GroupedChoiceAcknowledgment`. | Rendered input QA. |
+| AUD-14 | Fixed | Ending preview/acknowledge/confirm/cancel bound to the atomic transaction; modal input blocking; warning acknowledgement required. Test: `EndingConfirmationTransaction`. | All three endings rendered. |
+| AUD-15 | Fixed | Sanctuary rest advances fiction time (18 h/12 h), premature accept shows the authored retry line, arrivals broadcast. Test: `CourierDeliveryFlow`. | Interactive verification on cooked content. |
+| AUD-16 | Fixed | Story clock + delivery state persisted (schema v2), v1 migration synthesizes a pending reply, invariants enforce consistency. Tests: `DeliverySaveRoundtrip`, `SaveV1DeliveryMigration`. | Process-kill at each courier boundary. |
+| AUD-17 | Fixed | Completed agreement stages replay as revisions; effective A stays until B's reply is confirmed; rewards idempotent. Test: `AgreementRevisionFlow`. | Interactive revision on cooked content. |
+| AUD-18 | Fixed | Foundation/Golden Core admission authorities at every entry path. Tests: `AuthoredTrialAdmission`, `TrialAdmissionPolicy`. | In-engine gate verification. |
+| AUD-19 | Fixed (source) | Cancel/stay/return/success paths; success commits proof + breakthrough + hub travel; failed saves stay retryable. | In-engine success/failure/cancel/retry QA. |
+| AUD-20 | Fixed | Two-phase trials: storm schedule with ≥0.9 s warnings and safe spacing, then a required elite/shell kill; no free win. Tests: `TrialCatalogSpecs`, `HazardPlacementDeterministic`, `TimerExpiryRequiresKill`, `GoldenCoreEventOrder`. | Rendered hazard clarity and full trial QA. |
+| AUD-21 | Fixed (source+content) | Shared room layout drives authoring/doors/resume; tagged PlayerStarts regenerated; maps regenerated. Anchor object-name suffixes are stripped so interaction ids match authored keys. Test: `HubMapInteractionSpawner` loads the committed L_Hub and verifies all authored anchors. | Cooked collision/nav and enemy placement QA. |
+| AUD-22 | Fixed | Victory requires the final room with the boss room committed; defeat/retreat never write boss proof; distinct retreat. Test: `ExitRequiresBossClear`. | Full victory/retreat/defeat runs. |
+| AUD-23 | Fixed (source+content) | Arena gaps, off-floor anchors, overlapping trial targets, and boundary recovery addressed; hub anchors/start heights corrected; maps regenerated. | Cooked traversal QA. |
+| AUD-24 | Fixed (source+content) | Consistent Axis2D convention, gamepad bindings, regenerated input assets. | Development/Shipping input QA on both devices. |
+| AUD-25 | Fixed (source+content) | Pause action triggers while paused; pause/resume menu path. | In-engine pause/resume QA. |
+| AUD-26 | Fixed | Proximity + camera + line-of-sight focus with deterministic priority and a localized prompt. | Rendered prompt QA. |
+| AUD-27 | Fixed | Profile loadout resolves to technique assets and syncs on possess/BeginPlay/commit/travel. Test: `LoadoutSync`. | All eight techniques equipped/used in-engine. |
+| AUD-28 | Fixed (source) | Accepted-hit delegate drives enemy stagger/death; zero-health enemies stop. | Kills during windup/attack across delivery layers. |
+| AUD-29 | Fixed (source) | Attack shapes resolve through their own authorities; generic proximity limited. | Evasion QA per shape. |
+| AUD-30 | Fixed (source) | Projectiles sweep world blockers; spawn origin validated; piercing limited. | Wall/cover QA both sides. |
+| AUD-31 | Fixed (source) | Statuses apply only after an accepted authoritative hit. | I-frame/duplicate QA. |
+| AUD-32 | Fixed | Shared action gate, dodge buffering, forced reaction, choice input lock. Test: `ActionStateGate`. | Full input-state matrix QA. |
+| AUD-33 | Fixed | Process-wide cast identity + attacker in the dedupe key. Test: `HitKeyDedupe`. | Independent simultaneous attacks in-engine. |
+| AUD-34 | Fixed | Immunity clock re-anchors on every dodge start. Test: `ConsecutiveDodgeImmunity`. | Frame-rate matrix QA. |
+| AUD-35 | Fixed (source) | Bounded collision-aware Mist Step dash; Wet applied along the swept path with a deduplicated victim set. | In-engine dash QA. |
+| AUD-36 | Fixed | Root/slow drive movement through one authority with baseline restore; boss identity shared with Shock exclusion. Test: `StatusMoveMultiplier`. | Reapply/expiry/pool QA. |
+| AUD-37 | Fixed | Tier-2 purchase/state/persistence, 1.15 multiplier, Conduct/Burn/Wet bonuses, Herbal Knowledge in both heal paths, Grounded Steps stamina, equipment deltas. Test: `TechniqueTierBonus`. | Equip/unequip/save/load QA. |
+| AUD-38 | Fixed | Verdant Pulse timer starts at zero, total healing spread across the authored ticks. Test: `BurnThreeTickRefresh` (status cadence) covers the shared timing contract. | In-engine heal timing QA. |
+| AUD-39 | Fixed | Recall routes through the authoritative cleared-room retreat and never charges on rejection. | In-engine recall QA. |
+| AUD-40 | Fixed (source) | Wolf orbit has a finite budget and inward transition before the telegraph. | Functional AI test. |
+| AUD-41 | Fixed | Ashen embers gated to the boss at 50% with warnings and a safe-lane broadcast. | Rendered Low/Metal QA. |
+| AUD-42 | Partially fixed | Cue component instantiated on enemies, telegraph/ember/impact context carried, ground-center/ring/safe-lane placeholders, visible projectile bodies, no-Niagara fallback. `BootstrapNiagaraEffects` now authors `/Game/Qinglan/VFX/NS_{Impact,Telegraph,Cast}` from engine emitter templates (1 emitter handle each, post-save load verified; deletes the package on verification failure); the cue component resolves/caches the category system, spawns it for impact/telegraph/safe-lane with a bounded per-component Niagara budget, suppresses Niagara (placeholder markers remain) under Low quality / low-flash, and tears instances down on cue decay and pool reset. `Qinglan/VFX` is listed in `DirectoriesToAlwaysCook` because the systems are loaded by runtime path (no hard reference). Evidence: `content-bootstrap-2026-10-19-niagara-sockets.log`. Test: `Qinglan.VFX.NiagaraCueContract`. Enemy presentation paths were also package-only (`FSoftObjectPath` without `.Object`), so no archetype ever loaded its mesh, idle, or montage; the catalog now builds real object paths, addresses the Bat/Dragon meshes by their imported names, and resolves the sibling slot graph per rig. Test: `Qinglan.Content.EnemyPresentationAssets` (asserts every archetype mesh/idle/attack/hit-react asset resolves and its slot graph targets the mesh skeleton). The trial storm's `OnTrialHazardTelegraph` had no subscriber at all, so lightning strikes had no warning outline; the director now owns a cue presenter and draws the ground outline for every volley. Captured on the packaged build in the arena with Low preset + low-flash: wave-2 strike outlines and the spawned enemy are visible (`rendered/trial-lowflash-telegraph-wave2-dense-2026-10-19.png`). Impact/strike cues now play the imported `sfx_hit_impact`; swing/release/telegraph sounds remain owned by the sword, technique and enemy paths (no double audio). | Capture overlapping effects on the Metal backend. The **packaged Shipping client** produced a Metal frame with two strike telegraphs plus a wave enemy (`docs/dev/evidence/rendered/metal-shipping-trial-telegraphs-2026-10-21.png`); a developer `-game` comparison frame is also saved. DX12/Windows capture remains an owner action. |
+| AUD-43 | Fixed | Lights stored before registration, bounded, destroyed on decay/reset, honor preset + low-flash. Test: `CueLightBookkeeping`. | Rendered light-budget QA. |
+| AUD-44 | Fixed (source + content + rendered) | Montage references corrected, per-cut playback, cast montages, stationary-socket sampling with fallbacks, and a native animation instance (`UQinglanCharacterAnimInstance`) with a speed-driven Idle/Walk/Run/Airborne state machine plus action states wired on player and enemies. The bootstrap generates `SK_HumanHuman_Armature_Walk` (1.0 s) / `_Run` (0.6 s) via the engine data-controller recipe and a compiled `ABP_Human` (parent = the native anim instance, Root←Slot "DefaultSlot", 0 compile errors), so montage slots have a pose graph; non-Human rigs get their own compiled slot graphs (`ABP_Knight/Slime/Skeleton/Bat/Dragon`, 0 compile errors, target skeleton verified, re-loaded after save) and `AQinglanEnemyCharacter` derives/verifies the sibling graph from the mesh package. The bootstrap authors `sword_base`, `sword_tip`, and `cast_source` on `SK_Human_Skeleton` at `RightHand` (saved with the skeleton and re-verified every run); `AQinglanSwordComponent` samples the blade sockets with fallbacks for the sweep and `AQinglanCharacter::GetAimPoint` uses the cast socket. `AM_Human_HitReact` / `AM_Knight_HitReact` are cloned so every catalog path resolves. Tests: `MontagePathContract`, `NativeStateMachineExists`, `Qinglan.Animation.SkeletonSocketContract`, `Qinglan.Content.EnemyPresentationAssets`. Rendered: the packaged hub/walk captures show the procedural stride, and the arena capture shows a technique cast cue and skill-slot cooldown (`rendered/interactive-hub-walk-approach-2026-10-19.png`, `rendered/trial-lowflash-telegraph-wave2-dense-2026-10-19.png`, `rendered/trial-cast-cue-2026-10-20.png`). Keyboard J now covers the primary attack so a keyboard-only run can swing. | — |
+| AUD-45 | Fixed | Independent package per montage with explicit skeleton; post-build contract verification. Test: `MontagePathContract`; regeneration verified 8 montages. | Cooking/playback from a fresh process. |
+| AUD-46 | Fixed (source) | Bounded catalog asset cache replaces permanent rooting. | GC/count telemetry across rooms/trials. |
+| AUD-47 | Fixed (config) | `GameInstanceClass` moved to the maps-settings section. | Clean Saved/Config launch asserting the instance and Init log. |
+| AUD-48 | Fixed | Generated `DT_Localization` (890 bilingual rows), registered runtime text source for every `FText::FromStringTable` consumer, HUD prefers the service. Test: `BilingualKeyParityAndResolve`. Offline Shipping switch verified: with `[QinglanLocalization] PreferredCulture=zh-Hans`, every HUD string resolves in Chinese and CJK glyphs render (no tofu) — `docs/dev/evidence/rendered/hub-packaged-shipping-zh-Hans-2026-10-19.png`. | — |
+| AUD-49 | Fixed | First-launch state captured before profile creation; explicit culture preference persisted outside the profile. Test: `FirstLaunchOrdering`. | New-profile QA on a Chinese OS. |
+| AUD-50 | Fixed | `ST_Game` regenerated and asserted at import time (966 keys written; failure if the table truncates); the object-path table id bug that made every packaged lookup return the missing marker is fixed and covered by `Qinglan.Localization.StringTableRuntimeKeys`. | Fresh-process asset-load QA (now covered by the rendered packaged boot). |
+| AUD-51 | Fixed (source+tests) | Native pause, profile-slot, settings/accessibility, equipment/talisman, journal, shop/offer, and outcome screens with keyboard/controller/mouse navigation; HUD shows objective, talisman charges, trial time, barks. Tests: `JournalOpenCloseReopen`, `MenuStateMachine`, `OfferPersistence`. Rendered hub HUD confirmed in the packaged Shipping build (`docs/dev/evidence/rendered/`). | Full menu interaction QA on a display machine; outcome summary is limited to returned loot until Run exposes a settlement summary. |
+| AUD-52 | Fixed (source+tests) | Responsive native dialogue/record widgets with real font-size settings (not render scale), wrapping, scrolling, source-kind labels, record close/reopen. Test: `JournalOpenCloseReopen`. First rendered HUD pass shows correctly spaced skill slots and resolved labels. | Text-scale/720p/Retina/CJK visual QA remains a rendered acceptance step. |
+| AUD-53 | Fixed (Linux) | Packaging settings corrected to the config=Game section: all runtime-string content directories and all four maps cook. Package inventory verified in the IoStore table of contents (maps, DT_Localization, ST_Game, registry, widgets, montages, character/monster meshes, audio, materials); `package-game.sh` rc=0 and mandatory-output checks fixed. Evidence: `packaging/evidence/linux-shipping-2026-10-20-wave44.txt`. | Offline launch on a display machine; Windows/macOS cook inventory. |
+| AUD-54 | Fixed (source) | Correct dynamic-resolution CVar/user setting; GI/reflection/Nanite policy applied per preset; capability reasons. | Measured rendering on supported backends. |
+| AUD-55 | Partially fixed | 81 Poly Haven Texture2D assets imported with correct sRGB/compression; textured + solid MICs per surface set; master material with tiling/samplers; hub/trial surfaces textured; deterministic collision-free Quaternius nature dressing on all four maps; sky atmosphere + atmosphere-driven sun added to every map; hero skin texture imported and bound through `MIC_HumanCharacter` (the `BaseColor` parameter resolves to `T_Human_Clothed`; `Qinglan.Content.HeroSkinBinding`). Test: `TextureSetContract`. Rendered packaged screenshots show the textured world and a lit blue sky (`docs/dev/evidence/rendered/`), including a Low-preset + low-flash + `zh-Hans` boot (`hub-packaged-shipping-low-lowflash-zh-2026-10-19.png`). Hero cue effects now use the authored Niagara systems. | Hand art/UV and palette verification are now done: `M_QinglanSurface` compiles on Metal (linear-grayscale defaults for Roughness/AO) and the master/MIC carry the SkeletalMesh usage flag, so the packaged `-game`/Shipping frames show tan skin and the blue clothed bands; packaged close-ups are in `docs/dev/evidence/rendered/metal-shipping-hand-{near,normal}-2026-10-21.png` (see `metal-rendering-2026-10-21.md`). A Shipping hub segment was captured with the external Apple Metal HUD (60 s, 1,830 frames, frame interval mean/P95 33.34/33.34 ms, GPU mean/P95 21.39/23.82 ms; `docs/dev/evidence/perf-mac-shipping-hub-2026-10-21.md`). The HUD crash that blocked earlier attempts was fixed at the root (technique loadout `TObjectPtr`s were missing `UPROPERTY()`). Ordinary combat-room and normal-admission trial segments remain open. |
+| AUD-56 | Fixed (source+ledger) | Ledger populated with 42 records. The eight untraceable audio sources were replaced 2026-10-19 with project-original WAVs (generator script in `assets-raw/audio/original/`), the bootstrap imports the new `original/` sources under unchanged `SW_*` paths, `regenerate-content.sh` validates the eight sources and imported assets, and `Qinglan.Content.AudioSourceContract` pins the contract. No unknown or pending ledger rows remain. | Regeneration/cook re-imports the new audio into the committed `SW_*` uassets; human listening QA (loop seams, mix, SFX transients). |
+| AUD-57 | Fixed | Portable build/regenerate scripts, engine revision lock, nonzero on missing inputs, mandatory-output validation, regeneration rc_all=0. | Second-machine reproduction. |
+| AUD-58 | Partially fixed | 90 automation cases plus three real-file save fault-injection specs (`SaveBackupRecoveryChain`, `SaveRotationFaultInjection`, `SaveTruncatedTempRejected`) cover the repaired persistence/narrative/trial/combat/localization/UI/content paths. Packaged interactive evidence now includes keyboard menu/slot selection, WASD movement, mouse-look camera rotation, a real SIGKILL + relaunch at the hub boundary, Chinese/CJK and Low/low-flash boots, and Low/low-flash trial strike outlines (`docs/dev/evidence/rendered/interactive-*`, `kill-restart-*`, `profile-frontend-*`, `trial-*`). Both device classes are asserted at the mapping-asset level by `Qinglan.Input.BothDeviceMappingContract` (keyboard/mouse + gamepad sticks, face/shoulder buttons, triggers, d-pad). | Mac keyboard cold start/slot load, WASD movement and the hub-boundary `kill -9` + resume are now verified interactively (`docs/dev/evidence/mac-interactive-hub-2026-10-21.md`). A complete CH00–CH07 keyboard playthrough, realm/trial/ending boundaries, and the controller half (no physical gamepad attached) remain. |
+| AUD-59 | Partially fixed | Linux Shipping package rebuilt after the repair waves (rc=0) with a verified IoStore inventory (including the Niagara cue systems and per-rig slot graphs) and artifact hashes: `packaging/evidence/linux-shipping-2026-10-20-wave44.txt`. Direct cross-build probes both fail in UBT with "Platform Win64/Mac is not a valid platform to build. SDK validation failed" (`docs/dev/evidence/cross-build-win64-2026-10-20.log`, `cross-build-mac-2026-10-20.log`). | Windows Win64/DX12 still needs a Windows host. The **Mac arm64 Shipping build/cook succeeds**, the packaged client boots and renders, and both the cold-start Profile and hub courtyard frames are captured (`packaging/evidence/mac-shipping-2026-10-21.txt`, `docs/dev/evidence/rendered/metal-shipping-hub-2026-10-21.png`; the hub frame uses the `-QinglanAutoSlot` capture aid because real keystrokes do not reach the locked app). Win64 remains. |
+| AUD-60 | Fixed | README/CONTRIBUTING/test-report/build guide rewritten around recorded evidence with historical results labeled. | — |
+
+### Remaining acceptance gates (not satisfied by this repair work)
+
+1. **Full campaign playthrough** from a new profile through CH00–CH07, both
+   realms and trials, all side stages/records, and each ending branch, with
+   save/restart, defeat/retreat/retry, keyboard/controller and both locales.
+   This requires a display-capable machine and is the development-completion
+   gate from the closure rule above.
+2. **Fault injection** for save rotation, disk failures, and process kills at
+   every promised boundary. (Rotation/delete/torn-write and in-process restart
+   are covered; the hub boundary now has a real packaged `SIGKILL`; the
+   realm/reward/exit/trial-prep boundaries still need the interactive run.)
+3. **Rendered and cooked evidence**: collision/nav in regenerated maps, input
+   QA on both device classes, hazard clarity at Low/low-flash, CJK glyphs in
+   Shipping, and the target-platform performance captures. (Wave 36 closed the
+   Shipping CJK-glyph check and a Low + low-flash boot render; wave 37 added
+   real keyboard input evidence; the wave-39 arena capture shows trial strike
+   outlines under Low + low-flash and a spawned enemy. Collision/nav QA,
+   controller input, the Metal backend, and performance captures remain.)
+4. **Asset provenance** (resolved at source level 2026-10-19): the eight audio
+   assets are project-original and the ledger has no unknown or pending rows.
+   Regeneration/cook and listening QA remain before release.
+5. **Target platforms**: Windows x64 DX12 and native Apple Silicon Metal
+   builds and device acceptance (AUD-59) are outside this environment.
+
+No checkboxes above are ticked: per the closure rule, ticking requires the
+in-engine/platform evidence listed in each item's acceptance section.
+
+### Environment evidence for the blocked gates (2026-10-20)
+
+**Local Mac continuation:** the remaining work is now being attempted on an
+Apple M4 Mac with a display and Metal capability. The matching UE 5.8.3 source
+checkout, native dependencies, Xcode 27.1 and the separate Metal Toolchain
+are installed. UBT and native arm64 ShaderCompileWorker build successfully;
+the project editor passed UHT and is compiling. Native build/commandlet/package probes initially failed
+because the engine was absent. Host dispatch and raw-source portability
+repairs, and a palette import recipe repair, now exist at source level;
+their engine compilation, content regeneration and runtime acceptance are
+still pending. Existing Content binaries have not been changed. See
+[local-mac-setup.md](local-mac-setup.md) and the source-only
+[hand palette evidence](evidence/human-palette-source-2026-10-20.md).
+No disposition has been promoted on the strength of these changes. The
+container-specific blockers below are retained as historical evidence and
+must not be applied to this Mac's capabilities.
+
+Owner steps for the remaining items: `docs/dev/remaining-acceptance-runbook.md`.
+
+**Mac display lock (2026-10-21):** the native baseline is green and the Mac
+Shipping package is built and renders on Metal, but the owner's display
+session was locked while the capture pass ran (`IOConsoleLocked=true`,
+`CGSSessionScreenIsLocked=true`, `CGSSessionScreenLockedTime=1792571034`).
+A full-display capture was black. Before the `ApplySettings` fix a Metal client
+blocked in `FMacWindow::WaitForFullScreenTransition`; the fix makes the
+packaged client honor `-windowed`, and it produced packaged Metal frames for
+the cold-start screen and a trial with two strike telegraphs plus a wave enemy.
+Menu keystrokes still do not reach the app while locked, so slot selection,
+the hub gameplay frame, interactive playthroughs and the performance route
+remain owner actions. Evidence:
+[mac-display-locked-2026-10-21.md](evidence/mac-display-locked-2026-10-21.md),
+[metal-rendering-2026-10-21.md](evidence/metal-rendering-2026-10-21.md).
+
+Concrete probes run while attempting the remaining items, so the owner can
+reproduce or waive them:
+
+- **Controller**: the kernel has uinput (`/proc/misc` 10:223, `/sys/class/misc/
+  uinput` present), but opening `/dev/uinput` fails with `EPERM` even as root
+  (container device cgroup), and there is no `/dev/input`. A virtual gamepad
+  therefore cannot be created; only the mapping-asset contract
+  (`Qinglan.Input.BothDeviceMappingContract`) is verifiable here.
+- **Metal / Windows / macOS**: no Apple GPU or Metal runtime, and no Windows
+  SDK / cross toolchain in the container. Probed directly: UBT rejects both
+  `Build.sh QinglanAscension Win64 Shipping` and `... Mac Shipping` with
+  "Platform Win64/Mac is not a valid platform to build. SDK validation
+  failed" (logs: `cross-build-win64-2026-10-20.log`,
+  `cross-build-mac-2026-10-20.log`). Those builds require the owner.
+- **Performance captures**: `-csvprofile` and `-fpschart` runs of the packaged
+  client abort in the cluster's GPU contention failure (SIGSEGV →
+  `MallocCrash`, often within 30–65 s), so no stable frame-time capture can be
+  produced here. Short rendered runs (boot, frontend, trial wave 2) do succeed.
+  The editor `-game` fallback (for `stat unit`) crashes at startup with
+  `Assertion failed: !InLocalizationTargetPath.IsEmpty()`
+  (TextLocalizationManager.cpp:629) in this environment
+- **Interactive scope actually verified**: keyboard/mouse movement and camera,
+  menu/slot selection, hub-boundary `kill -9` + relaunch, arena trial start
+  with Low + low-flash strike outlines. A complete CH00–CH07 keyboard/controller
+  playthrough needs a stable display machine.

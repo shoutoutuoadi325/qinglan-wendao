@@ -1,13 +1,35 @@
-# Privacy Statement — Release Draft
+# Privacy Policy
 
-This statement describes the planned behavior of Qinglan: Path of Ascension. The game has not yet shipped. Verify every statement against the final Shipping builds and complete the support contact before using this as a public release policy.
+**Qinglan: Path of Ascension**  
+Publisher: Zhiqi Zhang  
+Effective date: 2026-10-25
 
-The planned game runs offline without an account. It does not include advertisements, in-app purchases, network analytics, or automatic upload of game logs and save files. It stores local progress, settings, optional profile labels, and limited diagnostic logs needed for operation on the player's device.
+[Chinese (Simplified)](localization/privacy/zh-Hans.md)
 
-Players can manage profiles and settings in the game. Local data can also be removed through the documented save-folder process; uninstall behavior must be verified per platform. No cloud synchronization is planned.
+## Privacy policy
 
-Players may voluntarily submit support reports. The game does not upload those automatically. Reports should be previewed and stripped of private information before sharing. Public GitHub issues are visible to others and should not contain raw saves, personal paths, contact details, or credentials.
+Qinglan: Path of Ascension is an offline single-player game. You do not need to
+create an account to play. The game contains no advertisements, in-app purchases,
+or network analytics and does not automatically send your save files or game
+logs to the publisher.
 
-Microsoft Store, operating-system services, download hosting, and GitHub may process information under their own policies. This statement does not describe or control those services. If the game later adds online features or data collection, update this statement before shipping them.
+The game stores progress, settings, optional profile labels, and operational
+diagnostic logs locally on your device. These files support saving and loading,
+personal preferences, and troubleshooting. You can manage your local profiles
+and settings in the game. The game does not provide cloud synchronization.
 
-Support contact: to be selected by the owner before release. Policy effective date: to be set when the final behavior and contact have been verified.
+If you contact support, we receive the information you choose to send, such as
+your email address, a description of the issue, and any attachments. We use this
+information to answer your request and investigate the issue. Please omit
+passwords, payment information, personal paths, and other unnecessary personal
+information. Public GitHub issue reports can be read by other people; use email
+for a private support request. We keep support correspondence only as long as
+needed to handle the request or meet applicable legal obligations.
+
+Microsoft Store, Windows, your email provider, and GitHub operate under their
+own privacy policies. Their processing is separate from the game's local data.
+
+For privacy questions or requests about support information you have sent,
+contact **zhiqizhangg@gmail.com**. You can also report general game issues at
+[GitHub Issues](https://github.com/shoutoutuoadi325/qinglan-wendao/issues).
+Changes to this policy will be published here with an updated effective date.

@@ -101,13 +101,21 @@ float UQinglanEconomyLibrary::GetBankingMultiplier(bool bVictory, bool bVoluntar
 
 FQinglanInventory UQinglanEconomyLibrary::ApplyBankingMultiplier(const FQinglanInventory& UnbankedLoot, bool bVictory, bool bVoluntaryRetreat)
 {
-	const double Multiplier = static_cast<double>(GetBankingMultiplier(bVictory, bVoluntaryRetreat));
+	// Exact rational arithmetic: 0.7f promoted to double is slightly below 0.7,
+	// so floor(100 * Multiplier) used to pay 69. Splitting quotient/remainder
+	// also avoids intermediate overflow and preserves int64 victory amounts.
+	const int64 Numerator = bVictory ? 10 : (bVoluntaryRetreat ? 7 : 5);
+	const auto Scale = [Numerator](int64 Amount)
+	{
+		// Preserve invalid negative input so the authoritative grant rejects it.
+		return Amount <= 0 ? Amount : (Amount / 10) * Numerator + ((Amount % 10) * Numerator) / 10;
+	};
 	FQinglanInventory Result;
 	// Floored per stack so a multiplier never mints fractional currency; boss
 	// proof flags are separate campaign flags and never pass through here.
-	Result.SpiritShards = static_cast<int64>(FMath::FloorToDouble(static_cast<double>(UnbankedLoot.SpiritShards) * Multiplier));
-	Result.SpiritHerb = static_cast<int64>(FMath::FloorToDouble(static_cast<double>(UnbankedLoot.SpiritHerb) * Multiplier));
-	Result.VeinCrystal = static_cast<int64>(FMath::FloorToDouble(static_cast<double>(UnbankedLoot.VeinCrystal) * Multiplier));
+	Result.SpiritShards = Scale(UnbankedLoot.SpiritShards);
+	Result.SpiritHerb = Scale(UnbankedLoot.SpiritHerb);
+	Result.VeinCrystal = Scale(UnbankedLoot.VeinCrystal);
 	return Result;
 }
 
@@ -423,6 +431,10 @@ void UQinglanEconomyLibrary::AppendPermanentRegen(UObject* WorldContext, float& 
 		}
 		EnergyRegen += Entry.EnergyRegenPerSecond;
 		StaminaRegenPercent += Entry.StaminaRegenPercent;
+		// AUD-37: Herbal Knowledge's +10% healing was accumulated but never
+		// folded; every heal path resolves this bundle inside the combat
+		// component's authoritative Heal entry point.
+		HealingPercent += Entry.HealingPercent;
 	}
 	StaminaRegen *= (1.f + StaminaRegenPercent / 100.f);
 
@@ -432,5 +444,39 @@ void UQinglanEconomyLibrary::AppendPermanentRegen(UObject* WorldContext, float& 
 	if (FindRelic(Profile->GetEquippedRelic(), Relic))
 	{
 		HealingPercent += Relic.BonusHealingPercent;
+	}
+}
+
+void UQinglanEconomyLibrary::GetPermanentAttributeBonuses(UObject* WorldContext,
+	float& OutMaxHealthBonus, float& OutMaxStaminaBonus)
+{
+	OutMaxHealthBonus = 0.f;
+	OutMaxStaminaBonus = 0.f;
+
+	UWorld* World = WorldContext ? GEngine->GetWorldFromContextObject(WorldContext, EGetWorldErrorMode::LogAndReturnNull) : nullptr;
+	UGameInstance* GameInstance = World ? World->GetGameInstance() : nullptr;
+	const UQinglanProfileSubsystem* Profile = GameInstance ? GameInstance->GetSubsystem<UQinglanProfileSubsystem>() : nullptr;
+	if (Profile == nullptr)
+	{
+		return;
+	}
+
+	// Equipped relic (Mountain Token is the authored health relic).
+	FQinglanRelicDef Relic;
+	if (FindRelic(Profile->GetEquippedRelic(), Relic))
+	{
+		OutMaxHealthBonus += Relic.BonusMaxHealth;
+	}
+
+	// Equipped passives: flat maxima only (percents belong to other surfaces).
+	for (const FName PassiveId : Profile->GetEquippedPassives())
+	{
+		FQinglanPassiveCatalogEntry Entry;
+		if (!FindPassive(PassiveId, Entry))
+		{
+			continue;
+		}
+		OutMaxHealthBonus += Entry.MaxHealthBonus;
+		OutMaxStaminaBonus += Entry.MaxStaminaBonus;
 	}
 }

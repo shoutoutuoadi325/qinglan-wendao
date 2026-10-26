@@ -126,7 +126,8 @@ public:
 	static constexpr int64 AshenFirstClearCrystals = 3;
 	static constexpr int64 AshenRepeatCrystals = 2;
 
-	/** Stable realm ids, mirror data/examples/realm.json and localization realm.* keys. */
+	/** Stable logical/save ids, matching localization realm.* keys. Map asset
+	 * names are separate: ashen_peak travels to L_AshenVerge. */
 	static constexpr const TCHAR* BambooRealmIdText = TEXT("bamboo_hollow");
 	static constexpr const TCHAR* AshenRealmIdText = TEXT("ashen_peak");
 	static constexpr const TCHAR* TutorialRealmIdText = TEXT("tutorial_guided");
@@ -242,4 +243,13 @@ public:
 	 */
 	UFUNCTION(BlueprintPure, Category = "Qinglan|Economy")
 	static void AppendPermanentRegen(UObject* WorldContext, float& EnergyRegen, float& StaminaRegen, float& HealingPercent);
+
+	/**
+	 * AUD-37: permanent-equipment contributions to the derived maxima, for the
+	 * combat component's attribute recomputation. Grounded Steps adds flat
+	 * MaxStamina; Steady Foundation and Mountain Token add flat MaxHealth.
+	 * No profile subsystem (headless tests/enemies): outputs stay 0.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Qinglan|Economy")
+	static void GetPermanentAttributeBonuses(UObject* WorldContext, float& OutMaxHealthBonus, float& OutMaxStaminaBonus);
 };

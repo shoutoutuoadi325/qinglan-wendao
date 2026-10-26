@@ -1,0 +1,26 @@
+{
+  "segment": "hub-route-shipping-01",
+  "samples": {
+    "hud_lines": 61,
+    "frames": 1830
+  },
+  "frame_interval_ms": {
+    "mean": 33.34,
+    "p95": 33.34,
+    "max": 50.0
+  },
+  "gpu_ms": {
+    "mean": 21.39,
+    "p95": 23.82,
+    "max": 40.22,
+    "zero_samples": 0
+  },
+  "hud_memory_mb": {
+    "field1_min": 3632.89,
+    "field1_max": 3632.89,
+    "field2_min": 4549.71,
+    "field2_max": 4833.97
+  },
+  "percentile_method": "nearest-rank P95 over every logged frame pair",
+  "notes": "Values are Apple Metal HUD measurements; frame interval is display-cadence-limited to the 30 FPS cap. Memory fields are the HUD's own reported values; their definitions are Apple's, not RSS/dedicated VRAM."
+}

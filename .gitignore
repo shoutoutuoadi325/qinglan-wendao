@@ -3,6 +3,7 @@ game/Binaries/
 game/Intermediate/
 game/Saved/
 game/DerivedDataCache/
+game/Build/
 game/.vs/
 game/*.sln
 game/*.xcodeproj/
@@ -31,8 +32,29 @@ __pycache__/
 Thumbs.db
 *.log
 core.*
+*.core
+*.tmp
+*.orig
+*.rej
+*.swp
+*~
+.claude/
 
-# Packaged builds are regenerable artifacts (bash /inspire/hdd/project/qianghuaxuexi/s26044/package-game.sh)
+# Packaged builds are regenerable with tools/build/package-game.sh
 packaging/Linux/Engine/
 packaging/Linux/QinglanAscension/
-packaging/windows/
+packaging/windows/Engine/
+packaging/windows/QinglanAscension/
+packaging/windows/*.exe
+
+# Portable build entry points are tracked despite the global build/ ignore
+!tools/build/
+packaging/LinuxDev/
+
+# Removable workspace-local toolchains, assets, downloads, and caches
+/.local/
+packaging/Mac/
+packaging/Win64/
+packaging/Windows/Engine/
+packaging/Windows/QinglanAscension/
+packaging/Windows/*.exe

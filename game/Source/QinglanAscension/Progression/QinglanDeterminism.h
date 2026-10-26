@@ -80,13 +80,16 @@ namespace QinglanDeterminism
 	 * (FRandomStream::GetCurrentSeed at export time). Initialize() seeds the
 	 * generator with the saved state directly, so the next draw equals the
 	 * next draw at save time (pre-room snapshot resume, blueprint section 1.6).
-	 * States <= 0 are degenerate/non-serializable and fall back to the derived
-	 * expedition seed so a hand-corrupted save can never wedge the pipeline.
+	 * The signed int32 state is preserved exactly: FRandomStream keeps its live
+	 * state as uint32 and GetCurrentSeed returns it reinterpreted, so zero and
+	 * negative values are legal engine states (docs/05 section 7 permits every
+	 * int32 stream state). Presence is schema information (the owning save's
+	 * bHasCheckpoint flag), so a serialized state is never replaced here and a
+	 * resumed stream reproduces the uninterrupted draws bit-for-bit.
 	 */
-	inline FRandomStream RestoreStream(int32 SavedGeneratorState, int32 DerivedSeedFallback)
+	inline FRandomStream RestoreStream(int32 SavedGeneratorState)
 	{
-		const int32 Fallback = DerivedSeedFallback > 0 ? DerivedSeedFallback : 1;
-		return FRandomStream(SavedGeneratorState > 0 ? SavedGeneratorState : Fallback);
+		return FRandomStream(SavedGeneratorState);
 	}
 
 	/**

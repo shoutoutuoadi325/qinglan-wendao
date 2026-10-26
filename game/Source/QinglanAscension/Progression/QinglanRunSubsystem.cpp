@@ -26,11 +26,18 @@
 #include "AI/QinglanEncounterDirector.h"
 #include "Combat/QinglanCharacter.h"
 #include "Combat/QinglanCombatComponent.h"
+#include "Core/QinglanInteractable.h"
+#include "Core/QinglanRoomLayout.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
+#include "Misc/PackageName.h"
 #include "Narrative/QinglanStoryDataTypes.h"
+#include "Narrative/QinglanStoryRuntime.h"
+#include "Narrative/QinglanStorySubsystem.h"
 #include "Persistence/QinglanSaveGame.h"
+#include "Persistence/QinglanProfileSnapshot.h"
+#include "Persistence/QinglanSaveSubsystem.h"
 #include "Progression/QinglanBlessingDrafting.h"
 #include "Progression/QinglanDeterminism.h"
 #include "Progression/QinglanEconomyLibrary.h"
@@ -41,8 +48,10 @@
 
 namespace
 {
-	// --- 7-room contract (blueprint section 1.4; data/examples/realm.json) ---
-	constexpr int32 RealmRoomCount = 7;
+	// --- Full realms use seven rooms; CH01 guided training returns at shrine 3. ---
+	constexpr int32 RealmRoomCount = QinglanRoomLayout::RoomCount;
+	constexpr int32 TutorialRoomCount = 4;
+	constexpr int32 TutorialReturnRoom = TutorialRoomCount - 1;
 
 	/** Rooms 2 and 4 (0-based) end with a blessing draft (blueprint 1.4 "blessing #1/#2"). */
 	bool IsBlessingDraftRoom(int32 RoomIndex)
@@ -61,7 +70,7 @@ namespace
 	 */
 	struct FRoomSpec { EQinglanRoomKind Kind; int32 SpiritShards; };
 
-	void FillRoomSpecs(FName RealmId, FRoomSpec (&OutRooms)[RealmRoomCount])
+	int32 FillRoomSpecs(FName RealmId, FRoomSpec (&OutRooms)[RealmRoomCount])
 	{
 		static const FRoomSpec Bamboo[RealmRoomCount] =
 		{
@@ -75,13 +84,15 @@ namespace
 			{ EQinglanRoomKind::Shrine, 0 }, { EQinglanRoomKind::Elite, 80 },
 			{ EQinglanRoomKind::Boss, 100 }, { EQinglanRoomKind::Exit, 0 }
 		};
-		static const FRoomSpec Tutorial[RealmRoomCount] =
+		static const FRoomSpec Tutorial[TutorialRoomCount] =
 		{
-			{ EQinglanRoomKind::Entrance, 0 }, { EQinglanRoomKind::Combat, 20 }, { EQinglanRoomKind::Combat, 20 },
-			{ EQinglanRoomKind::Shrine, 0 }, { EQinglanRoomKind::Elite, 20 },
-			{ EQinglanRoomKind::Boss, 20 }, { EQinglanRoomKind::Exit, 0 }
+			{ EQinglanRoomKind::Entrance, 0 },
+			{ EQinglanRoomKind::Combat, UQinglanEconomyLibrary::TutorialPayoutShards / 2 },
+			{ EQinglanRoomKind::Combat, UQinglanEconomyLibrary::TutorialPayoutShards - UQinglanEconomyLibrary::TutorialPayoutShards / 2 },
+			{ EQinglanRoomKind::Shrine, 0 }
 		};
 		const FRoomSpec* Selected = Bamboo;
+		int32 RoomCount = RealmRoomCount;
 		if (RealmId == FName(UQinglanEconomyLibrary::AshenRealmIdText))
 		{
 			Selected = Ashen;
@@ -89,22 +100,28 @@ namespace
 		else if (RealmId == FName(UQinglanEconomyLibrary::TutorialRealmIdText))
 		{
 			Selected = Tutorial;
+			RoomCount = TutorialRoomCount;
 		}
-		for (int32 Index = 0; Index < RealmRoomCount; ++Index)
+		for (int32 Index = 0; Index < RoomCount; ++Index)
 		{
 			OutRooms[Index] = Selected[Index];
 		}
+		return RoomCount;
 	}
 
 	/** Per-instance expedition state (see file-header FIXME-CONTRACT). */
 	struct FQinglanRunState
 	{
 		bool bInExpedition = false;
+		bool bEndingExpedition = false; // Blocks reentrant banking from commit delegates.
+		bool bNeedsCheckpointResume = false;
 		FName RealmId = NAME_None;
 		int32 RealmSeed = 1;
 
 		/** The three seeded streams (docs/01 section 6; determinism helpers). */
 		FRandomStream EncounterStream;
+		int32 EntryEncounterStreamState = 0;
+		bool bHasRoomEncounterSnapshot = false;
 		FRandomStream LootStream;
 		FRandomStream BlessingStream;
 
@@ -118,6 +135,8 @@ namespace
 		TArray<FName> AcquiredBlessings;
 		/** Cached 1-of-3 draft rolled at draft-room completion (docs/03 section 5). */
 		TArray<FName> PendingBlessingOffer;
+		/** Room whose completion rolled the pending draft (checkpoint restore, AUD-06). */
+		int32 PendingOfferRoom = INDEX_NONE;
 		bool bDraftPending = false;
 
 		/** Room ids whose reward already committed; idempotency for crash-resume. */
@@ -154,19 +173,25 @@ namespace
 	/** Resolves the realm template: imported asset first, synthesis otherwise. */
 	const UQinglanRealmDataAsset* ResolveRealmTemplate(const UQinglanRunSubsystem* Subsystem, FName RealmId)
 	{
-		// FIXME-CONTRACT(data): the imported realm asset path is a convention
-		// (/Game/Qinglan/Data/DA_Realm_<id>) until the editor importer authors
-		// the realm data assets; synthesis keeps headless runs identical.
-		const FString AssetPath = FString::Printf(TEXT("/Game/Qinglan/Data/DA_Realm_%s"), *RealmId.ToString());
-		// TCHAR* constructor: the FString overload is explicit in some engine versions.
-		if (UQinglanRealmDataAsset* Imported = Cast<UQinglanRealmDataAsset>(FSoftObjectPath(*AssetPath).TryLoad()))
-		{
-			return Imported;
-		}
 		FQinglanRunState& State = StateFor(const_cast<UQinglanRunSubsystem*>(Subsystem));
 		if (State.SynthesizedRealm.IsValid() && State.SynthesizedRealm->RealmId == RealmId)
 		{
 			return State.SynthesizedRealm.Get();
+		}
+		// CH01 always uses its authored four-room guided route, never a stale
+		// seven-room tutorial asset. DataImport currently authors only bamboo;
+		// Ashen uses the catalog fallback, so a missing optional
+		// package is expected and must not trigger a failed UObject load on
+		// every room query. Logical ids are independent of map asset names:
+		// persisted ashen_peak resumes on L_AshenVerge.
+		const FString PackagePath = FString::Printf(TEXT("/Game/Qinglan/Data/DA_Realm_%s"), *RealmId.ToString());
+		if (RealmId != FName(UQinglanEconomyLibrary::TutorialRealmIdText) && FPackageName::DoesPackageExist(PackagePath))
+		{
+			const FString ObjectPath = PackagePath + TEXT(".") + FPackageName::GetShortName(PackagePath);
+			if (UQinglanRealmDataAsset* Imported = Cast<UQinglanRealmDataAsset>(FSoftObjectPath(*ObjectPath).TryLoad()))
+			{
+				return Imported;
+			}
 		}
 		UQinglanRealmDataAsset* Realm = NewObject<UQinglanRealmDataAsset>(GetTransientPackage());
 		if (!Realm)
@@ -178,9 +203,9 @@ namespace
 		Realm->DefaultSeed = State.RealmSeed;
 		Realm->MaxConcurrentEnemies = 8; // docs/01 section 6 cap
 		FRoomSpec Specs[RealmRoomCount];
-		FillRoomSpecs(RealmId, Specs);
-		Realm->Rooms.SetNum(RealmRoomCount);
-		for (int32 Index = 0; Index < RealmRoomCount; ++Index)
+		const int32 RoomCount = FillRoomSpecs(RealmId, Specs);
+		Realm->Rooms.SetNum(RoomCount);
+		for (int32 Index = 0; Index < RoomCount; ++Index)
 		{
 			Realm->Rooms[Index].Kind = Specs[Index].Kind;
 			Realm->Rooms[Index].SpiritShards = Specs[Index].SpiritShards;
@@ -310,11 +335,29 @@ namespace
 			: nullptr;
 	}
 
+	/** Index of the realm's Boss room, or INDEX_NONE when the template has none. */
+	int32 FindBossRoomIndex(const UQinglanRealmDataAsset* Realm)
+	{
+		if (!Realm)
+		{
+			return INDEX_NONE;
+		}
+		for (int32 RoomIndex = 0; RoomIndex < Realm->GetRoomCount(); ++RoomIndex)
+		{
+			if (Realm->GetRoomKind(RoomIndex) == EQinglanRoomKind::Boss)
+			{
+				return RoomIndex;
+			}
+		}
+		return INDEX_NONE;
+	}
+
 	/**
 	 * Unique, journal-stable banking transaction id. Repeat expeditions of the
 	 * same realm must never collide (a replayed id would silently skip the
-	 * payout), so the counter probes the profile journal until an uncommitted
-	 * id is found; the journal makes the probe stable across reloads.
+	 * payout), so the counter probes the profile journal upward without an
+	 * arbitrary cap (the journal's own 8192-entry invariant bound keeps the
+	 * search finite); the journal makes the probe stable across reloads.
 	 */
 	FName MakeBankingTransactionId(UQinglanProfileSubsystem* Profile, FName RealmId)
 	{
@@ -322,17 +365,81 @@ namespace
 		{
 			return NAME_None;
 		}
-		int32 Counter = 1;
-		while (Counter < 1000)
+		FQinglanProfileSnapshot Snapshot;
+		Profile->ExportStateForSave(Snapshot);
+		// At most N candidates can be occupied by N journal entries.
+		for (int32 Counter = 1; Counter <= Snapshot.CommittedTransactionIds.Num() + 1; ++Counter)
 		{
 			const FName Candidate(*FString::Printf(TEXT("tx.run.%s.%02d.bank"), *RealmId.ToString(), Counter));
 			if (!Profile->WasTransactionCommitted(Candidate))
 			{
 				return Candidate;
 			}
-			++Counter;
 		}
 		return NAME_None;
+	}
+
+	/**
+	 * Durable save at the run's safe boundaries (entrance, completed-room
+	 * reward, post-selection draft commit, banking; AUD-02). The save
+	 * subsystem broadcasts OnSaveFailed for the UI when a write does not
+	 * commit; the boundary caller only keeps a log breadcrumb.
+	 */
+	void CommitBoundarySave(const UQinglanRunSubsystem* Subsystem)
+	{
+		const UGameInstance* Instance = Subsystem->GetGameInstance();
+		UQinglanSaveSubsystem* Save = Instance ? const_cast<UGameInstance*>(Instance)->GetSubsystem<UQinglanSaveSubsystem>() : nullptr;
+		if (!Save)
+		{
+			return;
+		}
+		FText SaveError;
+		if (!Save->SaveNow(SaveError))
+		{
+			UE_LOG(LogQinglan, Warning, TEXT("Run boundary save did not commit: %s"), *SaveError.ToString());
+		}
+	}
+
+	/**
+	 * Victory material top-up (AUD-08): the economy table's repeat material
+	 * total is the guaranteed per-clear material payout; the elite room's
+	 * guaranteed material is one unit of it granted early at room completion,
+	 * so the banking grant tops the remainder up. Retreat/defeat keep only
+	 * the per-stack floored loot (ApplyBankingMultiplier ran before this).
+	 */
+	bool AppendRepeatMaterialPayout(const FQinglanRunState& State, const UQinglanRealmDataAsset* Realm, FQinglanInventory& InOutGrant)
+	{
+		FQinglanInventory Repeat;
+		if (!UQinglanEconomyLibrary::GetExpeditionPayout(State.RealmId, /*bFirstClear*/ false, Repeat))
+		{
+			return true; // tutorial: its two combat rewards + guaranteed herb already match the authored payout
+		}
+		int32 CommittedEliteRooms = 0;
+		for (const int32 RoomId : State.CommittedRoomIds)
+		{
+			if (Realm && Realm->Rooms.IsValidIndex(RoomId) && Realm->GetRoomKind(RoomId) == EQinglanRoomKind::Elite)
+			{
+				++CommittedEliteRooms;
+			}
+		}
+		FQinglanInventory Candidate = InOutGrant;
+		const auto Add = [](int64& Amount, int64 Delta)
+		{
+			if (Amount < 0 || Delta < 0 || Delta > MAX_int64 - Amount) { return false; }
+			Amount += Delta;
+			return true;
+		};
+		if (State.RealmId == FName(UQinglanEconomyLibrary::AshenRealmIdText))
+		{
+			if (!Add(Candidate.VeinCrystal, FMath::Max<int64>(0, Repeat.VeinCrystal - CommittedEliteRooms))) { return false; }
+		}
+		else
+		{
+			if (!Add(Candidate.SpiritHerb, FMath::Max<int64>(0, Repeat.SpiritHerb - CommittedEliteRooms))
+				|| !Add(Candidate.VeinCrystal, Repeat.VeinCrystal)) { return false; }
+		}
+		InOutGrant = Candidate;
+		return true;
 	}
 }
 
@@ -343,7 +450,7 @@ namespace
 bool UQinglanRunSubsystem::StartExpedition(FName RealmId, int32 Seed)
 {
 	FQinglanRunState& State = StateFor(this);
-	if (State.bInExpedition)
+	if (State.bInExpedition || State.bEndingExpedition)
 	{
 		UE_LOG(LogQinglan, Warning, TEXT("StartExpedition rejected: expedition to %s already open"), *State.RealmId.ToString());
 		return false;
@@ -353,28 +460,41 @@ bool UQinglanRunSubsystem::StartExpedition(FName RealmId, int32 Seed)
 		|| RealmId == FName(UQinglanEconomyLibrary::AshenRealmIdText)
 		|| RealmId == FName(UQinglanEconomyLibrary::TutorialRealmIdText);
 
+	if (!bKnownRealm)
+	{
+		UE_LOG(LogQinglan, Warning, TEXT("StartExpedition rejected: unknown realm '%s'"), *RealmId.ToString());
+		return false;
+	}
+	UQinglanSaveSubsystem* Save = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQinglanSaveSubsystem>() : nullptr;
+	if (!Save || !Save->IsProfileSessionActive())
+	{
+		UE_LOG(LogQinglan, Warning, TEXT("StartExpedition rejected: no active profile session"));
+		return false;
+	}
 	State.bInExpedition = true;
+	State.bNeedsCheckpointResume = false;
 	State.RealmId = RealmId;
 	State.RealmSeed = QinglanDeterminism::CanonicalSeed(Seed);
 	State.EncounterStream = QinglanDeterminism::MakeEncounterStream(State.RealmSeed);
+	State.EntryEncounterStreamState = State.EncounterStream.GetCurrentSeed();
+	State.bHasRoomEncounterSnapshot = false;
 	State.LootStream = QinglanDeterminism::MakeLootStream(State.RealmSeed);
 	State.BlessingStream = QinglanDeterminism::MakeBlessingStream(State.RealmSeed);
-	State.CurrentRoomIndex = INDEX_NONE;
+	// Travel may save before the realm world exists: use a valid entrance
+	// checkpoint now; EnterRoom(0) captures the actual realm entrance later.
+	State.CurrentRoomIndex = 0;
 	State.UnbankedLoot = FQinglanInventory();
 	State.AcquiredBlessings.Reset();
 	State.PendingBlessingOffer.Reset();
+	State.PendingOfferRoom = INDEX_NONE;
 	State.bDraftPending = false;
 	State.CommittedRoomIds.Reset();
-	State.EntryAttributes = FQinglanAttributes();
+	State.EntryAttributes = SnapshotPlayerAttributes(this);
+	Save->BeginExpeditionCheckpoint();
 
 	// Force the template to exist (imported asset or synthesis) so the realm id
-	// is validated up front; unknown realms fall back to the bamboo template
-	// rather than failing the whole expedition (logged, never fatal).
+	// is available before the first entrance checkpoint.
 	const UQinglanRealmDataAsset* Realm = ResolveRealmTemplate(this, RealmId);
-	if (!bKnownRealm)
-	{
-		UE_LOG(LogQinglan, Warning, TEXT("StartExpedition: unknown realm '%s' (synthesizing the 7-room contract)"), *RealmId.ToString());
-	}
 	UE_LOG(LogQinglan, Log, TEXT("Expedition begin: realm %s seed %d (%d rooms)"),
 		*RealmId.ToString(), State.RealmSeed, Realm ? Realm->GetRoomCount() : 0);
 	return true;
@@ -387,6 +507,11 @@ bool UQinglanRunSubsystem::EnterRoom(int32 RoomIndex)
 	{
 		return false;
 	}
+	if (State.bDraftPending && RoomIndex != State.CurrentRoomIndex)
+	{
+		UE_LOG(LogQinglan, Warning, TEXT("EnterRoom rejected: select the pending blessing before leaving"));
+		return false;
+	}
 	const UQinglanRealmDataAsset* Realm = ResolveRealmTemplate(this, State.RealmId);
 	if (!Realm || RoomIndex < 0 || RoomIndex >= Realm->GetRoomCount())
 	{
@@ -394,11 +519,33 @@ bool UQinglanRunSubsystem::EnterRoom(int32 RoomIndex)
 		return false;
 	}
 
+	// An unfinished room checkpoint stores its pre-wave RNG state, because
+	// the new world must reproduce this room's wave rather than draw the next.
+	if (!State.CommittedRoomIds.Contains(RoomIndex))
+	{
+		if (State.CurrentRoomIndex == RoomIndex && State.bHasRoomEncounterSnapshot)
+		{
+			State.EncounterStream = QinglanDeterminism::RestoreStream(State.EntryEncounterStreamState);
+		}
+		State.EntryEncounterStreamState = State.EncounterStream.GetCurrentSeed();
+		State.bHasRoomEncounterSnapshot = true;
+	}
 	State.CurrentRoomIndex = RoomIndex;
 	// Pre-room snapshot: this exact attributes value rides the checkpoint
 	// (docs/05 section 6 crash-resume restores room-entrance vitals).
 	State.EntryAttributes = SnapshotPlayerAttributes(this);
 	OnRoomEntered.Broadcast(RoomIndex);
+	// AUD-11: authored CH01_S02 proof term for reaching the room-3 shrine.
+	if (RoomIndex == 3)
+	{
+		if (UGameInstance* GameInstance = GetGameInstance())
+		{
+			if (UQinglanStorySubsystem* Story = GameInstance->GetSubsystem<UQinglanStorySubsystem>())
+			{
+				QinglanStoryRuntime::NotifyGameplayEvent(Story, FName(TEXT("shrine.room3_reached")), {});
+			}
+		}
+	}
 
 	// Room pipeline drives the encounter: the realm game mode owns the
 	// director actor; combat/elite/boss rooms begin their wave now, so doors
@@ -416,6 +563,7 @@ bool UQinglanRunSubsystem::EnterRoom(int32 RoomIndex)
 	{
 		if (AQinglanEncounterDirector* Director = FindDirector(this))
 		{
+			Director->SetRoomOrigin(QinglanRoomLayout::RoomCenter(RoomIndex));
 			Director->BeginEncounter(Wave, RoomIndex, Realm->GetRoomKind(RoomIndex) == EQinglanRoomKind::Boss);
 		}
 		else
@@ -425,6 +573,10 @@ bool UQinglanRunSubsystem::EnterRoom(int32 RoomIndex)
 			UE_LOG(LogQinglan, Verbose, TEXT("EnterRoom: no encounter director in the world; room %d armed without a wave"), RoomIndex);
 		}
 	}
+
+	// Room entrance is a safe checkpoint boundary (blueprint section 1.6);
+	// the durable write persists the pre-room snapshot for crash resume (AUD-02).
+	CommitBoundarySave(this);
 	return true;
 }
 
@@ -469,8 +621,19 @@ void UQinglanRunSubsystem::CompleteCurrentRoom(FName TransactionId)
 		}
 	}
 
-	OnRoomCompleted.Broadcast(RoomIndex, Shards);
+	// CH01 returns at shrine 3, before the full realm's elite and boss rooms.
+	// Its one guaranteed herb is earned with the second guided combat reward,
+	// and shares that room's committed-id guard/checkpoint, so reload cannot
+	// replay it. The two room rewards already sum to the full 80-shard payout.
+	if (State.RealmId == FName(UQinglanEconomyLibrary::TutorialRealmIdText) && RoomIndex == 2)
+	{
+		State.UnbankedLoot.SpiritHerb += UQinglanEconomyLibrary::TutorialPayoutHerbs;
+	}
 
+	// AUD-22: clearing the boss room commits its reward, but boss proof and the
+	// campaign flag are settlement outcomes. EndExpedition writes them only for
+	// an authoritative victory (boss cleared AND the run reached the exit), so a
+	// later defeat/retreat can never earn progression from this encounter.
 	// Blessing draft after rooms 2 and 4 (blueprint 1.4; docs/03 section 5):
 	// the roll consumes the blessings stream exactly once per draft room.
 	if (IsBlessingDraftRoom(RoomIndex))
@@ -478,83 +641,218 @@ void UQinglanRunSubsystem::CompleteCurrentRoom(FName TransactionId)
 		State.PendingBlessingOffer.Reset();
 		QinglanBlessingDrafting::RollOffer(State.BlessingStream, State.AcquiredBlessings, State.PendingBlessingOffer);
 		State.bDraftPending = !State.PendingBlessingOffer.IsEmpty();
+		State.PendingOfferRoom = State.bDraftPending ? RoomIndex : INDEX_NONE;
 	}
+
+	// AUD-02/06: persist both the reward and the exact pending offer. Waiting
+	// for a selection would leave the promised completed-room boundary unsaved.
+	CommitBoundarySave(this);
+	// Reward observers can now query the actual offer and committed room state.
+	OnRoomCompleted.Broadcast(RoomIndex, Shards);
 }
 
 void UQinglanRunSubsystem::EndExpedition(bool bVictory, bool bVoluntaryRetreat)
 {
 	FQinglanRunState& State = StateFor(this);
-	if (!State.bInExpedition)
+	if (!State.bInExpedition || State.bEndingExpedition)
 	{
 		return;
 	}
-
-	// Banking (docs/03 section 6): apply the outcome multiplier floored per
-	// stack, then commit once through the profile subsystem's journaled,
-	// idempotent mutation path. Boss proof flags never pass through here.
+	TGuardValue<bool> EndingGuard(State.bEndingExpedition, true);
 	UGameInstance* Instance = GetGameInstance();
 	UQinglanProfileSubsystem* Profile = Instance ? Instance->GetSubsystem<UQinglanProfileSubsystem>() : nullptr;
-	if (Profile)
+	UQinglanSaveSubsystem* Save = Instance ? Instance->GetSubsystem<UQinglanSaveSubsystem>() : nullptr;
+	const UQinglanRealmDataAsset* Realm = ResolveRealmTemplate(this, State.RealmId);
+	// Full realms require a completed boss and their final exit; CH01's
+	// guided route instead requires both combats, blessing and shrine 3.
+	// Defeat/retreat never qualify for boss proof.
+	const bool bAuthoritativeVictory = bVictory && CanClaimVictory();
+	if (!Profile || !Save || !Save->IsProfileSessionActive() || (bVictory && !bAuthoritativeVictory))
 	{
-		const FQinglanInventory Banked = UQinglanEconomyLibrary::ApplyBankingMultiplier(State.UnbankedLoot, bVictory, bVoluntaryRetreat);
-		const FName BankTx = MakeBankingTransactionId(Profile, State.RealmId);
-		if (BankTx != NAME_None && !Profile->TryGrant(BankTx, Banked))
+		UE_LOG(LogQinglan, Warning, TEXT("Banking rejected: missing profile or unearned victory"));
+		OnBankingFailed.Broadcast();
+		return;
+	}
+
+	FQinglanInventory Banked = UQinglanEconomyLibrary::ApplyBankingMultiplier(State.UnbankedLoot, bVictory, bVoluntaryRetreat);
+	FQinglanInventory FirstClearBonus;
+	FName FirstClearId = NAME_None;
+	// AUD-22: first-clear rewards ride the same authoritative victory gate as
+	// the settlement itself; defeat/retreat never compute or grant them.
+	if (bAuthoritativeVictory && State.RealmId == FName(UQinglanEconomyLibrary::TutorialRealmIdText))
+	{
+		// The guided reward is an expedition TOTAL, not another room reward or
+		// a guardian first-clear bonus. Reconcile to the authored amount once
+		// the short-route proof passes, including a resumed pre-fix checkpoint
+		// that earned the former 20+20 shard split before reaching shrine 3.
+		UQinglanEconomyLibrary::GetTutorialPayout(Banked);
+	}
+	else if (bAuthoritativeVictory)
+	{
+		if (!AppendRepeatMaterialPayout(State, Realm, Banked))
 		{
-			// Overflow rejection: leave the run open so the UI can show the
-			// preview instead of silently destroying the loot.
-			UE_LOG(LogQinglan, Error, TEXT("EndExpedition: banking transaction rejected; expedition kept open"));
+			UE_LOG(LogQinglan, Warning, TEXT("Banking rejected: material top-up overflow"));
+			OnBankingFailed.Broadcast();
 			return;
 		}
-
-		// Separate, idempotent first-clear bonus for a victorious boss clear
-		// (docs/03 section 2). Keyed by realm boss, so repeats never re-pay.
-		const FName BossId = UQinglanEconomyLibrary::GetBossIdForRealm(State.RealmId);
-		if (bVictory && BossId != NAME_None)
+		FQinglanInventory First, Repeat;
+		if (UQinglanEconomyLibrary::GetExpeditionPayout(State.RealmId, true, First)
+			&& UQinglanEconomyLibrary::GetExpeditionPayout(State.RealmId, false, Repeat))
 		{
-			FQinglanInventory Payout;
-			if (UQinglanEconomyLibrary::GetExpeditionPayout(State.RealmId, /*bFirstClear*/ true, Payout))
-			{
-				// Only the bonus portion is granted here; the base payout is the
-				// expedition total already banked from room rewards above
-				// (docs/03 section 2: "Base payout is the expedition total,
-				// including room rewards, not an additional boss payout").
-				FQinglanInventory BonusOnly;
-				const int64 BaseShards = (State.RealmId == FName(UQinglanEconomyLibrary::AshenRealmIdText))
-					? UQinglanEconomyLibrary::AshenBaseShards : UQinglanEconomyLibrary::BambooBaseShards;
-				BonusOnly.SpiritShards = Payout.SpiritShards - BaseShards;
-				BonusOnly.SpiritHerb = Payout.SpiritHerb;
-				BonusOnly.VeinCrystal = Payout.VeinCrystal;
-				Profile->TryGrant(UQinglanEconomyLibrary::MakeFirstClearTransactionId(NAME_None, BossId), BonusOnly);
-			}
+			// Full first-clear totals include base rewards, not another material
+			// stack. Only their difference is the one-time bonus (AUD-08).
+			FirstClearBonus.SpiritShards = First.SpiritShards - Repeat.SpiritShards;
+			FirstClearBonus.SpiritHerb = First.SpiritHerb - Repeat.SpiritHerb;
+			FirstClearBonus.VeinCrystal = First.VeinCrystal - Repeat.VeinCrystal;
+			FirstClearId = UQinglanEconomyLibrary::MakeFirstClearTransactionId(NAME_None,
+				UQinglanEconomyLibrary::GetBossIdForRealm(State.RealmId));
 		}
+	}
+	const FName BankTx = MakeBankingTransactionId(Profile, State.RealmId);
+	if (BankTx.IsNone() || !Profile->TryBankExpedition(BankTx, Banked, FirstClearId, FirstClearBonus))
+	{
+		// No partial grant/bonus/journal mutation: leave all run loot retryable.
+		UE_LOG(LogQinglan, Warning, TEXT("Banking rejected: allocation, capacity or inventory overflow"));
+		OnBankingFailed.Broadcast();
+		return;
+	}
 
-		// Bank the combat proof for the breakthrough gate (docs/03 section 1:
-		// Foundation breakthrough requires the bamboo guardian proof; Golden
-		// Core requires ashen). The story path sets its own flag on scene
-		// completion; IsBambooCleared/IsAshenCleared accept either.
-		if (BossId == FName(UQinglanEconomyLibrary::GetBossIdForRealm(FName(UQinglanEconomyLibrary::BambooRealmIdText))))
+	// AUD-22: boss proof/campaign progression is written exactly once, here,
+	// after the authoritative victory settlement committed. Defeat and retreat
+	// pass bVictory=false and therefore never reach this write.
+	if (ShouldWriteBossProof(bVictory))
+	{
+		if (State.RealmId == FName(UQinglanEconomyLibrary::BambooRealmIdText))
 		{
 			Profile->SetCampaignFlag(FName(QinglanProgression::BambooClearedCampaignFlag));
 		}
-		else if (BossId == FName(UQinglanEconomyLibrary::GetBossIdForRealm(FName(UQinglanEconomyLibrary::AshenRealmIdText))))
+		else if (State.RealmId == FName(UQinglanEconomyLibrary::AshenRealmIdText))
 		{
 			Profile->SetCampaignFlag(FName(QinglanProgression::AshenClearedCampaignFlag));
 		}
 	}
 
-	// Blessings expire at expedition end (docs/03 section 5); the run state
-	// itself resets so the next StartExpedition begins clean.
+	// Profile commit callbacks above saw an open expedition and skipped the hub
+	// autosave. Close it now, then save profile + absence of checkpoint together.
+	// AUD-11: the authored banking proof term (CH01_S03); emitted only after
+	// the settlement above committed, so a failed bank never proves it.
+	if (UGameInstance* GameInstance = GetGameInstance())
+	{
+		if (UQinglanStorySubsystem* Story = GameInstance->GetSubsystem<UQinglanStorySubsystem>())
+		{
+			QinglanStoryRuntime::NotifyGameplayEvent(Story, FName(TEXT("bank.reward_banked")), {});
+		}
+	}
 	State.bInExpedition = false;
+	State.bNeedsCheckpointResume = false;
 	State.AcquiredBlessings.Reset();
+	State.EntryEncounterStreamState = 0;
+	State.bHasRoomEncounterSnapshot = false;
 	State.PendingBlessingOffer.Reset();
+	State.PendingOfferRoom = INDEX_NONE;
 	State.bDraftPending = false;
 	State.UnbankedLoot = FQinglanInventory();
 	State.CommittedRoomIds.Reset();
 	State.CurrentRoomIndex = INDEX_NONE;
 	State.EntryAttributes = FQinglanAttributes();
-
+	CommitBoundarySave(this);
+	// A disk failure retains the banked in-memory profile and last valid disk
+	// snapshot; guarded travel retries SaveActiveSession before leaving. The
+	// player must still get a retry/error UI (AUD-02/51), not a success claim.
 	OnExpeditionEnded.Broadcast();
 	UE_LOG(LogQinglan, Log, TEXT("Expedition ended (victory=%d voluntary=%d)"), bVictory ? 1 : 0, bVoluntaryRetreat ? 1 : 0);
+}
+
+// ---------------------------------------------------------------------------
+// AUD-22: authoritative exit / victory / retreat gates
+// ---------------------------------------------------------------------------
+
+int32 UQinglanRunSubsystem::GetBossRoomIndex() const
+{
+	const FQinglanRunState* State = FindStateFor(this);
+	if (!State || !State->bInExpedition)
+	{
+		return INDEX_NONE;
+	}
+	return FindBossRoomIndex(ResolveRealmTemplate(this, State->RealmId));
+}
+
+bool UQinglanRunSubsystem::IsBossRoomCompleted() const
+{
+	const FQinglanRunState* State = FindStateFor(this);
+	if (!State || !State->bInExpedition)
+	{
+		return false;
+	}
+	const int32 BossRoomIndex = GetBossRoomIndex();
+	return BossRoomIndex != INDEX_NONE && State->CommittedRoomIds.Contains(BossRoomIndex);
+}
+
+bool UQinglanRunSubsystem::CanClaimVictory() const
+{
+	const FQinglanRunState* State = FindStateFor(this);
+	if (!State || !State->bInExpedition)
+	{
+		return false;
+	}
+	const UQinglanRealmDataAsset* Realm = ResolveRealmTemplate(this, State->RealmId);
+	if (!Realm || Realm->GetRoomCount() <= 0)
+	{
+		return false;
+	}
+	if (State->RealmId == FName(UQinglanEconomyLibrary::TutorialRealmIdText))
+	{
+		// A short guided route is not a Bamboo Guardian clear. Its return is
+		// earned by both combat rooms, the real room-2 blessing selection, and
+		// reaching the authored safe shrine; no synthetic boss proof is used.
+		return Realm->GetRoomCount() == TutorialRoomCount
+			&& Realm->GetRoomKind(TutorialReturnRoom) == EQinglanRoomKind::Shrine
+			&& State->CurrentRoomIndex == TutorialReturnRoom
+			&& State->CommittedRoomIds.Contains(1) && State->CommittedRoomIds.Contains(2)
+			&& !State->bDraftPending && !State->AcquiredBlessings.IsEmpty();
+	}
+	// The exit interaction lives in the last room; a boss clear alone is not a
+	// completed expedition (the player could still die to trailing adds).
+	const int32 ExitRoomIndex = Realm->GetRoomCount() - 1;
+	return State->CurrentRoomIndex == ExitRoomIndex && IsBossRoomCompleted();
+}
+
+bool UQinglanRunSubsystem::ShouldWriteBossProof(bool bVictory) const
+{
+	// Defeat (false/false) and retreat (false/true) always land here as
+	// bVictory=false. The boss-room completion alone deliberately does not
+	// qualify: progression must be earned on the victory settlement path.
+	return bVictory && IsBossRoomCompleted();
+}
+
+bool UQinglanRunSubsystem::RequestExit()
+{
+	const FQinglanRunState* State = FindStateFor(this);
+	if (!State || !State->bInExpedition)
+	{
+		return false;
+	}
+	if (!CanClaimVictory())
+	{
+		UE_LOG(LogQinglan, Warning,
+			TEXT("Exit refused: route completion requirements unmet (boss room %d, current room %d)"),
+			GetBossRoomIndex(), State->CurrentRoomIndex);
+		return false;
+	}
+	EndExpedition(/*bVictory=*/true, /*bVoluntaryRetreat=*/false);
+	return true;
+}
+
+bool UQinglanRunSubsystem::RequestRetreat()
+{
+	const FQinglanRunState* State = FindStateFor(this);
+	if (!State || !State->bInExpedition)
+	{
+		return false;
+	}
+	// Distinct retreat path: 70% banking, no victory, no boss proof.
+	EndExpedition(/*bVictory=*/false, /*bVoluntaryRetreat=*/true);
+	return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -637,7 +935,12 @@ bool UQinglanRunSubsystem::AcceptBlessing(FName BlessingId)
 	State.AcquiredBlessings.Add(BlessingId);
 	// One pick consumes the draft; remaining options vanish (docs/03 section 5).
 	State.PendingBlessingOffer.Reset();
+	State.PendingOfferRoom = INDEX_NONE;
 	State.bDraftPending = false;
+	// Replace the pending-offer checkpoint with the selected blessing: the
+	// chosen blessing is granted exactly once and must survive a quit now
+	// (AUD-06 acceptance: "a chosen blessing is granted once").
+	CommitBoundarySave(this);
 	return true;
 }
 
@@ -645,6 +948,50 @@ FQinglanInventory UQinglanRunSubsystem::GetUnbankedLoot() const
 {
 	const FQinglanRunState* State = FindStateFor(this);
 	return State ? State->UnbankedLoot : FQinglanInventory();
+}
+
+void UQinglanRunSubsystem::ResetRun()
+{
+	// AUD-04: discard the entire profile-owned session, including cached realm,
+	// RNGs, draft, loot and room snapshot. This is not a completed expedition:
+	// do not broadcast OnExpeditionEnded (subscribers may trigger banking/travel).
+	RunStates().Remove(this);
+	// TODO(AUD-04/AUD-51): profile selection must tear down the old world/pawn
+	// before resuming another profile; this reset only owns subsystem state.
+}
+
+FName UQinglanRunSubsystem::GetPendingCheckpointRealm() const
+{
+	const FQinglanRunState* State = FindStateFor(this);
+	return State && State->bInExpedition && State->bNeedsCheckpointResume ? State->RealmId : NAME_None;
+}
+
+bool UQinglanRunSubsystem::NeedsCheckpointResume() const
+{
+	return !GetPendingCheckpointRealm().IsNone();
+}
+
+FName UQinglanRunSubsystem::GetPendingCheckpointMap() const
+{
+	const FName Realm = GetPendingCheckpointRealm();
+	if (Realm == FName(UQinglanEconomyLibrary::BambooRealmIdText)
+		|| Realm == FName(UQinglanEconomyLibrary::TutorialRealmIdText))
+	{
+		return FName(QinglanInteraction::BambooMapPath);
+	}
+	if (Realm == FName(UQinglanEconomyLibrary::AshenRealmIdText))
+	{
+		return FName(QinglanInteraction::AshenMapPath);
+	}
+	return NAME_None;
+}
+
+void UQinglanRunSubsystem::MarkCheckpointResumed()
+{
+	if (FQinglanRunState* State = RunStates().Find(this))
+	{
+		State->bNeedsCheckpointResume = false;
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -664,11 +1011,14 @@ void UQinglanRunSubsystem::ExportCheckpoint(FQinglanCheckpoint& Out) const
 	Out.RealmSeed = State->RealmSeed;
 	// Generator states serialize so the next draw after resume equals the next
 	// draw at save time (QinglanDeterminism::RestoreStream contract).
-	Out.EncounterStreamState = State->EncounterStream.GetCurrentSeed();
+	Out.EncounterStreamState = State->bHasRoomEncounterSnapshot && !State->CommittedRoomIds.Contains(State->CurrentRoomIndex)
+		? State->EntryEncounterStreamState : State->EncounterStream.GetCurrentSeed();
 	Out.LootStreamState = State->LootStream.GetCurrentSeed();
 	Out.BlessingStreamState = State->BlessingStream.GetCurrentSeed();
 	Out.RoomIndex = State->CurrentRoomIndex;
 	Out.AcquiredBlessings = State->AcquiredBlessings;
+	Out.PendingBlessingOffer = State->PendingBlessingOffer;
+	Out.PendingBlessingRoom = State->PendingOfferRoom;
 	Out.PlayerAttributes = State->EntryAttributes;
 	Out.Loot = State->UnbankedLoot;
 	Out.CommittedRoomIds = State->CommittedRoomIds;
@@ -676,27 +1026,45 @@ void UQinglanRunSubsystem::ExportCheckpoint(FQinglanCheckpoint& Out) const
 
 void UQinglanRunSubsystem::ImportCheckpoint(const FQinglanCheckpoint& In)
 {
-	FQinglanRunState& State = StateFor(this);
+	// Replace, rather than merge with, the previous profile's run state.
+	ResetRun();
 	if (In.RealmId == NAME_None)
 	{
-		return; // "at the sanctuary": nothing to resume
+		return; // Explicit empty checkpoint also clears a previous expedition.
 	}
+	FQinglanRunState& State = StateFor(this);
 	State.bInExpedition = true;
+	State.bNeedsCheckpointResume = true;
 	State.RealmId = In.RealmId;
 	State.RealmSeed = In.RealmSeed > 0 ? In.RealmSeed : 1;
-	State.EncounterStream = QinglanDeterminism::RestoreStream(In.EncounterStreamState, QinglanDeterminism::MakeEncounterStream(State.RealmSeed).GetCurrentSeed());
-	State.LootStream = QinglanDeterminism::RestoreStream(In.LootStreamState, QinglanDeterminism::MakeLootStream(State.RealmSeed).GetCurrentSeed());
-	State.BlessingStream = QinglanDeterminism::RestoreStream(In.BlessingStreamState, QinglanDeterminism::MakeBlessingStream(State.RealmSeed).GetCurrentSeed());
+	State.EncounterStream = QinglanDeterminism::RestoreStream(In.EncounterStreamState);
+	State.LootStream = QinglanDeterminism::RestoreStream(In.LootStreamState);
+	State.BlessingStream = QinglanDeterminism::RestoreStream(In.BlessingStreamState);
 	State.CurrentRoomIndex = In.RoomIndex;
 	State.AcquiredBlessings = In.AcquiredBlessings;
 	State.EntryAttributes = In.PlayerAttributes;
 	State.UnbankedLoot = In.Loot;
 	State.CommittedRoomIds = In.CommittedRoomIds;
-	// A resumed draft is re-rolled only by completing the next draft room; a
-	// pending (un-accepted) offer at crash time does not survive (blueprint 1.6
-	// safe checkpoints only).
-	State.PendingBlessingOffer.Reset();
-	State.bDraftPending = false;
+	// Older guided saves could still be standing in the full realm's rooms
+	// 4-6. Keep earned combat/draft proof, loot and exact RNG states, but resume
+	// at CH01's return shrine once both guided combats were already committed.
+	// This is position-only compatibility; victory settlement alone reconciles
+	// the tutorial payout. Ordinary realms and unfinished guided routes retain
+	// their original checkpoint positions.
+	if (State.RealmId == FName(UQinglanEconomyLibrary::TutorialRealmIdText)
+		&& In.RoomIndex >= TutorialReturnRoom && In.RoomIndex < RealmRoomCount
+		&& State.CommittedRoomIds.Contains(1) && State.CommittedRoomIds.Contains(2))
+	{
+		State.CurrentRoomIndex = TutorialReturnRoom;
+	}
+	// AUD-06: importing consumes no random draw and keeps the same choices.
+	// The save subsystem validates offer/room pairing before calling this bridge.
+	State.PendingBlessingOffer = In.PendingBlessingOffer;
+	State.PendingOfferRoom = In.PendingBlessingRoom;
+	State.bDraftPending = !State.PendingBlessingOffer.IsEmpty();
+	// TODO(AUD-06): migrate legacy saves that already committed a draft room
+	// without an offer. Its original roll cannot be recovered from current data;
+	// choose/document an explicit compatibility policy rather than reroll silently.
 
 	ResolveRealmTemplate(this, State.RealmId); // ensure the template exists for queries
 	UE_LOG(LogQinglan, Log, TEXT("Checkpoint resumed: realm %s room %d"), *State.RealmId.ToString(), State.CurrentRoomIndex);

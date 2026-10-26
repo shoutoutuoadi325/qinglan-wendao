@@ -4,12 +4,14 @@
 #include "Combat/QinglanCharacter.h"
 
 #include "QinglanAscension.h"
+#include "Combat/QinglanCharacterAnimInstance.h"
 #include "Combat/QinglanSwordComponent.h"
 #include "Combat/QinglanDodgeComponent.h"
 #include "Combat/QinglanCombatComponent.h"
 #include "Combat/QinglanTalismanComponent.h"
 #include "Combat/QinglanTechniqueComponent.h"
 #include "Core/QinglanCoreTypes.h"
+#include "Progression/QinglanEconomyLibrary.h"
 
 // The scaffold references UQinglanStatusComponent but the Combat folder scaffold does
 // not ship that header (parallel module SPELL-001 provides it). Compile with or
@@ -25,10 +27,15 @@
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Animation/AnimBlueprintGeneratedClass.h"
+#include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
 #include "Animation/AnimSequence.h"
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/SkeletalMesh.h"
+#include "Misc/CommandLine.h"
+#include "Misc/PackageName.h"
 #include "UObject/SoftObjectPath.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -37,14 +44,22 @@
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
 #include "InputAction.h"
+#include "InputCoreTypes.h"
+#include "Components/InputComponent.h"
+#include "Framework/Commands/InputChord.h"
 #include "InputTriggers.h"
 #include "Kismet/GameplayStatics.h"
+#include "Framework/Application/SlateApplication.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "UObject/ConstructorHelpers.h"
 #include "Blueprint/UserWidget.h"
 #include "Core/QinglanInteractable.h"
+#include "Core/QinglanGameModeBase.h"
+#include "Core/QinglanTrialAdmission.h"
+#include "Core/QinglanTrialDirector.h"
+#include "Persistence/QinglanSaveSubsystem.h"
 #include "Narrative/QinglanStoryDataTypes.h"
 #include "Narrative/QinglanStoryRuntime.h"
 #include "Progression/QinglanProfileSubsystem.h"
@@ -178,6 +193,11 @@ namespace
 
 	// --- Playable-loop glue tunables (task contract; interaction layer) ---
 	constexpr float QinglanInteractRange = 300.f;        // cm proximity for interact aiming
+	// The camera sits a full arm length behind the player, so a station at the
+	// player's feet is already ~350 cm from the camera. Capping the camera leg
+	// at the proximity range made every nearby station unfocusable (AUD-26):
+	// allow the arm length plus the proximity reach.
+	constexpr float QinglanInteractCameraReach = QinglanInteractRange + 350.f + 100.f;
 	constexpr float QinglanInteractAimDot = 0.5f;        // camera-aim cone half-angle (~60 deg)
 	constexpr float QinglanDefeatTravelDelay = 1.75f;    // s death beat before the hub reload
 	constexpr float QinglanOnScreenMessageSeconds = 8.f; // fallback notice duration
@@ -192,7 +212,22 @@ namespace
 		}
 	}
 
-	/** Nearest interactable inside the camera-aim cone (no trace; simple distance + dot). */
+	struct FQinglanInteractCandidate
+	{
+		AQinglanInteractable* Actor = nullptr;
+		float PlayerDistance = 0.f;
+		float Dot = 0.f;
+	};
+
+	/**
+	 * AUD-26: aimed interactable. All of the following must hold:
+	 *  - player -> interactable distance <= 300 cm,
+	 *  - camera -> interactable distance <= 300 cm,
+	 *  - the interactable lies inside the camera-aim cone (dot >= 0.5),
+	 *  - the camera has ECC_Visibility line of sight (player ignored).
+	 * Overlaps are resolved deterministically: closer to the player first,
+	 * then larger aim dot, then actor name as the stable tie-break.
+	 */
 	AQinglanInteractable* QinglanFindAimedInteractable(AQinglanCharacter* Self)
 	{
 		UWorld* const World = Self ? Self->GetWorld() : nullptr;
@@ -200,27 +235,82 @@ namespace
 		{
 			return nullptr;
 		}
-		const FVector AimOrigin = Self->FollowCamera ? Self->FollowCamera->GetComponentLocation() : Self->GetActorLocation();
+		const FVector PlayerLocation = Self->GetActorLocation();
+		const FVector AimOrigin = Self->FollowCamera ? Self->FollowCamera->GetComponentLocation() : PlayerLocation;
 		const FVector AimDirection = Self->FollowCamera
 			? Self->FollowCamera->GetComponentRotation().Vector()
 			: Self->GetActorForwardVector();
-		AQinglanInteractable* Best = nullptr;
-		float BestDot = QinglanInteractAimDot;
+
+		TArray<FQinglanInteractCandidate> Candidates;
 		for (TActorIterator<AQinglanInteractable> It(World); It; ++It)
 		{
-			const FVector Delta = It->GetActorLocation() - AimOrigin;
-			if (Delta.Size() > QinglanInteractRange)
+			AQinglanInteractable* const Candidate = *It;
+			const FVector AnchorLocation = Candidate->GetActorLocation();
+			const float PlayerDistance = FVector::Dist(PlayerLocation, AnchorLocation);
+			if (PlayerDistance > QinglanInteractRange)
 			{
 				continue;
 			}
-			const float Dot = FVector::DotProduct(AimDirection, Delta.GetSafeNormal());
-			if (Dot > BestDot)
+			// Authored anchors sit on the walking surface. Aim/visibility use a
+			// point above that surface so the floor cannot occlude the E prompt.
+			const FVector TargetLocation = AnchorLocation + FVector(0.f, 0.f, 80.f);
+			const FVector CameraDelta = TargetLocation - AimOrigin;
+			if (CameraDelta.Size() > QinglanInteractCameraReach)
 			{
-				BestDot = Dot;
-				Best = *It;
+				continue;
 			}
+			const float Dot = FVector::DotProduct(AimDirection, CameraDelta.GetSafeNormal());
+			if (Dot < QinglanInteractAimDot)
+			{
+				continue;
+			}
+			// Visibility: the interaction anchor itself has no collision, so any
+			// blocking hit between the camera and the anchor obscures it.
+			FCollisionQueryParams Params(SCENE_QUERY_STAT(QinglanInteractAimTrace), /*bTraceComplex=*/false, Self);
+			Params.AddIgnoredActor(Self);
+			FHitResult Hit;
+			const bool bBlocked = World->LineTraceSingleByChannel(Hit, AimOrigin, TargetLocation, ECC_Visibility, Params);
+			if (bBlocked && Hit.GetActor() != Candidate)
+			{
+				continue;
+			}
+			Candidates.Add({ Candidate, PlayerDistance, Dot });
 		}
-		return Best;
+
+		Candidates.Sort([](const FQinglanInteractCandidate& A, const FQinglanInteractCandidate& B)
+		{
+			if (!FMath::IsNearlyEqual(A.PlayerDistance, B.PlayerDistance))
+			{
+				return A.PlayerDistance < B.PlayerDistance; // closer to the player wins
+			}
+			if (!FMath::IsNearlyEqual(A.Dot, B.Dot))
+			{
+				return A.Dot > B.Dot; // better aim wins
+			}
+			return A.Actor->GetName() < B.Actor->GetName(); // deterministic tie-break
+		});
+		return Candidates.IsEmpty() ? nullptr : Candidates[0].Actor;
+	}
+
+	/** AUD-26: "action.interact" + the spawner's DisplayNameKey when authored. */
+	FText QinglanMakeInteractPrompt(const AQinglanInteractable* Target)
+	{
+		const FName ActionKey(TEXT("action.interact"));
+		const FText Action = UQinglanHUDStatics::HasGameText(ActionKey)
+			? UQinglanHUDStatics::GameText(ActionKey)
+			: NSLOCTEXT("Qinglan", "Interact.Action", "Interact");
+		if (!Target || Target->DisplayNameKey.IsNone()
+			|| !UQinglanHUDStatics::HasGameText(Target->DisplayNameKey))
+		{
+			return Action;
+		}
+		const FText Name = UQinglanHUDStatics::GameText(Target->DisplayNameKey);
+		if (Name.IsEmpty())
+		{
+			return Action;
+		}
+		// Ordered-format fallback pattern (no new string-table key authored).
+		return FText::Format(NSLOCTEXT("Qinglan", "Interact.Prompt", "{0}: {1}"), Action, Name);
 	}
 
 	template <typename T>
@@ -351,6 +441,144 @@ namespace
 		const FVector Normalized = Direction.GetSafeNormal2D();
 		return Normalized.IsNearlyZero() ? FVector::ForwardVector : Normalized;
 	}
+
+	// --- Gameplay-proof event producers (AUD-11) ---
+
+	/**
+	 * Character -> proof relay. The actor owns the relay through a UPROPERTY,
+	 * so it survives while the actor is alive without rooting its world. Dynamic
+	 * delegates bind UFUNCTIONs only; the relay forwards stable proof event
+	 * names to QinglanStoryRuntime::NotifyGameplayEvent.
+	 */
+	void QinglanBindGameplayProofEvents(AQinglanCharacter* Character, UQinglanStorySubsystem* Story,
+		TObjectPtr<UQinglanGameplayProofRelay>& RelaySlot)
+	{
+		if (Character == nullptr || Story == nullptr)
+		{
+			return;
+		}
+		if (!RelaySlot)
+		{
+			RelaySlot = NewObject<UQinglanGameplayProofRelay>(Character);
+		}
+		UQinglanGameplayProofRelay* Relay = RelaySlot.Get();
+		Relay->StorySubsystem = Story;
+		Relay->OwnerActor = Character;
+		if (UQinglanCombatComponent* Combat = Character->GetCombat())
+		{
+			Combat->OnDamageResultResolved.AddUniqueDynamic(Relay, &UQinglanGameplayProofRelay::HandleDamageResultResolved);
+		}
+		if (UQinglanDodgeComponent* Dodge = QinglanFindComponent<UQinglanDodgeComponent>(Character))
+		{
+			Dodge->OnDodgeStarted.AddUniqueDynamic(Relay, &UQinglanGameplayProofRelay::HandleDodgeStarted);
+		}
+		if (UQinglanTechniqueComponent* Techniques = Character->GetTechniques())
+		{
+			Techniques->OnCastReleased.AddUniqueDynamic(Relay, &UQinglanGameplayProofRelay::HandleCastReleased);
+		}
+	}
+
+	void QinglanUnbindGameplayProofEvents(AQinglanCharacter* Character,
+		TObjectPtr<UQinglanGameplayProofRelay>& RelaySlot)
+	{
+		if (Character == nullptr)
+		{
+			return;
+		}
+		UQinglanGameplayProofRelay* Relay = RelaySlot.Get();
+		if (Relay == nullptr)
+		{
+			return;
+		}
+		if (UQinglanCombatComponent* Combat = Character->GetCombat())
+		{
+			Combat->OnDamageResultResolved.RemoveDynamic(Relay, &UQinglanGameplayProofRelay::HandleDamageResultResolved);
+		}
+		if (UQinglanDodgeComponent* Dodge = QinglanFindComponent<UQinglanDodgeComponent>(Character))
+		{
+			Dodge->OnDodgeStarted.RemoveDynamic(Relay, &UQinglanGameplayProofRelay::HandleDodgeStarted);
+		}
+		if (UQinglanTechniqueComponent* Techniques = Character->GetTechniques())
+		{
+			Techniques->OnCastReleased.RemoveDynamic(Relay, &UQinglanGameplayProofRelay::HandleCastReleased);
+		}
+		Relay->StorySubsystem.Reset();
+		Relay->OwnerActor.Reset();
+		RelaySlot = nullptr;
+	}
+
+	/** Authored room-clear realm token ("tutorial_guided" -> "tutorial"). */
+	FString QinglanRoomClearRealmToken(FName RealmId)
+	{
+		const FString Id = RealmId.ToString();
+		if (Id.StartsWith(TEXT("tutorial"))) { return TEXT("tutorial"); }
+		if (Id.StartsWith(TEXT("bamboo"))) { return TEXT("bamboo"); }
+		if (Id.StartsWith(TEXT("ashen"))) { return TEXT("ashen"); }
+		return Id;
+	}
+
+	// AUD-44: ABP_Human's parent is the native state machine; its compiled
+	// Root+DefaultSlot graph supplies the pose output that native slot montages
+	// require. Missing/incompatible assets fall back to the native class.
+	const TCHAR* const HumanAnimBlueprintPackage = TEXT("/Game/Qinglan/Characters/Human/ABP_Human");
+	const TCHAR* const HumanAnimBlueprintClassPath =
+		TEXT("/Game/Qinglan/Characters/Human/ABP_Human.ABP_Human_C");
+
+	UClass* ResolveHumanoidAnimInstanceClass(const USkeletalMesh* Mesh)
+	{
+		const USkeleton* const MeshSkeleton = Mesh ? Mesh->GetSkeleton() : nullptr;
+		if (MeshSkeleton && FPackageName::DoesPackageExist(HumanAnimBlueprintPackage))
+		{
+			if (UClass* const AnimBlueprintClass =
+					LoadClass<UQinglanCharacterAnimInstance>(nullptr, HumanAnimBlueprintClassPath))
+			{
+				const UAnimBlueprintGeneratedClass* const GeneratedClass =
+					Cast<UAnimBlueprintGeneratedClass>(AnimBlueprintClass);
+				if (GeneratedClass && GeneratedClass->GetTargetSkeleton() == MeshSkeleton)
+				{
+					return AnimBlueprintClass;
+				}
+			}
+		}
+		return UQinglanCharacterAnimInstance::StaticClass();
+	}
+}
+
+// ---------------------------------------------------------------------------
+// UQinglanGameplayProofRelay
+// ---------------------------------------------------------------------------
+
+void UQinglanGameplayProofRelay::HandleDamageResultResolved(const FQinglanResolvedDamage& Result)
+{
+	UQinglanStorySubsystem* Story = StorySubsystem.Get();
+	AActor* Owner = OwnerActor.Get();
+	if (Story == nullptr || Owner == nullptr || Result.Attacker.Get() != Owner)
+	{
+		return;
+	}
+	// The resolved result carries only the cast id; technique proofs are
+	// emitted by HandleCastReleased, whose delegate carries TechniqueId.
+	QinglanStoryRuntime::NotifyGameplayEvent(Story, FName(TEXT("combat.sword_hit")), {});
+}
+
+void UQinglanGameplayProofRelay::HandleDodgeStarted(float /*Duration*/)
+{
+	UQinglanStorySubsystem* Story = StorySubsystem.Get();
+	if (Story != nullptr)
+	{
+		QinglanStoryRuntime::NotifyGameplayEvent(Story, FName(TEXT("combat.dodge")), {});
+	}
+}
+
+void UQinglanGameplayProofRelay::HandleCastReleased(FName TechniqueId, FQinglanCastId /*CastId*/)
+{
+	UQinglanStorySubsystem* Story = StorySubsystem.Get();
+	if (Story == nullptr || TechniqueId.IsNone())
+	{
+		return;
+	}
+	QinglanStoryRuntime::NotifyGameplayEvent(Story,
+		FName(*FString::Printf(TEXT("cast.%s"), *TechniqueId.ToString())), {});
 }
 
 // ---------------------------------------------------------------------------
@@ -445,17 +673,59 @@ void AQinglanCharacter::BeginPlay()
 
 	// Presentation wiring: resolve the imported player rig by convention
 	// (mesh import + anim bootstrap authors these); null-safe in test worlds.
+	//
+	// AUD-44: the mesh runs UQinglanCharacterAnimInstance instead of the old
+	// single-node looping idle. The native instance derives planar speed and
+	// selects Idle/Walk/Run/Airborne, while the action layer (Attack/Cast/
+	// Dodge/Hit/Death) pauses locomotion selection for montage-driven states.
+	// Montage playback stays on DefaultSlot. If creating the instance fails
+	// (unregistered mesh or class failure), fall back to the single-node idle.
+	//
+	// Walk/Run and ABP_Human are authored by QinglanAnimBootstrap (the Human rig
+	// ships Idle/Jump/Action only), falling back to native/Idle until that
+	// commandlet runs. ABP_Human's parent is the native class and its graph is
+	// Root + DefaultSlot, so native state machine logic is preserved while slot
+	// montages finally produce pose. Still missing from the art side: aim
+	// offsets, a layered combat slot, richer transitions, and
+	// sword_base/sword_tip/cast_source socket validation.
 	if (USkeletalMeshComponent* const MeshComp = GetMesh())
 	{
-		if (USkeletalMesh* const Mesh = Cast<USkeletalMesh>(
+		if (USkeletalMesh* const HeroMesh = Cast<USkeletalMesh>(
 				FSoftObjectPath(TEXT("/Game/Qinglan/Characters/Human/SK_Human")).TryLoad()))
 		{
-			MeshComp->SetSkeletalMesh(Mesh);
-			MeshComp->SetRelativeLocation(FVector(0.f, 0.f, -QinglanCapsuleHalfHeight));
+			MeshComp->SetSkeletalMesh(HeroMesh);
+			// The Quaternius FBX rigs import at ~5.3 m tall (SK_Human bounds
+			// extent Z ~263 cm) against the 1.76 m capsule, which put the
+			// third-person camera inside the mesh when rendered. Normalize the
+			// component scale so the mesh half-height matches the capsule, and
+			// re-seat the feet at the capsule bottom (origin may not be at the
+			// feet in the export).
+			const FBoxSphereBounds MeshBounds = HeroMesh->GetBounds();
+			const float MeshHalfHeight = FMath::Max(1.f, static_cast<float>(MeshBounds.BoxExtent.Z));
+			const float MeshScale = QinglanCapsuleHalfHeight / MeshHalfHeight;
+			MeshComp->SetRelativeScale3D(FVector(MeshScale));
+			const float MeshMinZ = static_cast<float>(MeshBounds.Origin.Z - MeshBounds.BoxExtent.Z);
+			MeshComp->SetRelativeLocation(FVector(0.f, 0.f, -QinglanCapsuleHalfHeight - MeshMinZ * MeshScale));
 			MeshComp->SetRelativeRotation(FRotator(0.f, -90.f, 0.f)); // rig faces +Y in the export
-			if (UAnimSequence* const Idle = Cast<UAnimSequence>(
-					FSoftObjectPath(TEXT("/Game/Qinglan/Characters/Human/SK_HumanHuman_Armature_Idle")).TryLoad()))
+			// AUD-55: hero skin material imported from the Quaternius pack; the
+			// engine grey default read as an untextured blockout in renders.
+			if (UMaterialInterface* Skin = Cast<UMaterialInterface>(
+					FSoftObjectPath(TEXT("/Game/Qinglan/Materials/MIC_HumanCharacter.MIC_HumanCharacter")).TryLoad()))
 			{
+				MeshComp->SetMaterial(0, Skin);
+			}
+
+			MeshComp->SetAnimInstanceClass(ResolveHumanoidAnimInstanceClass(HeroMesh));
+			if (UQinglanCharacterAnimInstance* const AnimInstance =
+					Cast<UQinglanCharacterAnimInstance>(MeshComp->GetAnimInstance()))
+			{
+				AnimInstance->SetActionState(EQinglanAnimActionState::Idle);
+			}
+			else if (UAnimSequence* const Idle = Cast<UAnimSequence>(
+					FSoftObjectPath(TEXT("/Game/Qinglan/Characters/Human/SK_HumanHuman_Armature_Idle.SK_HumanHuman_Armature_Idle")).TryLoad()))
+			{
+				// AUD-44 fallback: retain the old visible idle when no anim
+				// instance could be created, rather than showing the ref pose.
 				MeshComp->SetAnimationMode(EAnimationMode::AnimationSingleNode);
 				MeshComp->PlayAnimation(Idle, /*bLooping=*/true);
 			}
@@ -472,13 +742,32 @@ void AQinglanCharacter::BeginPlay()
 	if (CombatComponent)
 	{
 		CombatComponent->OnHealthChanged.AddDynamic(this, &AQinglanCharacter::HandleHealthChanged);
+		// AUD-32: accepted hits force an invulnerable-to-input hit reaction.
+		CombatComponent->OnDamageResolved.AddUniqueDynamic(this, &AQinglanCharacter::HandleDamageResolved);
 	}
 	BindStoryDelegates();
+	// AUD-27: a freshly spawned pawn (including every map travel) re-imports
+	// the profile's equipped techniques, then keeps tracking profile commits.
+	BindProfileDelegates();
+	if (TechniqueComponent)
+	{
+		TechniqueComponent->SyncLoadoutFromProfile();
+	}
+
+	// AUD-01: cold start opens the slot selector instead of silently importing
+	// slot 0 over the session. The hub game mode defers its arrival work until
+	// a slot is chosen (HandleMenuClosed resumes it).
+	OpenProfileFrontendIfNeeded();
 }
 
 void AQinglanCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	UnbindStoryDelegates();
+	UnbindProfileDelegates();
+	if (CombatComponent)
+	{
+		CombatComponent->OnDamageResolved.RemoveDynamic(this, &AQinglanCharacter::HandleDamageResolved);
+	}
 	if (UWorld* const World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(DefeatTravelTimer);
@@ -493,6 +782,16 @@ void AQinglanCharacter::PossessedBy(AController* NewController)
 	// Possession can precede world BeginPlay on travel flows; binding here
 	// catches a realm entry scene that begins the moment the map loads.
 	BindStoryDelegates();
+	// AUD-27: the profile may have finished loading between spawn and possession.
+	BindProfileDelegates();
+	if (TechniqueComponent)
+	{
+		TechniqueComponent->SyncLoadoutFromProfile();
+	}
+
+	// AUD-01: BeginPlay may run before possession on some travel flows; retry
+	// the cold-start selector here so it is never skipped for lack of a PC.
+	OpenProfileFrontendIfNeeded();
 
 	APlayerController* const PC = Cast<APlayerController>(NewController);
 	if (!PC || !PC->GetLocalPlayer())
@@ -516,6 +815,22 @@ void AQinglanCharacter::PossessedBy(AController* NewController)
 void AQinglanCharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	RefreshFinishedSceneDialogue();
+
+	// AUD-32: paused-game-time action clock; DeltaSeconds stops while paused.
+	ActionClock += DeltaSeconds;
+
+	// Forced hit reaction ends on its own; death keeps the gate closed.
+	if (bInHitReaction && (ActionClock >= HitReactionEndsAt || (CombatComponent && !CombatComponent->IsAlive())))
+	{
+		bInHitReaction = false;
+	}
+	// A buffered dodge fires as soon as its action window opens (0.15 s max).
+	ProcessBufferedDodge();
+
+	// AUD-44: keep the native anim instance's action layer in sync with the
+	// authoritative gameplay components (idle/attack/cast/dodge/hit/death).
+	UpdateAnimationActionState();
 
 	// HUD lands on the first player-controlled tick (possession may complete
 	// after BeginPlay on dedicated-client flows; UI/QinglanHUDStatics ids).
@@ -527,6 +842,10 @@ void AQinglanCharacter::Tick(float DeltaSeconds)
 
 	UpdateLockOn(DeltaSeconds);
 	UpdateCameraObstruction(DeltaSeconds);
+	if (IsPlayerControlled())
+	{
+		UpdateInteractionFocus();
+	}
 
 	if (FollowCamera) // docs/02 §2: FOV user range 65-95
 	{
@@ -603,17 +922,53 @@ void AQinglanCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCo
 			EnhancedInput->BindActionValueLambda(Action, ETriggerEvent::Started, [this, Slot](const FInputActionValue&) { InputTalismanSlot(Slot); });
 		}
 	}
+	// Native menu bindings work with current cooked input assets. The first
+	// four number keys retain technique bindings; keys 5..8 are menu-only.
+	const TArray<FKey> ExtraNumbers = { EKeys::Five, EKeys::Six, EKeys::Seven, EKeys::Eight };
+	for (int32 Index = 0; Index < ExtraNumbers.Num(); ++Index)
+	{
+		FInputKeyBinding Binding(FInputChord(ExtraNumbers[Index]), IE_Pressed);
+		Binding.KeyDelegate.GetDelegateForManualSet().BindLambda([this, Index]() { ConsumeMenuSelection(Index + 4); });
+		PlayerInputComponent->KeyBindings.Add(MoveTemp(Binding));
+	}
+	const auto BindMenuKey = [this, PlayerInputComponent](FKey Key, TFunction<void()> Handler)
+	{
+		FInputKeyBinding Binding(FInputChord(Key), IE_Pressed);
+		Binding.KeyDelegate.GetDelegateForManualSet().BindLambda([Handler = MoveTemp(Handler)]() { Handler(); });
+		PlayerInputComponent->KeyBindings.Add(MoveTemp(Binding));
+	};
+	BindMenuKey(EKeys::Up, [this]() { MoveMenuSelection(-1); });
+	BindMenuKey(EKeys::Down, [this]() { MoveMenuSelection(1); });
+	BindMenuKey(EKeys::Gamepad_DPad_Up, [this]() { MoveMenuSelection(-1); });
+	BindMenuKey(EKeys::Gamepad_DPad_Down, [this]() { MoveMenuSelection(1); });
+	BindMenuKey(EKeys::Enter, [this]() { ConfirmMenuSelection(); });
+	BindMenuKey(EKeys::BackSpace, [this]() { CancelMenu(); });
+	// Escape is handled once by IA_Pause, including menu/document dismissal.
+	// A second raw binding would compete with the Enhanced Input action.
+	BindMenuKey(EKeys::Gamepad_FaceButton_Right, [this]() { CancelMenu(); });
+	BindMenuKey(EKeys::Gamepad_Special_Left, [this]() { CancelMenu(); });
+	BindMenuKey(EKeys::SpaceBar, [this]()
+	{
+		if (UQinglanEndingWidget* Widget = EndingWidget.Get(); Widget && Widget->IsInViewport())
+		{
+			Widget->ToggleWarningAcknowledgment();
+		}
+	});
+
 }
 
 void AQinglanCharacter::InputMove(const FInputActionValue& Value)
 {
+	if (EndingWidget.IsValid() && EndingWidget->IsInViewport()) { return; }
 	if (!Controller || bDefeatHandled)
 	{
 		return;
 	}
-	if (const UQinglanDodgeComponent* const Dodge = QinglanFindComponent<UQinglanDodgeComponent>(this); Dodge && Dodge->IsDodging())
+	// AUD-32: movement is frozen while a scene choice is pending, during the
+	// forced hit reaction, and while the dodge owns the velocity.
+	if (!CanStartAction(EQinglanActionKind::Move))
 	{
-		return; // dodge owns the velocity until HandleDodgeFinished
+		return;
 	}
 
 	const FVector2D Axis = Value.Get<FVector2D>();
@@ -624,6 +979,9 @@ void AQinglanCharacter::InputMove(const FInputActionValue& Value)
 
 void AQinglanCharacter::InputLook(const FInputActionValue& Value)
 {
+	if (EndingWidget.IsValid() && EndingWidget->IsInViewport()) { return; }
+	// AUD-51: an open menu/journal owns the camera as well as the action gate.
+	if (bMenuOpen) { return; }
 	if (!Controller)
 	{
 		return;
@@ -642,28 +1000,58 @@ void AQinglanCharacter::InputLook(const FInputActionValue& Value)
 
 void AQinglanCharacter::InputSwordAttack(const FInputActionValue& /*Value*/)
 {
+	if (EndingWidget.IsValid() && EndingWidget->IsInViewport()) { return; }
 	if (bDefeatHandled)
+	{
+		return;
+	}
+	// AUD-32: casts (including post-release recovery) cannot be canceled by a
+	// normal attack; scene choices/hit reaction/dodge also close this gate.
+	if (!CanStartAction(EQinglanActionKind::Sword))
 	{
 		return;
 	}
 	if (UQinglanSwordComponent* const Sword = QinglanFindComponent<UQinglanSwordComponent>(this))
 	{
 		Sword->RequestAttack(); // buffering and combo-window rules live in the sword component
+		UpdateAnimationActionState();
 	}
 }
 
 void AQinglanCharacter::InputDodge(const FInputActionValue& /*Value*/)
 {
+	// A shares the gameplay dodge action, but confirms native menu/choice
+	// selections while those overlays own input. Check the physical gamepad
+	// key so Space keeps its separate ending-warning acknowledgment behavior.
+	const APlayerController* PC = Cast<APlayerController>(Controller);
+	const bool bEndingOpen = EndingWidget.IsValid() && EndingWidget->IsInViewport();
+	if (PC && PC->IsInputKeyDown(EKeys::Gamepad_FaceButton_Bottom)
+		&& (bMenuOpen || !PendingSceneChoices.IsEmpty() || !PendingBlessingChoices.IsEmpty()
+			|| !PendingShopChoices.IsEmpty() || bEndingOpen))
+	{
+		ConfirmMenuSelection();
+		return;
+	}
+	if (EndingWidget.IsValid() && EndingWidget->IsInViewport()) { return; }
 	TryDodge();
 }
 
 void AQinglanCharacter::InputLockTarget(const FInputActionValue& /*Value*/)
 {
+	// AUD-32: scene-choice/menu/death/reaction states own the input focus.
+	if (!CanStartAction(EQinglanActionKind::LockOn))
+	{
+		return;
+	}
 	ToggleLockOn();
 }
 
 void AQinglanCharacter::InputCycleTarget(const FInputActionValue& /*Value*/)
 {
+	if (!CanStartAction(EQinglanActionKind::LockOn))
+	{
+		return;
+	}
 	CycleLockTarget();
 }
 
@@ -679,14 +1067,22 @@ void AQinglanCharacter::InputTechniqueSlot(int32 Slot)
 	{
 		return;
 	}
+	if (!CanStartAction(EQinglanActionKind::Technique))
+	{
+		return; // AUD-32: committed actions and pending choices freeze casting
+	}
 	if (TechniqueComponent)
 	{
 		TechniqueComponent->TryCast(Slot); // validation/anticipation/release pipeline is there
+		UpdateAnimationActionState();
 	}
 }
 
 void AQinglanCharacter::InputTalismanSlot(int32 Slot)
 {
+	if (EndingWidget.IsValid() && EndingWidget->IsInViewport()) { return; }
+	// AUD-51: menus freeze every gameplay action, talismans included.
+	if (bMenuOpen) { return; }
 	// docs/02 §1 slots Q/R; charge accounting and effect execution live in the
 	// talisman component (docs/03 §5).
 	if (bDefeatHandled)
@@ -709,11 +1105,36 @@ void AQinglanCharacter::InputInteract(const FInputActionValue& /*Value*/)
 	{
 		return;
 	}
+	if (EndingWidget.IsValid() && EndingWidget->IsInViewport())
+	{
+		ConfirmMenuSelection();
+		return;
+	}
+	// AUD-51: menu overlays capture interaction; Enter/row buttons drive them.
+	if (bMenuOpen)
+	{
+		return;
+	}
 	UGameInstance* const Instance = GetGameInstance();
 	UQinglanStorySubsystem* const Story = Instance ? Instance->GetSubsystem<UQinglanStorySubsystem>() : nullptr;
+	if (UQinglanRunSubsystem* Run = Instance ? Instance->GetSubsystem<UQinglanRunSubsystem>() : nullptr;
+		Run && Run->NeedsCheckpointResume())
+	{
+		if (AQinglanRealmGameMode* Mode = GetWorld() ? Cast<AQinglanRealmGameMode>(GetWorld()->GetAuthGameMode()) : nullptr)
+		{
+			Mode->RequestCheckpointResume();
+		}
+		else
+		{
+			const FName Map = Run->GetPendingCheckpointMap();
+			if (!Map.IsNone()) { QinglanInteraction::TravelToMap(this, *Map.ToString()); }
+		}
+		return;
+	}
 	if (Story && Story->IsScenePlaying())
 	{
 		UQinglanHUDStatics::AdvanceDialogueLine(this);
+		RefreshFinishedSceneDialogue();
 		return;
 	}
 	if (AQinglanInteractable* const Interactable = QinglanFindAimedInteractable(this))
@@ -733,7 +1154,7 @@ void AQinglanCharacter::InputInteract(const FInputActionValue& /*Value*/)
 		const TArray<FName> EpilogueChapters = { FName(TEXT("CH07")) };
 		if (QinglanInteraction::FindObjectiveProofInChapters(Story, EpilogueChapters, ProofScene, ProofObjective))
 		{
-			Story->NotifyObjectiveCompleted(ProofObjective);
+			Story->NotifySceneObjectiveCompleted(ProofScene, ProofObjective);
 			return;
 		}
 	}
@@ -752,14 +1173,19 @@ void AQinglanCharacter::InputInteract(const FInputActionValue& /*Value*/)
 
 void AQinglanCharacter::InputPause(const FInputActionValue& /*Value*/)
 {
-	UWorld* const World = GetWorld();
-	if (!World)
+	if (UQinglanDialogueWidget* Dialogue = Cast<UQinglanDialogueWidget>(DialogueWidget.Get());
+		Dialogue && Dialogue->DismissRecord()) { return; }
+	if (EndingWidget.IsValid() && EndingWidget->IsInViewport())
 	{
+		CancelMenu();
 		return;
 	}
-	// docs/01: "Pause freezes combat and timers" - paused game time halts component
-	// ticking (DeltaTime accumulation) and world-time timestamps everywhere.
-	UGameplayStatics::SetGamePaused(World, !UGameplayStatics::IsGamePaused(World));
+	if (bMenuOpen)
+	{
+		CancelMenu();
+		return;
+	}
+	OpenGameMenu();
 }
 
 // ---------------------------------------------------------------------------
@@ -767,57 +1193,176 @@ void AQinglanCharacter::InputPause(const FInputActionValue& /*Value*/)
 // no wall pass-through; cancel rules docs/02 §3)
 // ---------------------------------------------------------------------------
 
+// --- AUD-32: unified action priority gate ---
+
+bool AQinglanCharacter::IsActionAllowed(EQinglanActionKind Kind, const FQinglanActionGateState& State)
+{
+	// Priority: Dead > forced HitReaction > menu/scene-choice freeze.
+	if (!State.bAlive || State.bHitReaction)
+	{
+		return false;
+	}
+	if (State.bSceneChoicePending || State.bMenuOpen)
+	{
+		return false;
+	}
+
+	switch (Kind)
+	{
+	case EQinglanActionKind::Move:
+		return !State.bDodging && !State.bRooted;
+
+	case EQinglanActionKind::Sword:
+		// Committed casts (anticipation and post-release recovery) cannot be
+		// canceled by a normal attack. The sword's own state machine handles
+		// buffering/chaining; dodge and reaction are excluded above.
+		return !State.bDodging && !State.bCasting;
+
+	case EQinglanActionKind::Dodge:
+		if (State.bRooted || State.bDodging)
+		{
+			return false; // one dodge at a time; root refuses outright
+		}
+		// Dodge cancels zero-cost anticipation and the pre-hit sword windup;
+		// post-release cast recovery and the active hit window are committed.
+		if (State.bCasting)
+		{
+			return State.bCastAnticipation;
+		}
+		return !State.bSwordSwinging || State.bSwordCanDodgeCancel;
+
+	case EQinglanActionKind::Technique:
+		// Existing docs/02 §3 rule: casting may start from idle/move/attack
+		// recovery, but never from a dodge, another cast, or sword
+		// windup/active (attack recovery stays legal).
+		return !State.bDodging && !State.bCasting && !State.bSwordWindupOrActive;
+
+	case EQinglanActionKind::LockOn:
+		return true;
+
+	default:
+		return false;
+	}
+}
+
+EQinglanDodgeRequest AQinglanCharacter::EvaluateDodgeRequest(const FQinglanActionGateState& State, bool bHasStamina)
+{
+	if (!State.bAlive || State.bHitReaction || State.bSceneChoicePending
+		|| State.bMenuOpen || State.bRooted || !bHasStamina)
+	{
+		return EQinglanDodgeRequest::Reject;
+	}
+	if (IsActionAllowed(EQinglanActionKind::Dodge, State))
+	{
+		return EQinglanDodgeRequest::Start;
+	}
+	// A committed action (sword active/early recovery, post-release cast
+	// recovery, another dodge tail) blocks now but will open inside the
+	// 0.15 s buffer window if the player pressed early.
+	return EQinglanDodgeRequest::Buffer;
+}
+
+bool AQinglanCharacter::IsDodgeBufferFresh(float BufferedAtSeconds, float NowSeconds, float WindowSeconds)
+{
+	return NowSeconds >= BufferedAtSeconds && (NowSeconds - BufferedAtSeconds) <= WindowSeconds;
+}
+
+void AQinglanCharacter::GetActionGateState(FQinglanActionGateState& OutState) const
+{
+	OutState = FQinglanActionGateState();
+	OutState.bAlive = CombatComponent && CombatComponent->IsAlive();
+	OutState.bRooted = CombatComponent && CombatComponent->HasStatus(EQinglanStatus::Root);
+	OutState.bHitReaction = bInHitReaction;
+
+	if (const UQinglanDodgeComponent* const Dodge = QinglanFindComponent<UQinglanDodgeComponent>(this))
+	{
+		OutState.bDodging = Dodge->IsDodging();
+	}
+	if (TechniqueComponent)
+	{
+		OutState.bCasting = TechniqueComponent->IsCasting();
+		OutState.bCastAnticipation = TechniqueComponent->IsInAnticipation();
+		OutState.bCastRecovery = TechniqueComponent->IsInRecovery();
+	}
+	if (const UQinglanSwordComponent* const Sword = QinglanFindComponent<UQinglanSwordComponent>(this))
+	{
+		const EQinglanSwordPhase Phase = Sword->GetPhase();
+		OutState.bSwordSwinging = Phase != EQinglanSwordPhase::Idle;
+		OutState.bSwordWindupOrActive = Phase == EQinglanSwordPhase::Windup
+			|| Phase == EQinglanSwordPhase::Active;
+		OutState.bSwordActive = Phase == EQinglanSwordPhase::Active;
+		OutState.bSwordCanDodgeCancel = Sword->CanDodgeCancelNow();
+	}
+	OutState.bSceneChoicePending = PendingSceneChoices.Num() > 0;
+	// AUD-51: pause/profile/settings/equipment/journal/offer overlays share the
+	// same freeze as scene choices; the ending modal remains an additional gate.
+	OutState.bMenuOpen = bMenuOpen
+		|| (EndingWidget.IsValid() && EndingWidget->IsInViewport());
+}
+
+bool AQinglanCharacter::CanStartAction(EQinglanActionKind Kind) const
+{
+	FQinglanActionGateState State;
+	GetActionGateState(State);
+	return IsActionAllowed(Kind, State);
+}
+
 bool AQinglanCharacter::CanDodge() const
 {
-	// Priority: Dead > forced HitReaction > allowed DodgeCancel > committed action
-	// > buffered input (docs/02 §3).
-	if (!CombatComponent || !CombatComponent->IsAlive())
-	{
-		return false; // Dead
-	}
-	if (CombatComponent->HasStatus(EQinglanStatus::Root))
-	{
-		return false; // rooted (docs/02 §7 Root)
-	}
-	// FIXME-CONTRACT: forced HitReaction has no query API on the scaffold components;
-	// insert the reaction gate here when one exists.
-	const UQinglanDodgeComponent* const Dodge = QinglanFindComponent<UQinglanDodgeComponent>(this);
-	if (Dodge && Dodge->IsDodging())
-	{
-		return false; // one dodge at a time
-	}
-	const UQinglanSwordComponent* const Sword = QinglanFindComponent<UQinglanSwordComponent>(this);
-	if (Sword && !Sword->CanDodgeCancelNow())
-	{
-		return false; // active hit window is committed (docs/02 §3)
-	}
-	// Casting is dodge-interruptible only before the release notify; pre-release
-	// interruption costs nothing (docs/02 §3). Post-release casts reject the dodge
-	// via the technique component's own validation on the next attempt.
-	return true;
+	return CanStartAction(EQinglanActionKind::Dodge);
 }
 
 void AQinglanCharacter::TryDodge()
+{
+	FQinglanActionGateState State;
+	GetActionGateState(State);
+	const bool bHasStamina = CombatComponent
+		&& CombatComponent->GetAttributes().Stamina + KINDA_SMALL_NUMBER >= DodgeStaminaCost;
+
+	switch (EvaluateDodgeRequest(State, bHasStamina))
+	{
+	case EQinglanDodgeRequest::Start:
+		StartDodgeNow();
+		break;
+	case EQinglanDodgeRequest::Buffer:
+		// Early press: retained for 0.15 s and fired by ProcessBufferedDodge
+		// as soon as the committed action reaches a cancellable boundary.
+		bHasBufferedDodge = true;
+		BufferedDodgeAt = ActionClock;
+		break;
+	case EQinglanDodgeRequest::Reject:
+	default:
+		break;
+	}
+}
+
+void AQinglanCharacter::StartDodgeNow()
 {
 	UQinglanDodgeComponent* const Dodge = QinglanFindComponent<UQinglanDodgeComponent>(this);
 	if (!Dodge || !CanDodge())
 	{
 		return;
 	}
-	// Stamina gate first: 25 stamina, rejected outright when insufficient (docs/02 §2).
+	// Defensive ordering: never spend stamina for a dodge the gate must reject.
+	if (TechniqueComponent && TechniqueComponent->IsCasting() && !TechniqueComponent->IsInAnticipation())
+	{
+		return; // released/recoving casts are not cancellable
+	}
+	// Stamina commits only when the dodge actually starts (buffering is free).
 	if (!CombatComponent || !CombatComponent->TrySpendStamina(DodgeStaminaCost))
 	{
 		return;
 	}
 
-	// Cancel lower-priority committed actions (docs/02 §3).
+	// Cancel lower-priority committed actions (docs/02 §3). Post-release cast
+	// recovery is not cancellable and was already excluded above/gate.
 	if (UQinglanSwordComponent* const Sword = QinglanFindComponent<UQinglanSwordComponent>(this))
 	{
 		Sword->InterruptSwing();
 	}
 	if (TechniqueComponent && TechniqueComponent->IsCasting())
 	{
-		TechniqueComponent->InterruptCast(); // pre-release only; already released is not refunded
+		TechniqueComponent->InterruptCast(); // pre-release: zero cost, never refunded
 	}
 
 	if (UCharacterMovementComponent* const Movement = GetCharacterMovement())
@@ -827,7 +1372,40 @@ void AQinglanCharacter::TryDodge()
 		Movement->MaxWalkSpeed = DodgeDistance / DodgeDuration;
 	}
 
+	bHasBufferedDodge = false;
 	Dodge->StartDodge(QinglanComputeDodgeDirection(this), DodgeDistance, DodgeDuration, GetDodgeIFrameStart(), GetDodgeIFrameEnd());
+	UpdateAnimationActionState();
+}
+
+void AQinglanCharacter::ProcessBufferedDodge()
+{
+	if (!bHasBufferedDodge)
+	{
+		return;
+	}
+	if (!IsDodgeBufferFresh(BufferedDodgeAt, ActionClock, DodgeInputBufferSeconds))
+	{
+		bHasBufferedDodge = false; // the 0.15 s window elapsed unused
+		return;
+	}
+
+	FQinglanActionGateState State;
+	GetActionGateState(State);
+	const bool bHasStamina = CombatComponent
+		&& CombatComponent->GetAttributes().Stamina + KINDA_SMALL_NUMBER >= DodgeStaminaCost;
+	switch (EvaluateDodgeRequest(State, bHasStamina))
+	{
+	case EQinglanDodgeRequest::Start:
+		bHasBufferedDodge = false;
+		StartDodgeNow();
+		break;
+	case EQinglanDodgeRequest::Reject:
+		bHasBufferedDodge = false; // death/reaction/menu/root: drop the press
+		break;
+	case EQinglanDodgeRequest::Buffer:
+	default:
+		break; // still inside the window, keep waiting
+	}
 }
 
 void AQinglanCharacter::HandleDodgeFinished()
@@ -997,7 +1575,8 @@ FVector AQinglanCharacter::GetAimPoint() const
 	{
 		return GetActorLocation() + GetActorForwardVector() * QinglanAimTraceDistance;
 	}
-	static const FName CastSocketName(TEXT("cast_source")); // socket name not authored; rig-side tunable
+	// Authored on SK_Human_Skeleton at RightHand by QinglanAnimBootstrap (AUD-44).
+	static const FName CastSocketName(TEXT("cast_source"));
 
 	const FVector CameraLocation = FollowCamera->GetComponentLocation();
 	const FVector CameraForward = FollowCamera->GetComponentRotation().Vector();
@@ -1049,8 +1628,11 @@ EQinglanCombatState AQinglanCharacter::GetCombatState() const
 	{
 		return EQinglanCombatState::Dead;
 	}
-	// FIXME-CONTRACT: no scaffold API exposes a forced hit reaction; when one lands,
-	// return EQinglanCombatState::HitReaction here.
+	// AUD-32: forced hit reaction outranks every committed action.
+	if (bInHitReaction)
+	{
+		return EQinglanCombatState::HitReaction;
+	}
 	if (const UQinglanDodgeComponent* const Dodge = QinglanFindComponent<UQinglanDodgeComponent>(this); Dodge && Dodge->IsDodging())
 	{
 		return EQinglanCombatState::Dodging;
@@ -1077,6 +1659,199 @@ EQinglanCombatState AQinglanCharacter::GetCombatState() const
 // (docs/dev/level-layout.md interaction contract; docs/03 sections 4-6)
 // ---------------------------------------------------------------------------
 
+AQinglanInteractable* AQinglanCharacter::GetFocusedInteractable() const
+{
+	return FocusedInteractable.Get();
+}
+
+FText AQinglanCharacter::GetInteractPromptText() const
+{
+	const AQinglanInteractable* const Focus = FocusedInteractable.Get();
+	return Focus ? QinglanMakeInteractPrompt(Focus) : FText::GetEmpty();
+}
+
+void AQinglanCharacter::UpdateInteractionFocus()
+{
+	// AUD-26: selection is recomputed every frame so the hint disappears as soon
+	// as the player/camera moves out of range or the line of sight is blocked.
+	if (bDefeatHandled || bInHitReaction)
+	{
+		FocusedInteractable = nullptr;
+		return;
+	}
+	AQinglanInteractable* const NewFocus = QinglanFindAimedInteractable(this);
+	AQinglanInteractable* const OldFocus = FocusedInteractable.Get();
+	if (NewFocus == OldFocus)
+	{
+		return;
+	}
+	FocusedInteractable = NewFocus;
+	if (!NewFocus)
+	{
+		return;
+	}
+	// Never stomp a dialogue/menu presentation with the proximity hint.
+	if (!PendingSceneChoices.IsEmpty()
+		|| (EndingWidget.IsValid() && EndingWidget->IsInViewport()))
+	{
+		return;
+	}
+	if (UGameInstance* const Instance = GetGameInstance())
+	{
+		if (const UQinglanStorySubsystem* const Story = Instance->GetSubsystem<UQinglanStorySubsystem>();
+			Story && Story->IsScenePlaying())
+		{
+			return;
+		}
+	}
+	// Localized suggestion: existing "action.interact" key plus the spawner's
+	// DisplayNameKey when the string table resolves it. Uses the established
+	// ShowGameMessage HUD channel (dialogue widget when open, on-screen text
+	// otherwise); no new localization keys are introduced.
+	ShowGameMessage(QinglanMakeInteractPrompt(NewFocus));
+}
+
+void AQinglanCharacter::HandleProfileCommitted()
+{
+	// AUD-27: every equipment/unlock commit re-imports the profile order.
+	if (TechniqueComponent)
+	{
+		TechniqueComponent->SyncLoadoutFromProfile();
+	}
+}
+
+void AQinglanCharacter::BindProfileDelegates()
+{
+	if (bProfileDelegatesBound)
+	{
+		return;
+	}
+	UGameInstance* const Instance = GetGameInstance();
+	UQinglanProfileSubsystem* const Profile = Instance ? Instance->GetSubsystem<UQinglanProfileSubsystem>() : nullptr;
+	if (!Profile)
+	{
+		return; // possession retries once the profile session exists
+	}
+	Profile->OnProfileCommitted.AddUniqueDynamic(this, &AQinglanCharacter::HandleProfileCommitted);
+	bProfileDelegatesBound = true;
+}
+
+void AQinglanCharacter::UnbindProfileDelegates()
+{
+	if (!bProfileDelegatesBound)
+	{
+		return;
+	}
+	UGameInstance* const Instance = GetGameInstance();
+	if (UQinglanProfileSubsystem* const Profile = Instance ? Instance->GetSubsystem<UQinglanProfileSubsystem>() : nullptr)
+	{
+		Profile->OnProfileCommitted.RemoveDynamic(this, &AQinglanCharacter::HandleProfileCommitted);
+	}
+	bProfileDelegatesBound = false;
+}
+
+void AQinglanCharacter::HandleDamageResolved(const FQinglanDamageEvent& Event)
+{
+	// AUD-32: the victim's own accepted hit forces a short reaction. Death is
+	// handled by HandleHealthChanged (OnHealthChanged fires first); a lethal
+	// event therefore never enters a reaction window.
+	if (Event.Target.Get() != this || bDefeatHandled)
+	{
+		return;
+	}
+	if (!CombatComponent || !CombatComponent->IsAlive())
+	{
+		return;
+	}
+	if (Event.FinalMagnitude <= 0.f && !Event.bBlockedByBarrier)
+	{
+		return;
+	}
+
+	bInHitReaction = true;
+	HitReactionEndsAt = ActionClock + FMath::Max(0.01f, HitReactionSeconds);
+	bHasBufferedDodge = false;
+
+	// A forced reaction outranks committed actions: cancel the sword and any
+	// cast (released techniques keep their committed cost).
+	if (UQinglanSwordComponent* const Sword = QinglanFindComponent<UQinglanSwordComponent>(this))
+	{
+		Sword->InterruptSwing();
+	}
+	if (TechniqueComponent && TechniqueComponent->IsCasting())
+	{
+		TechniqueComponent->InterruptCast();
+	}
+	// While no authored reaction montage exists, the action gate alone at least
+	// guarantees an immobile, unactionable window (docs/02 §3 "forced").
+	if (UCharacterMovementComponent* const Movement = GetCharacterMovement())
+	{
+		Movement->StopMovementImmediately();
+	}
+	PlayHitReactionMontage();
+	UpdateAnimationActionState();
+	UE_LOG(LogQinglanCombat, Verbose, TEXT("Forced hit reaction for %.2fs"), HitReactionSeconds);
+}
+
+void AQinglanCharacter::PlayHitReactionMontage()
+{
+	// Convention path authored by QinglanAnimBootstrap when available. Missing
+	// animation is non-fatal: the gate above still disables every action.
+	UAnimMontage* const Montage = Cast<UAnimMontage>(
+		FSoftObjectPath(TEXT("/Game/Qinglan/Characters/Human/Montages/AM_Human_HitReact.AM_Human_HitReact")).TryLoad());
+	USkeletalMeshComponent* const MeshComp = GetMesh();
+	UAnimInstance* const AnimInstance = MeshComp ? MeshComp->GetAnimInstance() : nullptr;
+	if (AnimInstance && Montage)
+	{
+		AnimInstance->Montage_Play(Montage, 1.f);
+	}
+	else
+	{
+		UE_LOG(LogQinglanCombat, Verbose,
+			TEXT("Hit-reaction montage unavailable; action gate supplies the forced reaction"));
+	}
+}
+
+void AQinglanCharacter::UpdateAnimationActionState()
+{
+	// AUD-44: presentation-only mirror of the authoritative action gates. The
+	// animation instance never feeds back into gameplay; if the instance or the
+	// rig is absent this is a no-op (headless/automation worlds).
+	USkeletalMeshComponent* const MeshComp = GetMesh();
+	UQinglanCharacterAnimInstance* const AnimInstance =
+		MeshComp ? Cast<UQinglanCharacterAnimInstance>(MeshComp->GetAnimInstance()) : nullptr;
+	if (!AnimInstance)
+	{
+		return;
+	}
+
+	EQinglanAnimActionState DesiredState = EQinglanAnimActionState::Idle;
+	const UQinglanDodgeComponent* const Dodge = QinglanFindComponent<UQinglanDodgeComponent>(this);
+	const UQinglanSwordComponent* const Sword = QinglanFindComponent<UQinglanSwordComponent>(this);
+	if (bDefeatHandled || (CombatComponent && !CombatComponent->IsAlive()))
+	{
+		DesiredState = EQinglanAnimActionState::Death;
+	}
+	else if (bInHitReaction)
+	{
+		DesiredState = EQinglanAnimActionState::Hit;
+	}
+	else if (Dodge && Dodge->IsDodging())
+	{
+		DesiredState = EQinglanAnimActionState::Dodge;
+	}
+	else if (TechniqueComponent && TechniqueComponent->IsCasting())
+	{
+		DesiredState = EQinglanAnimActionState::Cast;
+	}
+	else if (Sword && Sword->IsSwinging())
+	{
+		DesiredState = EQinglanAnimActionState::Attack;
+	}
+
+	AnimInstance->SetActionState(DesiredState);
+}
+
 void AQinglanCharacter::EnsureHudCreated()
 {
 	if (HudWidget.IsValid())
@@ -1095,6 +1870,16 @@ void AQinglanCharacter::EnsureHudCreated()
 	}
 }
 
+void AQinglanCharacter::RefreshFinishedSceneDialogue()
+{
+	if (UQinglanDialogueWidget* Dialogue = Cast<UQinglanDialogueWidget>(DialogueWidget.Get()))
+	{
+		const UGameInstance* Instance = GetGameInstance();
+		const UQinglanStorySubsystem* Story = Instance ? Instance->GetSubsystem<UQinglanStorySubsystem>() : nullptr;
+		Dialogue->RefreshScenePlayback(Story && Story->IsScenePlaying());
+	}
+}
+
 UUserWidget* AQinglanCharacter::EnsureDialogueWidget()
 {
 	if (UUserWidget* Widget = DialogueWidget.Get())
@@ -1105,8 +1890,504 @@ UUserWidget* AQinglanCharacter::EnsureDialogueWidget()
 	if (Widget)
 	{
 		DialogueWidget = Widget;
+		if (UQinglanDialogueWidget* Dialogue = Cast<UQinglanDialogueWidget>(Widget))
+		{
+			Dialogue->OnChoiceSelected.AddDynamic(this, &AQinglanCharacter::HandleDialogueChoiceSelected);
+		}
 	}
 	return Widget;
+}
+
+UQinglanEndingWidget* AQinglanCharacter::EnsureEndingWidget()
+{
+	if (UQinglanEndingWidget* Widget = EndingWidget.Get()) { return Widget; }
+	APlayerController* PC = Cast<APlayerController>(Controller);
+	UQinglanEndingWidget* Widget = PC ? CreateWidget<UQinglanEndingWidget>(PC, UQinglanEndingWidget::StaticClass()) : nullptr;
+	if (Widget)
+	{
+		EndingWidget = Widget;
+		Widget->OnEndingClosed.AddDynamic(this, &AQinglanCharacter::HandleEndingClosed);
+		Widget->OnEndingCommitted.AddDynamic(this, &AQinglanCharacter::HandleEndingCommitted);
+	}
+	return Widget;
+}
+
+UQinglanMenuWidget* AQinglanCharacter::EnsureMenuWidget()
+{
+	if (UQinglanMenuWidget* Widget = MenuWidget.Get())
+	{
+		return Widget;
+	}
+	APlayerController* PC = Cast<APlayerController>(Controller);
+	UQinglanMenuWidget* Widget = PC
+		? CreateWidget<UQinglanMenuWidget>(PC, UQinglanMenuWidget::StaticClass()) : nullptr;
+	if (Widget)
+	{
+		MenuWidget = Widget;
+		Widget->OnMenuClosed.AddDynamic(this, &AQinglanCharacter::HandleMenuClosed);
+	}
+	return Widget;
+}
+
+UQinglanJournalWidget* AQinglanCharacter::EnsureJournalWidget()
+{
+	if (UQinglanJournalWidget* Widget = JournalWidget.Get())
+	{
+		return Widget;
+	}
+	APlayerController* PC = Cast<APlayerController>(Controller);
+	UQinglanJournalWidget* Widget = PC
+		? CreateWidget<UQinglanJournalWidget>(PC, UQinglanJournalWidget::StaticClass()) : nullptr;
+	if (Widget)
+	{
+		JournalWidget = Widget;
+		Widget->OnJournalClosed.AddDynamic(this, &AQinglanCharacter::HandleJournalClosed);
+	}
+	return Widget;
+}
+
+void AQinglanCharacter::OpenGameMenu()
+{
+	if (bDefeatHandled || (EndingWidget.IsValid() && EndingWidget->IsInViewport()))
+	{
+		return;
+	}
+	if (!PendingSceneChoices.IsEmpty())
+	{
+		return; // scene choices keep the dialogue presenter
+	}
+	UQinglanMenuWidget* Menu = EnsureMenuWidget();
+	if (!Menu)
+	{
+		return;
+	}
+	bMenuOpen = true;
+	Menu->ShowScreen(EQinglanMenuScreen::Pause);
+	if (!Menu->IsInViewport())
+	{
+		Menu->AddToViewport(50);
+	}
+	// Pending offers persist across menu closes; re-present them rather than
+	// hiding the decision behind the pause screen.
+	if (PendingBlessingChoices.Num() > 0)
+	{
+		PresentBlessingOffer(PendingBlessingChoices);
+	}
+	else if (PendingShopChoices.Num() > 0)
+	{
+		PresentShopOffer(PendingShopChoices);
+	}
+	RefreshMenuInputState();
+}
+
+void AQinglanCharacter::OpenProfileFrontendIfNeeded()
+{
+	if (bProfileFrontendOpen)
+	{
+		return;
+	}
+	// QA capture (`-QinglanTrial=`) renders arena hazards without a slot; the
+	// selector would cover the frame and the trial does not need a profile.
+	FString TrialCaptureValue;
+	if (FParse::Value(FCommandLine::Get(), TEXT("QinglanTrial="), TrialCaptureValue))
+	{
+		return;
+	}
+	UGameInstance* Instance = GetGameInstance();
+	UQinglanSaveSubsystem* Save = Instance ? Instance->GetSubsystem<UQinglanSaveSubsystem>() : nullptr;
+	if (!Save || Save->IsProfileSessionActive())
+	{
+		return; // ordinary travel keeps the in-memory profile; no selector
+	}
+	// Widgets can only be owned by a local player controller. Headless test
+	// worlds and server-side controllers have no UI: they continue without a
+	// profile session rather than logging a widget-assignment error.
+	const APlayerController* const PC = Cast<APlayerController>(Controller);
+	if (!PC || !PC->IsLocalController())
+	{
+		UE_LOG(LogQinglan, Verbose,
+			TEXT("Profile frontend skipped: no local player controller (headless world)"));
+		return;
+	}
+	UQinglanMenuWidget* Menu = EnsureMenuWidget();
+	if (!Menu)
+	{
+		UE_LOG(LogQinglan, Warning, TEXT("Profile frontend unavailable (no menu widget); boot continues without a profile"));
+		return;
+	}
+	bProfileFrontendOpen = true;
+	bMenuOpen = true;
+	Menu->ShowScreen(EQinglanMenuScreen::Profile);
+	if (!Menu->IsInViewport())
+	{
+		Menu->AddToViewport(60);
+	}
+	RefreshMenuInputState();
+	UE_LOG(LogQinglan, Log, TEXT("Profile frontend open: select a slot to begin (AUD-01)"));
+
+	// QA capture aid: -QinglanAutoSlot=<0-2> confirms a slot through the real
+	// menu rows after a short settle, so an unattended capture can reach the
+	// hub. It never bypasses save validation; interactive selection acceptance
+	// still requires real input.
+	FString AutoSlotValue;
+	if (FParse::Value(FCommandLine::Get(), TEXT("QinglanAutoSlot="), AutoSlotValue))
+	{
+		const int32 AutoSlot = FMath::Clamp(FCString::Atoi(*AutoSlotValue), 0,
+			UQinglanSaveSubsystem::ProfileSlotCount - 1);
+		FTimerHandle AutoSlotHandle;
+		GetWorld()->GetTimerManager().SetTimer(AutoSlotHandle, FTimerDelegate::CreateWeakLambda(this, [this, AutoSlot]()
+		{
+			UQinglanMenuWidget* ActiveMenu = MenuWidget.Get();
+			if (!ActiveMenu || !ActiveMenu->IsMenuOpen())
+			{
+				return;
+			}
+			for (int32 Step = 0; Step < AutoSlot; ++Step)
+			{
+				ActiveMenu->MoveSelection(1);
+			}
+			ActiveMenu->ConfirmSelection();
+		}), 2.f, /*bLoop=*/false);
+	}
+}
+
+void AQinglanCharacter::CloseGameMenu()
+{
+	if (UQinglanMenuWidget* Menu = MenuWidget.Get())
+	{
+		Menu->CloseMenu(); // broadcasts; HandleMenuClosed restores input mode
+	}
+	else
+	{
+		bMenuOpen = false;
+		RefreshMenuInputState();
+	}
+}
+
+void AQinglanCharacter::OpenJournal(FName RecordId)
+{
+	if (bDefeatHandled || (EndingWidget.IsValid() && EndingWidget->IsInViewport()))
+	{
+		return;
+	}
+	if (!PendingSceneChoices.IsEmpty())
+	{
+		return; // scene choices own the input focus (AUD-32 gate compatibility)
+	}
+	UQinglanJournalWidget* Journal = EnsureJournalWidget();
+	if (!Journal)
+	{
+		return;
+	}
+	if (MenuWidget.IsValid() && MenuWidget->IsInViewport())
+	{
+		MenuWidget->RemoveFromParent(); // journal is the top overlay
+	}
+	bMenuOpen = true;
+	if (!Journal->IsInViewport())
+	{
+		Journal->AddToViewport(60);
+	}
+	Journal->OpenJournal();
+	if (!RecordId.IsNone())
+	{
+		Journal->OpenRecord(RecordId);
+	}
+	RefreshMenuInputState();
+}
+
+bool AQinglanCharacter::SelectMenuOption(int32 Index)
+{
+	if (!MenuWidget.IsValid() || !MenuWidget->IsMenuOpen())
+	{
+		return false;
+	}
+	return ConsumeMenuSelection(Index);
+}
+
+bool AQinglanCharacter::DismissMenuOffer()
+{
+	UQinglanMenuWidget* Menu = MenuWidget.Get();
+	// Blessing drafts are mandatory: leaving would strand the proof event.
+	if (PendingBlessingChoices.Num() > 0)
+	{
+		if (Menu)
+		{
+			Menu->SetNotice(UQinglanHUDStatics::GameText(FName(TEXT("menu.notice.offer_required"))));
+		}
+		return false;
+	}
+	PendingShopChoices.Reset();
+	if (Menu)
+	{
+		Menu->CloseOffer();
+	}
+	RefreshMenuInputState();
+	return true;
+}
+
+void AQinglanCharacter::QuitToSanctuary()
+{
+	UGameInstance* const Instance = GetGameInstance();
+	UQinglanSaveSubsystem* const Save = Instance ? Instance->GetSubsystem<UQinglanSaveSubsystem>() : nullptr;
+	if (!Save)
+	{
+		// Safe-exit contract: without the save API the only available action is
+		// Resume (closing the menu), never an unsaved map travel.
+		CloseGameMenu();
+		return;
+	}
+	FText SaveError;
+	if (!Save->SaveActiveSession(SaveError))
+	{
+		if (UQinglanMenuWidget* Menu = MenuWidget.Get())
+		{
+			Menu->SetNotice(SaveError.IsEmpty()
+				? UQinglanHUDStatics::GameText(FName(TEXT("menu.notice.save_failed")))
+				: SaveError);
+		}
+		return;
+	}
+	CloseGameMenu();
+	if (!UGameplayStatics::GetCurrentLevelName(this, true).Contains(TEXT("Hub")))
+	{
+		QinglanInteraction::TravelToMap(this, QinglanInteraction::HubMapPath);
+	}
+}
+
+void AQinglanCharacter::RefreshMenuInputState()
+{
+	const bool bJournalShowing = JournalWidget.IsValid() && JournalWidget->IsInViewport();
+	const bool bMenuShowing = MenuWidget.IsValid() && MenuWidget->IsInViewport();
+	bMenuOpen = bJournalShowing || bMenuShowing;
+	UpdateMenuInputMode();
+}
+
+void AQinglanCharacter::HandleMenuClosed()
+{
+	bMenuOpen = JournalWidget.IsValid() && JournalWidget->IsInViewport();
+
+	// AUD-01: leaving the cold-start selector is what starts the session. If a
+	// slot was chosen, run the hub arrival work that BeginPlay deferred;
+	// otherwise keep the selector up rather than entering a session-less hub.
+	if (bProfileFrontendOpen)
+	{
+		UGameInstance* Instance = GetGameInstance();
+		UQinglanSaveSubsystem* Save = Instance ? Instance->GetSubsystem<UQinglanSaveSubsystem>() : nullptr;
+		if (Save && Save->IsProfileSessionActive())
+		{
+			bProfileFrontendOpen = false;
+			if (AQinglanHubGameMode* Hub = GetWorld()
+					? Cast<AQinglanHubGameMode>(GetWorld()->GetAuthGameMode()) : nullptr)
+			{
+				Hub->CompleteHubArrivalAfterProfileSelection();
+			}
+		}
+		else
+		{
+			bProfileFrontendOpen = false;
+			OpenProfileFrontendIfNeeded();
+			return; // stay in UI-only input mode
+		}
+	}
+	UpdateMenuInputMode();
+}
+
+void AQinglanCharacter::HandleJournalClosed()
+{
+	// Closing the record viewer restores gameplay even when it was reached
+	// from the pause menu; the pause menu reopens through its own Journal row.
+	if (UQinglanMenuWidget* Menu = MenuWidget.Get(); Menu && Menu->IsMenuOpen())
+	{
+		Menu->CloseMenu(); // broadcasts HandleMenuClosed
+	}
+	bMenuOpen = false;
+	UpdateMenuInputMode();
+}
+
+void AQinglanCharacter::UpdateMenuInputMode()
+{
+	APlayerController* PC = Cast<APlayerController>(Controller);
+	if (!PC) { return; }
+	UUserWidget* Focus = nullptr;
+	// AUD-51: native menu/journal overlays keep keyboard focus on the game
+	// viewport so the Character's Up/Down/Enter/Escape/number bindings drive
+	// them; mouse clicks still resolve through Slate hit-testing.
+	bool bGameViewportKeyboard = false;
+	if (UQinglanEndingWidget* Ending = EndingWidget.Get(); Ending && Ending->IsInViewport()) { Focus = Ending; }
+	else if (UQinglanJournalWidget* Journal = JournalWidget.Get(); Journal && Journal->IsInViewport())
+	{
+		Focus = Journal;
+		bGameViewportKeyboard = true;
+	}
+	else if (UQinglanMenuWidget* Menu = MenuWidget.Get(); Menu && Menu->IsInViewport())
+	{
+		Focus = Menu;
+		bGameViewportKeyboard = true;
+	}
+	else if (!PendingSceneChoices.IsEmpty()) { Focus = DialogueWidget.Get(); }
+	PC->bShowMouseCursor = Focus != nullptr;
+	if (Focus)
+	{
+		FInputModeGameAndUI Mode;
+		if (!bGameViewportKeyboard)
+		{
+			Mode.SetWidgetToFocus(Focus->TakeWidget());
+		}
+		Mode.SetHideCursorDuringCapture(false);
+		PC->SetInputMode(Mode);
+		if (bGameViewportKeyboard)
+		{
+			if (FSlateApplication::IsInitialized())
+			{
+				FSlateApplication::Get().SetAllUserFocusToGameViewport();
+			}
+		}
+		else if (UQinglanEndingWidget* Ending = EndingWidget.Get(); Ending && Ending->IsInViewport())
+		{
+			Ending->FocusDefaultControl();
+		}
+		else if (UQinglanDialogueWidget* Dialogue = Cast<UQinglanDialogueWidget>(Focus))
+		{
+			Dialogue->SetSelectedChoiceIndex(MenuSelectionIndex);
+		}
+	}
+	else { PC->SetInputMode(FInputModeGameOnly()); }
+}
+
+void AQinglanCharacter::HandleDialogueChoiceSelected(FName ChoiceId)
+{
+	const int32 Index = PendingSceneChoices.IndexOfByPredicate([ChoiceId](const FQinglanSceneChoice& Choice) { return Choice.ChoiceId == ChoiceId; });
+	if (Index != INDEX_NONE) { ConsumeMenuSelection(Index); }
+}
+
+void AQinglanCharacter::MoveMenuSelection(int32 Direction)
+{
+	// AUD-51: native menus take Up/Down while open; journal navigation moves
+	// the record list instead.
+	if (UQinglanJournalWidget* Journal = JournalWidget.Get(); Journal && Journal->IsInViewport())
+	{
+		Journal->MoveRecordSelection(Direction);
+		return;
+	}
+	if (UQinglanMenuWidget* Menu = MenuWidget.Get(); Menu && Menu->IsMenuOpen())
+	{
+		Menu->MoveSelection(Direction);
+		return;
+	}
+	if (PendingSceneChoices.IsEmpty()) { return; }
+	MenuSelectionIndex = (MenuSelectionIndex + Direction + PendingSceneChoices.Num()) % PendingSceneChoices.Num();
+	if (UQinglanDialogueWidget* Dialogue = Cast<UQinglanDialogueWidget>(DialogueWidget.Get()))
+	{
+		Dialogue->SetSelectedChoiceIndex(MenuSelectionIndex);
+	}
+}
+
+void AQinglanCharacter::ConfirmMenuSelection()
+{
+	if (UQinglanEndingWidget* Ending = EndingWidget.Get(); Ending && Ending->IsInViewport())
+	{
+		Ending->ConfirmCurrentEnding();
+		return;
+	}
+	if (UQinglanJournalWidget* Journal = JournalWidget.Get(); Journal && Journal->IsInViewport())
+	{
+		if (Journal->IsRecordOpen())
+		{
+			// Enter on an open record returns to the list; the list itself
+			// opens the highlighted record.
+			Journal->CloseRecord();
+		}
+		else
+		{
+			Journal->SelectCurrentRecord();
+		}
+		return;
+	}
+	if (UQinglanMenuWidget* Menu = MenuWidget.Get(); Menu && Menu->IsMenuOpen())
+	{
+		Menu->ConfirmSelection();
+		return;
+	}
+	if (!PendingSceneChoices.IsEmpty()) { ConsumeMenuSelection(MenuSelectionIndex); }
+}
+
+void AQinglanCharacter::CancelMenu()
+{
+	if (UQinglanDialogueWidget* Dialogue = Cast<UQinglanDialogueWidget>(DialogueWidget.Get());
+		Dialogue && Dialogue->DismissRecord()) { return; }
+	if (UQinglanEndingWidget* Ending = EndingWidget.Get(); Ending && Ending->IsInViewport())
+	{
+		Ending->CancelPreview();
+		return;
+	}
+	if (UQinglanJournalWidget* Journal = JournalWidget.Get(); Journal && Journal->IsInViewport())
+	{
+		Journal->Back(); // record -> list -> closed (OnJournalClosed restores mode)
+		return;
+	}
+	if (UQinglanMenuWidget* Menu = MenuWidget.Get(); Menu && Menu->IsMenuOpen())
+	{
+		Menu->Back(); // offer dismisses, sub-screens return to Pause, Pause closes
+		return;
+	}
+	if (bMenuOpen)
+	{
+		// Defensive: a stale overlay flag must never trap gameplay input.
+		bMenuOpen = false;
+		RefreshMenuInputState();
+		return;
+	}
+	if (UGameplayStatics::GetCurrentLevelName(this, true).Contains(TEXT("TribulationArena")))
+	{
+		HandleStayAtHub(NAME_None, NAME_None);
+		return;
+	}
+	PendingShopChoices.Reset();
+	// A mandatory blessing/scene choice stays pending; dismissal cannot erase it.
+	if (PendingSceneChoices.IsEmpty() && PendingBlessingChoices.IsEmpty())
+	{
+		if (UUserWidget* Dialogue = DialogueWidget.Get()) { Dialogue->RemoveFromParent(); }
+	}
+	UpdateMenuInputMode();
+}
+
+void AQinglanCharacter::HandleEndingPreviewed(FName EndingId, FName SceneId)
+{
+	if (UQinglanEndingWidget* Ending = EnsureEndingWidget())
+	{
+		if (!Ending->IsInViewport()) { Ending->AddToViewport(100); }
+		UpdateMenuInputMode();
+		Ending->ShowEnding(EndingId, false);
+	}
+}
+
+void AQinglanCharacter::HandleConfirmEndingRequested(FName EndingId, FName SceneId)
+{
+	if (UQinglanEndingWidget* Ending = EnsureEndingWidget())
+	{
+		if (!Ending->IsInViewport()) { Ending->AddToViewport(100); }
+		UpdateMenuInputMode();
+		Ending->ShowEnding(EndingId, true);
+	}
+}
+
+void AQinglanCharacter::HandleCancelConfirmation(FName SceneId)
+{
+	if (UQinglanEndingWidget* Ending = EndingWidget.Get()) { Ending->RemoveFromParent(); }
+	UpdateMenuInputMode();
+}
+
+void AQinglanCharacter::HandleEndingClosed()
+{
+	UpdateMenuInputMode();
+}
+
+void AQinglanCharacter::HandleEndingCommitted(FName EndingId)
+{
+	PendingSceneChoices.Reset();
+	UpdateMenuInputMode();
+	QinglanInteraction::TravelToMap(this, QinglanInteraction::HubMapPath);
 }
 
 void AQinglanCharacter::HandleSceneLine(const FQinglanScriptLine& Line)
@@ -1123,7 +2404,8 @@ void AQinglanCharacter::HandleSceneLine(const FQinglanScriptLine& Line)
 		}
 		if (UQinglanDialogueWidget* Dialogue = Cast<UQinglanDialogueWidget>(Widget))
 		{
-			if (Dialogue->SetCurrentLine(Line.SpeakerName, Line.Text))
+			Dialogue->SetSourceKind(Line.SourceKind);
+			if (Dialogue->SetScenePlaybackLine(Line.SpeakerName, Line.Text))
 			{
 				return; // rendered into Txt_Speaker/Txt_Line
 			}
@@ -1136,7 +2418,19 @@ void AQinglanCharacter::HandleSceneLine(const FQinglanScriptLine& Line)
 
 void AQinglanCharacter::HandleChoicesPresented(const TArray<FQinglanSceneChoice>& Choices)
 {
+	// Defensive (e.g. resumed playback): choices outrank any open overlay.
+	if (UQinglanJournalWidget* Journal = JournalWidget.Get(); Journal && Journal->IsInViewport())
+	{
+		Journal->CloseJournal();
+	}
+	else if (bMenuOpen)
+	{
+		CloseGameMenu();
+	}
 	PendingSceneChoices = Choices;
+	MenuSelectionIndex = 0;
+	if (UUserWidget* Widget = EnsureDialogueWidget(); Widget && !Widget->IsInViewport()) { Widget->AddToViewport(); }
+	UpdateMenuInputMode();
 	// Widget path first (stored entries + Box_Choices rebuild); the keyed
 	// on-screen list is the unauthored-frontend fallback only.
 	if (UUserWidget* Widget = DialogueWidget.Get())
@@ -1144,6 +2438,8 @@ void AQinglanCharacter::HandleChoicesPresented(const TArray<FQinglanSceneChoice>
 		if (UQinglanDialogueWidget* Dialogue = Cast<UQinglanDialogueWidget>(Widget);
 			Dialogue && Widget->IsInViewport() && Dialogue->SetChoiceEntries(Choices))
 		{
+			Dialogue->SetSelectedChoiceIndex(MenuSelectionIndex);
+			UpdateMenuInputMode(); // Keep an ending modal above re-presented choices.
 			return;
 		}
 	}
@@ -1171,11 +2467,33 @@ void AQinglanCharacter::HandleSceneCompleted(FName SceneId)
 			Dialogue->SetChoiceEntries(TArray<FQinglanSceneChoice>());
 		}
 	}
+	UpdateMenuInputMode();
+	if (SceneId.ToString().StartsWith(TEXT("CH07")) && GetWorld()
+		&& Cast<AQinglanHubGameMode>(GetWorld()->GetAuthGameMode()))
+	{
+		GetWorld()->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this]()
+		{
+			if (UQinglanStorySubsystem* Story = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQinglanStorySubsystem>() : nullptr)
+			{
+				QinglanInteraction::BeginFirstSceneOfChapters(Story, { FName(TEXT("CH07")) });
+			}
+		}));
+	}
 	UE_LOG(LogQinglanCombat, Verbose, TEXT("Scene %s completed; dialogue presenter closed"), *SceneId.ToString());
 }
 
 void AQinglanCharacter::HandleSceneEntered(FName SceneId)
 {
+	// AUD-51/AUD-32: narrative playback owns the input focus. Close menu or
+	// journal overlays so scene choices never share the numeric/confirm keys.
+	if (UQinglanJournalWidget* Journal = JournalWidget.Get(); Journal && Journal->IsInViewport())
+	{
+		Journal->CloseJournal(); // broadcast restores gameplay/menu state
+	}
+	else if (bMenuOpen)
+	{
+		CloseGameMenu();
+	}
 	// Objective-proof tracking: choice-free scenes stop at script end without
 	// committing (their proof is a gameplay event); choice scenes commit from
 	// the selection itself.
@@ -1199,6 +2517,21 @@ bool AQinglanCharacter::WasSceneScriptExhausted(FName SceneId) const
 	return Story == nullptr || !Story->IsScenePlaying();
 }
 
+bool AQinglanCharacter::HasSceneScriptExhaustedForInspection(FName SceneId) const
+{
+	const UGameInstance* const Instance = GetGameInstance();
+	const UQinglanStorySubsystem* const Story = Instance ? Instance->GetSubsystem<UQinglanStorySubsystem>() : nullptr;
+	if (!Story || SceneId.IsNone())
+	{
+		return false;
+	}
+	if (Story->IsSceneCompleted(SceneId))
+	{
+		return true;
+	}
+	return SceneId == LastEnteredSceneId && bSawLineForEnteredScene && !Story->IsScenePlaying();
+}
+
 void AQinglanCharacter::HandleRoomCompleted(int32 RoomIndex, int64 ShardsAwarded)
 {
 	// Boss-room clear is the combat proof for the realm's current choice-free
@@ -1212,21 +2545,57 @@ void AQinglanCharacter::HandleRoomCompleted(int32 RoomIndex, int64 ShardsAwarded
 		return;
 	}
 	const UQinglanRealmDataAsset* Realm = Run->GetCurrentRealm();
-	if (Realm == nullptr || Realm->GetRoomKind(RoomIndex) != EQinglanRoomKind::Boss)
+	if (Realm == nullptr)
 	{
 		return;
 	}
-	const TArray<FName> Chapters = QinglanInteraction::ChaptersForRealm(Realm->RealmId);
-	FName ProofScene = NAME_None;
-	FName ProofObjective = NAME_None;
-	if (QinglanInteraction::FindObjectiveProofInChapters(Story, Chapters, ProofScene, ProofObjective))
+	// AUD-11: every non-boss clear proves the authored room event
+	// encounter.room_cleared.<realm>.<room> (main-early CH01, main-late CH04).
+	if (Realm->GetRoomKind(RoomIndex) != EQinglanRoomKind::Boss)
 	{
-		Story->NotifyObjectiveCompleted(ProofObjective);
+		QinglanStoryRuntime::NotifyGameplayEvent(Story,
+			FName(*FString::Printf(TEXT("encounter.room_cleared.%s.%d"),
+				*QinglanRoomClearRealmToken(Realm->RealmId), RoomIndex)), {});
+		return;
+	}
+	// Dispatch the exact defeated encounter; never scan for the first eligible
+	// chapter scene (late chapters deliberately reuse local objective IDs).
+	// AUD-11: emit the authored boss-defeat proof event first; the guard-based
+	// auto-completion then proves the exact objective, and the direct notify
+	// below stays idempotent.
+	if (Realm->RealmId == FName(UQinglanEconomyLibrary::BambooRealmIdText))
+	{
+		QinglanStoryRuntime::NotifyGameplayEvent(Story, FName(TEXT("encounter.boss_defeated.bamboo")), {});
+		Story->NotifySceneObjectiveCompleted(FName(TEXT("CH02_S02")), FName(TEXT("CH02_S02_OBJECTIVE")));
+	}
+	else if (Realm->RealmId == FName(UQinglanEconomyLibrary::AshenRealmIdText))
+	{
+		QinglanStoryRuntime::NotifyGameplayEvent(Story, FName(TEXT("encounter.boss_defeated.ashen")), {});
+		Story->NotifySceneObjectiveCompleted(FName(TEXT("CH05_S01")), FName(TEXT("s01.objective")));
 	}
 }
 
 void AQinglanCharacter::HandleRecordOpened(FName RecordId, const FText& Title, const FText& Body)
 {
+	// AUD-52: the record title also lands in the HUD text region so a player
+	// who continues after the dialogue notices the collection.
+	if (UQinglanHUDWidget* HUD = Cast<UQinglanHUDWidget>(HudWidget.Get()))
+	{
+		HUD->ShowRecordNotice(Title);
+	}
+	// AUD-11 producer: the read itself is the proof event; authored proofs use
+	// the stable record id (record.opened.<id>).
+	if (RecordId != NAME_None)
+	{
+		if (UGameInstance* const Instance = GetGameInstance())
+		{
+			if (UQinglanStorySubsystem* const Story = Instance->GetSubsystem<UQinglanStorySubsystem>())
+			{
+				QinglanStoryRuntime::NotifyGameplayEvent(Story,
+					FName(*FString::Printf(TEXT("record.opened.%s"), *RecordId.ToString())), {});
+			}
+		}
+	}
 	if (UUserWidget* Widget = EnsureDialogueWidget())
 	{
 		if (!Widget->IsInViewport())
@@ -1237,6 +2606,9 @@ void AQinglanCharacter::HandleRecordOpened(FName RecordId, const FText& Title, c
 		{
 			if (Dialogue->ShowRecordEntry(Title, Body))
 			{
+				// AUD-52: the registry has no authored record source, so the
+				// dialogue tag uses the same id-prefix inference as the journal.
+				Dialogue->SetSourceKind(FQinglanJournalState::InferRecordSourceKind(RecordId));
 				return; // rendered into the speaker/line blocks
 			}
 		}
@@ -1246,29 +2618,58 @@ void AQinglanCharacter::HandleRecordOpened(FName RecordId, const FText& Title, c
 
 void AQinglanCharacter::HandleEnterTrialRequested(FName IdempotencyKey, FName SceneId)
 {
-	// CH06_S01 payload gates on foundation_rank_3_and_ashen_first_clear; the
-	// imported choice carries only the action name, so the proof check lives
-	// here with the same flags the Golden Core breakthrough gate reads.
-	UGameInstance* const Instance = GetGameInstance();
-	UQinglanProfileSubsystem* const Profile = Instance ? Instance->GetSubsystem<UQinglanProfileSubsystem>() : nullptr;
-	UQinglanStorySubsystem* const Story = Instance ? Instance->GetSubsystem<UQinglanStorySubsystem>() : nullptr;
-	const bool bAshenCleared = (Profile && Profile->HasCampaignFlag(FName(QinglanProgression::AshenClearedCampaignFlag)))
-		|| (Story && Story->HasFlag(FName(QinglanProgression::AshenClearedStoryFlag)));
-	if (!bAshenCleared)
+	// Choice actions dispatch before their scene transaction finishes. Defer
+	// entry until that transaction has committed its preparation/story flags.
+	if (UWorld* World = GetWorld())
 	{
-		UE_LOG(LogQinglanCombat, Log, TEXT("Enter trial declined: ashen guardian proof missing"));
-		ShowGameMessage(UQinglanHUDStatics::GameText(FName(TEXT("cultivation.blocked.boss_required"))));
-		return;
+		World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this, SceneId]()
+		{
+			UGameInstance* Instance = GetGameInstance();
+			UQinglanProfileSubsystem* Profile = Instance ? Instance->GetSubsystem<UQinglanProfileSubsystem>() : nullptr;
+			UQinglanStorySubsystem* Story = Instance ? Instance->GetSubsystem<UQinglanStorySubsystem>() : nullptr;
+			const QinglanTrialAdmission::ETrial Trial = SceneId.ToString().StartsWith(TEXT("CH03"))
+				? QinglanTrialAdmission::ETrial::Foundation : QinglanTrialAdmission::ETrial::GoldenCore;
+			const QinglanTrialAdmission::FResult Admission = QinglanTrialAdmission::EvaluateForTrial(Trial, Profile, Story);
+			if (!Admission.IsAllowed())
+			{
+				ShowGameMessage(UQinglanHUDStatics::GameText(Admission.ReasonKey));
+				return;
+			}
+			const FString Map = UGameplayStatics::GetCurrentLevelName(this, true);
+			if (!Map.Contains(TEXT("TribulationArena")))
+			{
+				QinglanInteraction::TravelToMap(this, QinglanInteraction::ArenaMapPath);
+			}
+		}));
 	}
-	// The choice fires from the arena's own preparation scene; only travel
-	// when the player still stands elsewhere (a reload would restart the map).
-	const FString MapName = GetWorld() ? GetWorld()->GetMapName() : FString();
-	if (MapName.Contains(TEXT("Tribulation")) || MapName.Contains(TEXT("Arena")))
+}
+
+void AQinglanCharacter::HandleStayAtHub(FName IdempotencyKey, FName SceneId)
+{
+	// Canceling preparation never completes a trial or grants a breakthrough.
+	if (UWorld* World = GetWorld())
 	{
-		UE_LOG(LogQinglanCombat, Verbose, TEXT("Enter trial: already at the arena; no travel"));
-		return;
+		TActorIterator<AQinglanTrialDirector> It(World);
+		if (It)
+		{
+			It->CancelTrialAndReturnToHub();
+			return;
+		}
+		if (UGameplayStatics::GetCurrentLevelName(this, true).Contains(TEXT("TribulationArena")))
+		{
+			QinglanInteraction::TravelToMap(this, QinglanInteraction::HubMapPath);
+		}
 	}
-	QinglanInteraction::TravelToMap(this, QinglanInteraction::ArenaMapPath);
+}
+
+void AQinglanCharacter::HandleSaveFailed(FName ProfileId, FText Reason)
+{
+	ShowGameMessage(Reason);
+}
+
+void AQinglanCharacter::HandleBankingFailed()
+{
+	ShowGameMessage(UQinglanHUDStatics::GameText(FName(TEXT("run.banking_failed"))));
 }
 
 void AQinglanCharacter::HandleReturnToHub(FName IdempotencyKey, FName SceneId)
@@ -1287,6 +2688,26 @@ void AQinglanCharacter::HandleCampaignComplete(FName IdempotencyKey, FName Scene
 	QinglanInteraction::TravelToMap(this, QinglanInteraction::HubMapPath);
 }
 
+void AQinglanCharacter::HandleDeliveryArrived(FName QuestId, FName Version)
+{
+	// The arrival notice has exactly one shower: this binding (the rest
+	// station displays only the rested hours). Version names the answered
+	// draft for diagnostics; the player-facing line is the authored one.
+	UE_LOG(LogQinglanCombat, Verbose, TEXT("Courier reply arrived for %s (version %s)"),
+		*QuestId.ToString(), *Version.ToString());
+	UGameInstance* const Instance = GetGameInstance();
+	UQinglanStorySubsystem* const Story = Instance ? Instance->GetSubsystem<UQinglanStorySubsystem>() : nullptr;
+	if (!Story)
+	{
+		return;
+	}
+	const FText Arrival = QinglanStoryRuntime::DeliveryTimeText(Story, QuestId);
+	if (!Arrival.IsEmpty())
+	{
+		ShowGameMessage(Arrival);
+	}
+}
+
 void AQinglanCharacter::HandleHealthChanged(float Current, float Maximum)
 {
 	// Defeat (docs/03 section 6: defeat banks 50%; blueprint section 1.6 hub =
@@ -1298,6 +2719,7 @@ void AQinglanCharacter::HandleHealthChanged(float Current, float Maximum)
 		return;
 	}
 	bDefeatHandled = true;
+	UpdateAnimationActionState(); // AUD-44: Death action state, locomotion paused
 	if (UCharacterMovementComponent* const Movement = GetCharacterMovement())
 	{
 		Movement->DisableMovement();
@@ -1322,6 +2744,19 @@ void AQinglanCharacter::HandleHealthChanged(float Current, float Maximum)
 void AQinglanCharacter::HandleDefeatTravel()
 {
 	// Timer callback: OpenLevel runs off the input/damage call stack.
+	if (UQinglanRunSubsystem* Run = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQinglanRunSubsystem>() : nullptr)
+	{
+		if (Run->IsInExpedition())
+		{
+			Run->EndExpedition(/*bVictory=*/false, /*bVoluntaryRetreat=*/false);
+			if (Run->IsInExpedition())
+			{
+				// TODO(AUD-07/51): expose retry/recovery from the defeat screen.
+				// Never travel with a failed settlement's loot still unbanked.
+				return;
+			}
+		}
+	}
 	QinglanInteraction::TravelToMap(this, QinglanInteraction::HubMapPath);
 }
 
@@ -1346,13 +2781,26 @@ void AQinglanCharacter::BindStoryDelegates()
 	FQinglanStoryDelegates& Delegates = QinglanStoryRuntime::Delegates(Story);
 	Delegates.OnRecordOpened.AddDynamic(this, &AQinglanCharacter::HandleRecordOpened);
 	Delegates.OnEnterTrial.AddDynamic(this, &AQinglanCharacter::HandleEnterTrialRequested);
+	Delegates.OnStayAtHub.AddDynamic(this, &AQinglanCharacter::HandleStayAtHub);
+	Delegates.OnEndingPreviewed.AddDynamic(this, &AQinglanCharacter::HandleEndingPreviewed);
+	Delegates.OnConfirmEndingRequested.AddDynamic(this, &AQinglanCharacter::HandleConfirmEndingRequested);
+	Delegates.OnCancelConfirmation.AddDynamic(this, &AQinglanCharacter::HandleCancelConfirmation);
 	Delegates.OnReturnToHub.AddDynamic(this, &AQinglanCharacter::HandleReturnToHub);
 	Delegates.OnCompleteCampaign.AddDynamic(this, &AQinglanCharacter::HandleCampaignComplete);
+	Delegates.OnDeliveryArrived.AddDynamic(this, &AQinglanCharacter::HandleDeliveryArrived);
 	// Boss-room clears prove the realm's choice-free chapter scenes.
 	if (UQinglanRunSubsystem* const Run = Instance->GetSubsystem<UQinglanRunSubsystem>())
 	{
 		Run->OnRoomCompleted.AddDynamic(this, &AQinglanCharacter::HandleRoomCompleted);
+		Run->OnBankingFailed.AddDynamic(this, &AQinglanCharacter::HandleBankingFailed);
 	}
+	if (UQinglanSaveSubsystem* Save = Instance->GetSubsystem<UQinglanSaveSubsystem>())
+	{
+		Save->OnSaveFailed.AddDynamic(this, &AQinglanCharacter::HandleSaveFailed);
+	}
+	// AUD-11: bind the dynamic combat/dodge/technique delegates through the
+	// actor-owned proof relay, which shares the character's GC lifetime.
+	QinglanBindGameplayProofEvents(this, Story, GameplayProofRelay);
 	bStoryDelegatesBound = true;
 }
 
@@ -1362,6 +2810,7 @@ void AQinglanCharacter::UnbindStoryDelegates()
 	{
 		return;
 	}
+	QinglanUnbindGameplayProofEvents(this, GameplayProofRelay);
 	if (UGameInstance* const Instance = GetGameInstance())
 	{
 		if (UQinglanStorySubsystem* const Story = Instance->GetSubsystem<UQinglanStorySubsystem>())
@@ -1373,12 +2822,22 @@ void AQinglanCharacter::UnbindStoryDelegates()
 			FQinglanStoryDelegates& Delegates = QinglanStoryRuntime::Delegates(Story);
 			Delegates.OnRecordOpened.RemoveDynamic(this, &AQinglanCharacter::HandleRecordOpened);
 			Delegates.OnEnterTrial.RemoveDynamic(this, &AQinglanCharacter::HandleEnterTrialRequested);
+			Delegates.OnStayAtHub.RemoveDynamic(this, &AQinglanCharacter::HandleStayAtHub);
+			Delegates.OnEndingPreviewed.RemoveDynamic(this, &AQinglanCharacter::HandleEndingPreviewed);
+			Delegates.OnConfirmEndingRequested.RemoveDynamic(this, &AQinglanCharacter::HandleConfirmEndingRequested);
+			Delegates.OnCancelConfirmation.RemoveDynamic(this, &AQinglanCharacter::HandleCancelConfirmation);
 			Delegates.OnReturnToHub.RemoveDynamic(this, &AQinglanCharacter::HandleReturnToHub);
 			Delegates.OnCompleteCampaign.RemoveDynamic(this, &AQinglanCharacter::HandleCampaignComplete);
+			Delegates.OnDeliveryArrived.RemoveDynamic(this, &AQinglanCharacter::HandleDeliveryArrived);
+		}
+		if (UQinglanSaveSubsystem* Save = Instance->GetSubsystem<UQinglanSaveSubsystem>())
+		{
+			Save->OnSaveFailed.RemoveDynamic(this, &AQinglanCharacter::HandleSaveFailed);
 		}
 		if (UQinglanRunSubsystem* const Run = Instance->GetSubsystem<UQinglanRunSubsystem>())
 		{
 			Run->OnRoomCompleted.RemoveDynamic(this, &AQinglanCharacter::HandleRoomCompleted);
+			Run->OnBankingFailed.RemoveDynamic(this, &AQinglanCharacter::HandleBankingFailed);
 		}
 	}
 	bStoryDelegatesBound = false;
@@ -1387,16 +2846,33 @@ void AQinglanCharacter::UnbindStoryDelegates()
 void AQinglanCharacter::PresentBlessingOffer(const TArray<FQinglanBlessing>& Offers)
 {
 	PendingBlessingChoices = Offers;
-	// FIXME-CONTRACT: menu layout belongs to WBP_Dialogue; keyed on-screen list
-	// until the UMG frontend lands. Names resolve through the string table
-	// (blessing.<id>.name); unauthored keys fall back to the stable id.
+	TArray<FQinglanOfferChoice> MenuOffers;
 	TArray<FString> Lines;
 	for (int32 Index = 0; Index < Offers.Num(); ++Index)
 	{
 		const FText Name = Offers[Index].DisplayName.IsEmpty()
 			? FText::FromString(Offers[Index].BlessingId.ToString())
 			: Offers[Index].DisplayName;
+		FQinglanOfferChoice Choice;
+		Choice.OfferId = Offers[Index].BlessingId;
+		Choice.Title = Name;
+		Choice.bBlessing = true;
+		MenuOffers.Add(Choice);
 		Lines.Add(FString::Printf(TEXT("[%d] %s"), Index + 1, *Name.ToString()));
+	}
+	// AUD-51: native offer menu first; the keyed on-screen list remains the
+	// fallback when a scene choice currently owns the numeric row or the menu
+	// widget cannot be created.
+	if (PendingSceneChoices.IsEmpty())
+	{
+		if (UQinglanMenuWidget* Menu = EnsureMenuWidget())
+		{
+			bMenuOpen = true;
+			Menu->ShowOffers(MenuOffers);
+			if (!Menu->IsInViewport()) { Menu->AddToViewport(50); }
+			RefreshMenuInputState();
+			return;
+		}
 	}
 	ShowGameMessage(FText::FromString(FString::Join(Lines, TEXT("  "))));
 }
@@ -1404,18 +2880,43 @@ void AQinglanCharacter::PresentBlessingOffer(const TArray<FQinglanBlessing>& Off
 void AQinglanCharacter::PresentShopOffer(const TArray<FQinglanShopOfferEntry>& Entries)
 {
 	PendingShopChoices = Entries;
-	// FIXME-CONTRACT: shop layout belongs to WBP_Dialogue; keyed list fallback.
+	TArray<FQinglanOfferChoice> MenuOffers;
 	TArray<FString> Lines;
 	for (int32 Index = 0; Index < Entries.Num(); ++Index)
 	{
+		FQinglanOfferChoice Choice;
+		Choice.OfferId = Entries[Index].ItemId;
+		Choice.Title = Entries[Index].Title;
+		Choice.Cost = Entries[Index].CostSummary;
+		Choice.bBlessing = false;
+		MenuOffers.Add(Choice);
 		Lines.Add(FString::Printf(TEXT("[%d] %s (%s)"),
 			Index + 1, *Entries[Index].Title.ToString(), *Entries[Index].CostSummary.ToString()));
+	}
+	if (PendingSceneChoices.IsEmpty())
+	{
+		if (UQinglanMenuWidget* Menu = EnsureMenuWidget())
+		{
+			bMenuOpen = true;
+			Menu->ShowOffers(MenuOffers);
+			if (!Menu->IsInViewport()) { Menu->AddToViewport(50); }
+			RefreshMenuInputState();
+			return;
+		}
 	}
 	ShowGameMessage(FText::FromString(FString::Join(Lines, TEXT("  "))));
 }
 
 void AQinglanCharacter::ShowGameMessage(const FText& Message)
 {
+	// Shipping builds do not draw the engine's debug-message fallback. Keep
+	// interaction and blocked-action notices in the normal HUD, without
+	// reopening a finished conversation over the player's view.
+	if (UQinglanHUDWidget* HUD = Cast<UQinglanHUDWidget>(HudWidget.Get()))
+	{
+		HUD->ShowBarkLine(FText::GetEmpty(), Message);
+		return;
+	}
 	if (UUserWidget* Widget = DialogueWidget.Get())
 	{
 		if (Widget->IsInViewport())
@@ -1434,6 +2935,15 @@ void AQinglanCharacter::ShowGameMessage(const FText& Message)
 
 bool AQinglanCharacter::ConsumeMenuSelection(int32 Slot)
 {
+	// AUD-51: every numeric slot routed while a menu overlay is open is
+	// captured on the menu state; CloseMenu() clears that capture list.
+	UQinglanMenuWidget* Menu = MenuWidget.Get();
+	const bool bMenuOpenNow = Menu && Menu->IsMenuOpen();
+	if (bMenuOpenNow && Slot >= 0)
+	{
+		Menu->CaptureNumberKey(Slot);
+	}
+	if (EndingWidget.IsValid() && EndingWidget->IsInViewport()) { return true; }
 	if (Slot < 0)
 	{
 		return false;
@@ -1445,15 +2955,20 @@ bool AQinglanCharacter::ConsumeMenuSelection(int32 Slot)
 		{
 			return true; // swallow invalid keys while choices freeze the scene
 		}
+		const TArray<FQinglanSceneChoice> PreviousChoices = PendingSceneChoices;
 		const FName ChoiceId = PendingSceneChoices[Slot].ChoiceId;
-		if (UQinglanHUDStatics::SelectDialogueChoice(this, ChoiceId))
+		PendingSceneChoices.Reset();
+		if (UQinglanDialogueWidget* Dialogue = Cast<UQinglanDialogueWidget>(DialogueWidget.Get()))
 		{
-			PendingSceneChoices.Reset();
-			if (UQinglanDialogueWidget* Dialogue = Cast<UQinglanDialogueWidget>(DialogueWidget.Get()))
-			{
-				Dialogue->SetChoiceEntries(TArray<FQinglanSceneChoice>());
-			}
+			Dialogue->SetChoiceEntries({});
 		}
+		UpdateMenuInputMode();
+		if (!UQinglanHUDStatics::SelectDialogueChoice(this, ChoiceId))
+		{
+			HandleChoicesPresented(PreviousChoices);
+		}
+		// Successful selection may synchronously present another group/menu.
+		// Do not clear that new list after returning from the story subsystem.
 		return true;
 	}
 	if (PendingBlessingChoices.Num() > 0)
@@ -1463,14 +2978,31 @@ bool AQinglanCharacter::ConsumeMenuSelection(int32 Slot)
 			return true;
 		}
 		const FQinglanBlessing Blessing = PendingBlessingChoices[Slot];
-		PendingBlessingChoices.Reset();
+		bool bAccepted = false;
 		if (UGameInstance* const Instance = GetGameInstance())
 		{
 			if (UQinglanRunSubsystem* const Run = Instance->GetSubsystem<UQinglanRunSubsystem>())
 			{
-				Run->AcceptBlessing(Blessing.BlessingId); // exactly 1 of 3 (docs/03 section 5)
+				// exactly 1 of 3 (docs/03 section 5)
+				bAccepted = Run->AcceptBlessing(Blessing.BlessingId);
+				if (bAccepted)
+				{
+					// AUD-11 producer: accepted draft proof (CH01_S02).
+					if (UQinglanStorySubsystem* const Story = Instance->GetSubsystem<UQinglanStorySubsystem>())
+					{
+						QinglanStoryRuntime::NotifyGameplayEvent(Story, FName(TEXT("blessing.taken")), {});
+					}
+				}
 			}
 		}
+		if (!bAccepted)
+		{
+			// Offer persistence (AUD-51): a failed selection leaves the draft.
+			if (Menu) { Menu->SetNotice(UQinglanHUDStatics::GameText(FName(TEXT("menu.notice.offer_failed")))); }
+			return true;
+		}
+		PendingBlessingChoices.Reset();
+		if (Menu) { Menu->CloseOffer(); }
 		ShowGameMessage(Blessing.DisplayName.IsEmpty()
 			? FText::FromString(Blessing.BlessingId.ToString())
 			: Blessing.DisplayName);
@@ -1483,24 +3015,44 @@ bool AQinglanCharacter::ConsumeMenuSelection(int32 Slot)
 			return true;
 		}
 		const FQinglanShopOfferEntry Entry = PendingShopChoices[Slot];
+		if (!BuyShopEntry(Entry))
+		{
+			// Keep the entry selectable after a failed purchase (AUD-51).
+			if (Menu) { Menu->SetNotice(UQinglanHUDStatics::GameText(FName(TEXT("menu.notice.offer_failed")))); }
+			return true;
+		}
 		PendingShopChoices.RemoveAt(Slot);
-		BuyShopEntry(Entry);
 		if (PendingShopChoices.Num() > 0)
 		{
 			PresentShopOffer(PendingShopChoices); // re-present the shortened list
+		}
+		else if (Menu)
+		{
+			Menu->CloseOffer();
+		}
+		return true;
+	}
+	// While a menu overlay is open the number row belongs to the menu even when
+	// no offer is active (techniques must not fire behind it). Outside the
+	// offer screen the digit is a direct row shortcut.
+	if (bMenuOpenNow)
+	{
+		if (Menu->GetScreen() != EQinglanMenuScreen::Offer)
+		{
+			Menu->ActivateRow(Slot);
 		}
 		return true;
 	}
 	return false;
 }
 
-void AQinglanCharacter::BuyShopEntry(const FQinglanShopOfferEntry& Entry)
+bool AQinglanCharacter::BuyShopEntry(const FQinglanShopOfferEntry& Entry)
 {
 	UGameInstance* const Instance = GetGameInstance();
 	UQinglanProfileSubsystem* const Profile = Instance ? Instance->GetSubsystem<UQinglanProfileSubsystem>() : nullptr;
 	if (Profile == nullptr)
 	{
-		return;
+		return false;
 	}
 	const FName TransactionId = *FString::Printf(TEXT("shop.%s.%s"),
 		Entry.bRelic ? TEXT("relic") : TEXT("passive"), *Entry.ItemId.ToString());
@@ -1509,9 +3061,8 @@ void AQinglanCharacter::BuyShopEntry(const FQinglanShopOfferEntry& Entry)
 		: Profile->TryPurchasePassive(TransactionId, Entry.ItemId);
 	if (!bCommitted)
 	{
-		// FIXME-CONTRACT: no string-table key for the declined purchase.
-		ShowGameMessage(NSLOCTEXT("Qinglan", "Shop.Declined", "The keeper declines."));
-		return;
+		ShowGameMessage(UQinglanHUDStatics::GameText(FName(TEXT("menu.notice.offer_failed"))));
+		return false;
 	}
 	// Auto-equip into a free slot so purchases take effect without a separate
 	// equip UI (docs/03 sections 4-5: 1 relic, 2 passives equipped).
@@ -1532,4 +3083,5 @@ void AQinglanCharacter::BuyShopEntry(const FQinglanShopOfferEntry& Entry)
 		}
 	}
 	ShowGameMessage(Entry.Title);
+	return true;
 }

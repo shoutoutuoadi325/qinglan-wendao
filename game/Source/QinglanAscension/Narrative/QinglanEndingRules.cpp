@@ -8,7 +8,7 @@ namespace
 	/** Single game string table (code-contracts.md "Localization keys"). */
 	FText TableText(const TCHAR* Key)
 	{
-		return FText::FromStringTable(FName(TEXT("/Game/Qinglan/Data/ST_Game")), Key);
+		return FText::FromStringTable(FName(TEXT("/Game/Qinglan/Data/ST_Game.ST_Game")), Key);
 	}
 
 	/** Requirement copy authored per missing agreement (CH06.json). */

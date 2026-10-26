@@ -24,7 +24,7 @@ struct FQinglanRankCost
 namespace QinglanProgression
 {
 	/** Single source of every player-facing string. code-contracts.md "Localization keys". */
-	inline constexpr const TCHAR* GameStringTableId = TEXT("/Game/Qinglan/Data/ST_Game");
+	inline constexpr const TCHAR* GameStringTableId = TEXT("/Game/Qinglan/Data/ST_Game.ST_Game");
 
 	/** Three purchasable ranks per stage; Golden Core is rankless. docs/03 section 1. */
 	inline constexpr int32 RanksPerStage = 3;

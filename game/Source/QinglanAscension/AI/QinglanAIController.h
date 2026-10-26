@@ -56,6 +56,7 @@ namespace QinglanAITunables
 
 	// Authored movement flavor.
 	inline constexpr float OrbitSpeedFraction = 0.6f;    // circle-then-lunge tangent speed
+	inline constexpr float MaxOrbitSeconds = 2.5f;       // authored: orbit phase must turn inward after this
 	inline constexpr float RangedBackupSpeedFraction = 0.8f;
 	inline constexpr int32 ProjectilePoolSize = 12;      // authored per-enemy shot pool
 }
@@ -127,7 +128,8 @@ public:
 	const FQinglanBossPattern* GetCurrentBossPattern() const { return CurrentPattern; }
 
 	// --- Attack execution support (character calls these) ---
-	int32 NextAttackSerial() { return ++AttackSerialCounter; }
+	/** Globally-unique release identity from the combat authority (AUD-33). */
+	FQinglanCastId NextAttackCastId();
 	void NotifyWindupBegan(float TelegraphDuration, const FQinglanBossPattern* Pattern);
 	void NotifyAttackCommitted(float LungeSpeed);
 	void NotifyAttackCycleEnded();
@@ -146,13 +148,16 @@ public:
 	/** Spawns (or reuses) a pooled projectile aimed at the current target. */
 	bool SpawnPooledProjectileAtTarget(float Damage, float Range, FName TechniqueId, FName CueId,
 		float AimYawOffsetDeg = 0.f);
+	/** Spawns (or reuses) a pooled projectile along an explicit direction (ember volley, AUD-41). */
+	bool SpawnPooledProjectileInDirection(float Damage, float Range, FName TechniqueId, FName CueId,
+		const FVector& Direction, float Speed);
 	/** Seconds since death (world time), for the director's pool return. */
 	float GetDeathAgeSeconds() const;
 	void NotifyDeathBegan();
 	void NotifyRetreatBegan(float Seconds) { RetreatRemaining = Seconds; }
 
-	/** Offscreen check + audible cue (docs/02 section 8). */
-	void PlayOffscreenAttackAudioCue();
+	/** One windup warning, retained for attacks outside the camera (docs/02 section 8). */
+	void PlayAttackAudioCue();
 	bool IsTargetOffscreenFromPlayerCamera() const;
 
 private:
@@ -163,6 +168,7 @@ private:
 	bool HasLineOfSightToTarget(ACharacter* Target) const;
 	void ApproachTarget(ACharacter* Target, float AcceptanceRadius);
 	AQinglanEnemyCharacter* GetEnemy() const;
+	AQinglanEnemyProjectile* AcquirePooledProjectile();
 	void StopMoving();
 
 	TWeakObjectPtr<AQinglanEncounterDirector> Director;
@@ -192,7 +198,6 @@ private:
 	float PortalDuration = QinglanAITunables::PortalWarningSeconds;
 
 	// Attack execution.
-	int32 AttackSerialCounter = 0;
 	int32 ComboIndex = 0;
 	bool bAttackHitApplied = false;
 	bool bChargeLaunched = false;
@@ -203,6 +208,11 @@ private:
 	float RetreatRemaining = 0.f;
 	float StrafeSign = 1.f;
 	bool bDirectMovement = false;
+
+	// Bounded orbit phase (AUD-40): after MaxOrbitSeconds circling, the enemy
+	// turns inward so a stationary target still reaches the attack envelope.
+	bool bOrbiting = false;
+	float OrbitRemaining = 0.f;
 
 	// Death -> pool timing.
 	float DeathWorldSeconds = -1.f;

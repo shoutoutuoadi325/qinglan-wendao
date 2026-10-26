@@ -33,6 +33,11 @@ public:
 	UFUNCTION(BlueprintPure) bool IsSideQuestStageComplete(FName StageId) const;
 	UFUNCTION(BlueprintPure) bool HasReadRecord(FName RecordId) const;
 
+	/** AUD-37: purchased technique tier (1 = base, 2 = upgraded; no tier 3). */
+	UFUNCTION(BlueprintPure) int32 GetTechniqueTier(FName TechniqueId) const;
+	/** Multiplier for the profile's current tier of TechniqueId (1.0 / 1.15). */
+	UFUNCTION(BlueprintPure) float GetTechniqueTierMultiplier(FName TechniqueId) const;
+
 	// --- Permanent equipment queries (docs/03 sections 4-5) ---
 	UFUNCTION(BlueprintPure) TArray<FName> GetOwnedRelics() const;
 	UFUNCTION(BlueprintPure) FName GetEquippedRelic() const;
@@ -48,6 +53,12 @@ public:
 	// --- Authoritative mutations (atomic, idempotent via transaction IDs) ---
 	/** Grants currency/materials. Returns false if it would overflow bounded ints. */
 	UFUNCTION(BlueprintCallable) bool TryGrant(FName TransactionId, const FQinglanInventory& Grant);
+	/** AUD-07/08: commit run payout and optional first-clear delta together.
+	 * Replayed banking IDs are no-ops; overflow/journal-capacity failure changes
+	 * neither inventory nor transaction history. The run owner saves afterward.
+	 */
+	bool TryBankExpedition(FName BankingId, const FQinglanInventory& Grant,
+		FName FirstClearId, const FQinglanInventory& FirstClearBonus);
 	/** Spends currency; on insufficient resources returns false and changes nothing. */
 	UFUNCTION(BlueprintCallable) bool TrySpend(FName TransactionId, const FQinglanInventory& Cost);
 	/** Attempts the next cultivation rank up; validates boss gates and materials. */
@@ -70,6 +81,13 @@ public:
 	UFUNCTION(BlueprintCallable) bool TrySetEquippedPassives(const TArray<FName>& PassiveIds);
 	/** Studies one passive manual (docs/03 section 4); rejects unknown/owned ids. */
 	UFUNCTION(BlueprintCallable) bool TryPurchasePassive(FName TransactionId, FName PassiveId);
+	/**
+	 * AUD-37: buys the optional tier-2 upgrade (100 Shards + 1 Vein Crystal,
+	 * Foundation Establishment onward; docs/03 sections 1 and 3). The stable
+	 * transaction id makes replays no-ops; an already-upgraded technique
+	 * commits the id without charging again.
+	 */
+	UFUNCTION(BlueprintCallable) bool TryPurchaseTechniqueTier(FName TransactionId, FName TechniqueId);
 	/** Authored study cost (docs/03 section 4 lists no prices): 120 Shards + 2 Spirit Herbs. */
 	static constexpr int64 PassiveStudyCostShards = 120;
 	static constexpr int64 PassiveStudyCostHerbs = 2;
@@ -125,6 +143,8 @@ private:
 	TSet<FName> CampaignFlags;
 	TSet<FName> UnlockedTechniques;
 	TArray<FName> EquippedTechniques;
+	/** AUD-37: technique id -> purchased tier (absent or 1 = base). */
+	TMap<FName, int32> TechniqueTiers;
 	TSet<FName> OwnedRelics;
 	FName EquippedRelic = NAME_None;
 	TSet<FName> OwnedPassives;

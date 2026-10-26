@@ -11,7 +11,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Combat/QinglanCombatComponent.h" // FQinglanResolvedDamage for the gameplay-proof relay
 #include "Core/QinglanCoreTypes.h"
+#include "Narrative/QinglanStoryDataTypes.h"
 #include "Narrative/QinglanStorySubsystem.h"
 #include "Persistence/QinglanSaveGame.h"
 #include "UObject/StrongObjectPtr.h"
@@ -39,6 +41,9 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQinglanStoryReturnToHub, FName, Id
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQinglanStoryCompleteCampaign, FName, IdempotencyKey, FName, SceneId);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQinglanStoryProposalSelected, FName, QuestId, FName, PendingVersion);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQinglanStoryAgreementEffective, FName, QuestId, FName, EffectiveVersion);
+/** A courier reply arrived for QuestId (a safe hub time advance flipped the
+ *  delivery); Version names the pending agreement it answers. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQinglanStoryDeliveryArrived, FName, QuestId, FName, Version);
 /** One ambient bark line, reusing the localized script-line struct. */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQinglanStoryBarkLine, FName, BarkId, const FQinglanScriptLine&, Line);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FQinglanStoryRecordOpened, FName, RecordId, const FText&, Title, const FText&, Body);
@@ -57,20 +62,14 @@ struct FQinglanStoryDelegates
 	FQinglanStoryCompleteCampaign OnCompleteCampaign;
 	FQinglanStoryProposalSelected OnProposalSelected;
 	FQinglanStoryAgreementEffective OnAgreementEffective;
+	FQinglanStoryDeliveryArrived OnDeliveryArrived;
 	FQinglanStoryBarkLine OnBarkLine;
 	FQinglanStoryRecordOpened OnRecordOpened;
 };
 
-/** One quest's pending courier delivery (SQ02/SQ03 proposal round trip). */
-struct FQinglanStoryDelivery
-{
-	/** Pending version this delivery was dispatched for; NAME_None = none. */
-	FName Version = NAME_None;
-	/** Story-clock second at which the matching reply arrives. */
-	double ReadyAtStorySeconds = 0.0;
-	/** True once the safe hub time advance delivered the matching reply. */
-	bool bDelivered = false;
-};
+/** One quest's pending courier delivery (SQ02/SQ03 proposal round trip);
+ *  persisted form lives in the save schema so migrations and validation share it. */
+using FQinglanStoryDelivery = FQinglanNarrativeDelivery;
 
 /**
  * Per-subsystem runtime state: persistent narrative mirror (FQinglanNarrativeState
@@ -84,7 +83,7 @@ struct FQinglanStorySession
 	TSet<FName> CompletedMainScenes;
 	TSet<FName> CompletedSideStages;
 	TSet<FName> Flags;
-	/** ChoiceId -> chosen option Id (self-recorded authored option ids). */
+	/** Scene-scoped choice key -> authored option ID. */
 	TMap<FName, FName> ChoiceDecisions;
 	/** QuestId -> pending version (selected draft, not yet effective). */
 	TMap<FName, FName> PendingAgreements;
@@ -99,6 +98,11 @@ struct FQinglanStorySession
 	bool bRevisitBranch = false;
 	bool bChoicesPresented = false;
 	bool bChoicesResolved = true;
+	/** Playback-local decision families; authored unnamed choices form one family. */
+	TSet<FName> ResolvedChoiceGroups;
+	TSet<FName> PresentedChoiceIds;
+	FName ActiveChoiceGroup = NAME_None;
+	FName ActiveChoicePin = NAME_None;
 	bool bAdvanceHalted = false;
 	int32 NextScriptLine = 0;
 	TArray<FName> PendingResponseKeys;
@@ -123,6 +127,8 @@ struct FQinglanStorySession
 
 	// --- Objectives / journal ---
 	TSet<FName> CompletedObjectives;
+	/** Prevent save delegates from recursively autosaving the same transaction. */
+	bool bSavingStoryBoundary = false;
 
 	// --- Ambient (barks) / dispatcher events ---
 	FName CurrentLocation = NAME_None;
@@ -132,7 +138,11 @@ struct FQinglanStorySession
 	TMap<FName, int32> BarkPlaysThisVisit;
 	/** Deterministic rotation cursor; no gameplay randomness (code-contracts). */
 	int32 BarkRotationCursor = 0;
+	/** Set form: trigger-gated script lines test membership. */
 	TSet<FName> FiredEvents;
+	/** Ordered history for proof evaluation (event_count repetition and the
+	 *  ordered prefix). Every dispatch appends; bounded on write and in save. */
+	TArray<FName> FiredEventLog;
 
 	// --- GC-safe bindings + delegates ---
 	TStrongObjectPtr<class UQinglanStorySignalRelay> Relay;
@@ -157,6 +167,33 @@ public:
 	TWeakObjectPtr<UQinglanStorySubsystem> StorySubsystem;
 };
 
+/**
+ * Gameplay-proof event relay (AUD-11 event producers). The player character's
+ * combat/dodge/technique delegates are dynamic, so they can only bind
+ * UFUNCTIONs; these handlers live here and
+ * forward stable proof event names to QinglanStoryRuntime::NotifyGameplayEvent.
+ * Owned by a reflected property on the character, without an external GC root.
+ */
+UCLASS()
+class UQinglanGameplayProofRelay : public UObject
+{
+	GENERATED_BODY()
+
+public:
+	/** Accepted damage resolved; emits combat.sword_hit when the owner attacked. */
+	UFUNCTION()
+	void HandleDamageResultResolved(const FQinglanResolvedDamage& Result);
+	UFUNCTION()
+	void HandleDodgeStarted(float Duration);
+	UFUNCTION()
+	void HandleCastReleased(FName TechniqueId, FQinglanCastId CastId);
+
+	UPROPERTY()
+	TWeakObjectPtr<UQinglanStorySubsystem> StorySubsystem;
+	UPROPERTY()
+	TWeakObjectPtr<AActor> OwnerActor;
+};
+
 /** Narrative-module tunables; every value cites its authored source. */
 namespace QinglanStoryRuntime
 {
@@ -164,7 +201,7 @@ namespace QinglanStoryRuntime
 	inline constexpr const TCHAR* StoryRegistrySoftPath = TEXT("/Game/Qinglan/Data/DA_StoryRegistry");
 
 	/** Single game string table (code-contracts.md "Localization keys"). */
-	inline constexpr const TCHAR* GameStringTableId = TEXT("/Game/Qinglan/Data/ST_Game");
+	inline constexpr const TCHAR* GameStringTableId = TEXT("/Game/Qinglan/Data/ST_Game.ST_Game");
 
 	/** Courier round trips are in-fiction time only, never real-time waits
 	 * (docs/dev/implementation-blueprint.md section 1.9: "SQ02 18 h, SQ03 12 h,
@@ -173,6 +210,22 @@ namespace QinglanStoryRuntime
 	inline constexpr double SQ03DeliveryGameHours = 12.0;
 	/** Seconds per in-fiction hour for the hub story clock. */
 	inline constexpr double SecondsPerGameHour = 3600.0;
+	/** Bounded ordered event history; matches the save validator's
+	 *  MaxNarrativeEntries ceiling so an exported log always validates. */
+	inline constexpr int32 MaxFiredEventLogEntries = 1024;
+	/** Hour fractions accumulate rounding error (17.9 h + 0.1 h can land a
+	 *  hair under an exact 18 h ready time); arrivals compare with this
+	 *  tolerance so authored whole-hour boundaries stay exact on both sides. */
+	inline constexpr double DeliveryArrivalToleranceSeconds = 1e-3;
+
+	/** Courier round-trip hours per quest (side-quests.json
+	 *  delivery_transition.elapsed_game_hours): SQ02 18 h, SQ03 12 h, and any
+	 *  later proposal quest inherits the SQ03 trip. Shared with the save
+	 *  migration so synthesized deliveries match live dispatches. */
+	inline double DeliveryGameHoursForQuest(FName QuestId)
+	{
+		return QuestId == FName(TEXT("SQ02")) ? SQ02DeliveryGameHours : SQ03DeliveryGameHours;
+	}
 
 	/** Bark scheduling defaults (docs/dev/implementation-blueprint.md section
 	 * 2.6: "cooldown 180 s, <=1/visit, combat-suppressed"); per-bark registry
@@ -202,20 +255,96 @@ namespace QinglanStoryRuntime
 	bool TryInspectRecord(UQinglanStorySubsystem* Story, FName RecordId);
 
 	// --- Dispatcher bridge: gameplay events -> trigger-gated lines + mq_* flags ---
-	void NotifyGameplayEvent(UQinglanStorySubsystem* Story, FName Event, const TArray<FName>& SetsFlags);
+	QINGLANASCENSION_API void NotifyGameplayEvent(UQinglanStorySubsystem* Story, FName Event, const TArray<FName>& SetsFlags);
+
+	// --- Gameplay-proof guards (AUD-10/AUD-11) ---
+	/** Guard evaluation outcome. OrderReset and DeliveryPending/TimeShort are
+	 *  more actionable than a generic Missing, so they win when terms fail. */
+	enum class EQinglanGuardStatus : uint8
+	{
+		Satisfied,
+		Missing,
+		OrderReset,
+		DeliveryPending,
+		TimeShort
+	};
+
+	struct FQinglanGuardReport
+	{
+		EQinglanGuardStatus Status = EQinglanGuardStatus::Satisfied;
+		/** Unmet event/flag/quest names; ordered terms list their remaining
+		 *  steps in authored order so a UI can describe the next action. */
+		TArray<FName> Missing;
+		/** Fully satisfied terms. */
+		int32 Progress = 0;
+		/** Total authored terms (0 = unauthored guard, vacuously satisfied). */
+		int32 Total = 0;
+	};
+
+	/** Evaluates one conjunction against the session's fired-event log/flags,
+	 *  courier deliveries, and story clock. Never mutates state. */
+	QINGLANASCENSION_API FQinglanGuardReport EvaluateGuard(const UQinglanStorySubsystem* Story, const FQinglanRegistryGuard& Guard);
+	/** Evaluates the named objective's authored proof. */
+	QINGLANASCENSION_API FQinglanGuardReport EvaluateObjectiveGuard(const UQinglanStorySubsystem* Story, FName SceneId, FName ObjectiveId);
+	/** Evaluates a scene's structured confirmation_guard. Unauthored guards
+	 *  report Satisfied so legacy scenes keep their existing commit path. */
+	QINGLANASCENSION_API FQinglanGuardReport EvaluateSceneCommitGuard(const UQinglanStorySubsystem* Story, FName SceneId);
+	/** True when the scene authors at least one confirmation_guard term. */
+	QINGLANASCENSION_API bool SceneHasCommitGuard(const UQinglanStorySubsystem* Story, FName SceneId);
+	/** Clears the ordered-prefix history for every ordered term of the scene
+	 *  (objective and confirmation guards) so the player may retry the sequence. */
+	QINGLANASCENSION_API void ResetOrderedProgress(UQinglanStorySubsystem* Story, FName SceneId);
 
 	// --- Safe hub time advance (courier deliveries) ---
 	/** Advances the in-fiction hub clock; marks matching deliveries arrived.
-	 *  Returns true when at least one pending delivery became ready. */
-	bool AdvanceHubTime(UQinglanStorySubsystem* Story, double GameHours);
+	 *  Returns true when at least one pending delivery became ready.
+	 *  Exported for the editor automation specs (courier flow cases). */
+	QINGLANASCENSION_API bool AdvanceHubTime(UQinglanStorySubsystem* Story, double GameHours);
 	double GetStoryClockSeconds(const UQinglanStorySubsystem* Story);
 
+	// --- Agreement delivery / revision (SQ02/SQ03 courier round trips) ---
+	/** Pending-delivery snapshot for the sanctuary rest station and UI. */
+	struct FQinglanDeliveryStatus
+	{
+		/** True while at least one dispatched reply has not arrived yet. */
+		bool bHasPending = false;
+		/** Hours until the last in-flight reply arrives (longest round trip);
+		 *  what a single sanctuary rest must cover. */
+		double RemainingHours = 0.0;
+		/** Quests with a reply still in flight, lexical order. */
+		TArray<FName> Quests;
+	};
+	/** Queries the pending courier deliveries against the current clock. */
+	QINGLANASCENSION_API FQinglanDeliveryStatus QueryPendingDeliveries(const UQinglanStorySubsystem* Story);
+	/**
+	 * Replays one completed protocol stage with live choices so a settled
+	 * agreement can be renegotiated (docs/story/narrative-implementation.md
+	 * section 9). Guards: the stage belongs to a proposal quest, the quest is
+	 * available, no ending is confirmed, and the stage is completed; a live
+	 * encounter defers instead of freezing the player. Returns false when a
+	 * guard rejects the revision (callers fall back to the recap branch).
+	 */
+	QINGLANASCENSION_API bool BeginRevisionScene(UQinglanStorySubsystem* Story, FName SceneId);
+	/** "Accepted plan X. Proposal awaiting confirmation Y." for one quest
+	 *  (authored pending_status key); empty for non-protocol quests. */
+	QINGLANASCENSION_API FText PendingStatusText(const UQinglanStorySubsystem* Story, FName QuestId);
+	/** Authored arrival notice for one quest's courier reply (the accept
+	 *  stage's delivery_time key); empty when unauthored. */
+	QINGLANASCENSION_API FText DeliveryTimeText(const UQinglanStorySubsystem* Story, FName QuestId);
+
 	// --- Save bridge (see QinglanStorySubsystem.cpp FIXME-CONTRACT) ---
-	void ExportNarrativeState(const UQinglanStorySubsystem* Story, FQinglanNarrativeState& Out);
-	void ImportNarrativeState(UQinglanStorySubsystem* Story, const FQinglanNarrativeState& In);
+	QINGLANASCENSION_API void ExportNarrativeState(const UQinglanStorySubsystem* Story, FQinglanNarrativeState& Out);
+	QINGLANASCENSION_API void ImportNarrativeState(UQinglanStorySubsystem* Story, const FQinglanNarrativeState& In);
+	/** Persist the current narrative transaction through the active profile save path. */
+	QINGLANASCENSION_API bool SaveStoryBoundary(UQinglanStorySubsystem* Story);
+#if WITH_DEV_AUTOMATION_TESTS
+	/** Transient registry injection; tests must clear this with nullptr before returning. */
+	QINGLANASCENSION_API void SetRegistryForTesting(UQinglanStoryRegistry* Registry);
+#endif
 
 	// --- State queries for UI / automation specs ---
-	bool IsObjectiveCompleted(const UQinglanStorySubsystem* Story, FName ObjectiveId);
-	FName GetPendingAgreement(const UQinglanStorySubsystem* Story, FName QuestId);
+	QINGLANASCENSION_API bool IsObjectiveCompleted(const UQinglanStorySubsystem* Story, FName ObjectiveId);
+	QINGLANASCENSION_API bool IsSceneObjectiveCompleted(const UQinglanStorySubsystem* Story, FName SceneId, FName ObjectiveId);
+	QINGLANASCENSION_API FName GetPendingAgreement(const UQinglanStorySubsystem* Story, FName QuestId);
 	bool WasEndingPreviewed(const UQinglanStorySubsystem* Story, FName EndingId);
 } // namespace QinglanStoryRuntime

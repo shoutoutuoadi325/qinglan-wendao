@@ -3,6 +3,8 @@
 //   docs/dev/implementation-blueprint.md section 3 "Data Contracts"
 //   docs/dev/implementation-blueprint.md sections 1.4-1.9 (numbers)
 //   docs/dev/code-contracts.md "Localization keys" (ST_Game regeneration)
+//   AUD-48: both locales are also baked into DT_Localization for the runtime
+//   bilingual service (no engine .locres gather step in this offline project)
 //   docs/03-progression-and-economy.md sections 1-2 (payouts used for parity)
 //
 // Determinism: file iteration is always sorted, no RNG is used anywhere, and
@@ -19,7 +21,9 @@
 #include "QinglanAscensionEditor.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "Core/QinglanLocalizationService.h" // FQinglanLocalizedTextRow (AUD-48)
 #include "Dom/JsonObject.h"
+#include "Engine/DataTable.h"
 #include "HAL/FileManager.h"
 #include "Internationalization/StringTable.h" // UE 5.8 location (was Engine/StringTable.h)
 #include "Internationalization/StringTableCore.h" // FStringTable definition (SetSourceString); the header above only forward-declares it
@@ -36,6 +40,7 @@
 #include "Abilities/QinglanTechniqueTypes.h"
 #include "Core/QinglanCoreTypes.h"
 #include "Narrative/QinglanStoryDataTypes.h"
+#include "Narrative/QinglanStoryIdentity.h"
 #include "Progression/QinglanProgressionTables.h"
 
 namespace
@@ -59,6 +64,14 @@ namespace
 
 	/** Single player-facing string table. docs/dev/code-contracts.md "Localization keys". */
 	constexpr const TCHAR* StringTableAssetPath = TEXT("/Game/Qinglan/Data/ST_Game");
+
+	/**
+	 * AUD-48: packaged bilingual table consumed by FQinglanLocalizationService.
+	 * Row name = localization key, columns = en-US + zh-Hans. Baking both
+	 * locales into a cooked asset replaces the unavailable .locres pipeline and
+	 * keeps the repository JSON out of the shipped build.
+	 */
+	constexpr const TCHAR* BilingualTableAssetPath = TEXT("/Game/Qinglan/Data/DT_Localization");
 
 	/** Story registry asset. Task contract + QinglanStoryDataTypes.h header note. */
 	constexpr const TCHAR* StoryRegistryAssetPath = TEXT("/Game/Qinglan/Data/DA_StoryRegistry");
@@ -770,6 +783,36 @@ namespace
 		}
 	}
 
+	/** AUD-09: identities are unique within an explicit scene/stage owner.
+	 * Cross-scene reuse of a local ID is valid; runtime callers must supply ownership.
+	 */
+	void ValidateSceneMemberIds(const TSharedRef<FJsonObject>& Scene, const FString& Context, TArray<FString>& Errors)
+	{
+		if (!QinglanStoryIdentity::IsValidComponent(JName(Scene, TEXT("id"))))
+		{
+			AddError(Errors, Context, TEXT("scene/stage id is empty or contains reserved separator '::'"));
+		}
+		for (const TCHAR* Field : { TEXT("objectives"), TEXT("choices") })
+		{
+			TSet<FName> Seen;
+			for (const TSharedPtr<FJsonValue>& Value : JArr(Scene, Field))
+			{
+				const TSharedPtr<FJsonObject> Member = Value.IsValid() ? Value->AsObject() : nullptr;
+				if (!Member.IsValid())
+				{
+					AddError(Errors, Context, FString::Printf(TEXT("%s member must be an object"), Field));
+					continue;
+				}
+				const FName Id = JName(Member.ToSharedRef(), TEXT("id"));
+				if (!QinglanStoryIdentity::IsValidComponent(Id) || Seen.Contains(Id))
+				{
+					AddError(Errors, Context, FString::Printf(TEXT("invalid or duplicate %s id '%s' within owner"), Field, *Id.ToString()));
+				}
+				Seen.Add(Id);
+			}
+		}
+	}
+
 	void ValidateStoryFiles(const TMap<FString, TSharedRef<FJsonObject>>& StoryFiles, const FQinglanLocaleData& Locales,
 		TArray<FString>& Errors, int32& OutMainSceneCount, int32& OutSideStageCount, int32& OutRecordCount, int32& OutBarkCount)
 	{
@@ -837,6 +880,7 @@ namespace
 				if (!Scene.IsValid()) { continue; }
 				const TSharedRef<FJsonObject> SceneRef = Scene.ToSharedRef();
 				const FName SceneId = JName(SceneRef, TEXT("id"));
+				ValidateSceneMemberIds(SceneRef, FPaths::GetCleanFilename(FilePair.Key) + TEXT("/scene ") + SceneId.ToString(), Errors);
 				if (SceneId.IsNone()) { continue; }
 				if (SceneIds.Contains(SceneId)) // UE 5.8: TSet::Add returns FSetElementId, not bool
 				{
@@ -875,6 +919,7 @@ namespace
 					const TSharedPtr<FJsonObject> Stage = StageValue->AsObject();
 					if (!Stage.IsValid()) { continue; }
 					const FName StageId = JName(Stage.ToSharedRef(), TEXT("id"));
+					ValidateSceneMemberIds(Stage.ToSharedRef(), FPaths::GetCleanFilename(FilePair.Key) + TEXT("/stage ") + StageId.ToString(), Errors);
 					if (StageId.IsNone()) { continue; }
 					if (StageIds.Contains(StageId)) // UE 5.8: TSet::Add returns FSetElementId, not bool
 					{
@@ -889,6 +934,13 @@ namespace
 			}
 			OutRecordCount += JArr(Root, TEXT("records")).Num();
 			OutBarkCount += JArr(Root, TEXT("barks")).Num();
+		}
+		for (const FName StageId : StageIds)
+		{
+			if (SceneIds.Contains(StageId))
+			{
+				AddError(Errors, TEXT("story identities"), FString::Printf(TEXT("main scene and side stage share owner id '%s'"), *StageId.ToString()));
+			}
 		}
 
 		// --- Chapters reference existing scenes and agree with scene.chapter ----
@@ -1310,11 +1362,82 @@ namespace
 		Out.ShowAfterTextKey = JName(Json, TEXT("show_after_text_key"));
 	}
 
+	/**
+	 * Parses one `all_of` term (AUD-11). Unknown kinds are skipped with a
+	 * Warning instead of failing the whole import: the data validator owns the
+	 * grammar, so an unrecognized kind is a forward-compatibility signal, not a
+	 * reason to drop the scene.
+	 */
+	bool ParseGuardTerm(const TSharedRef<FJsonObject>& Json, FQinglanRegistryGuardTerm& Out)
+	{
+		Out.Kind = JName(Json, TEXT("kind"));
+		if (Out.Kind.IsNone())
+		{
+			UE_LOG(LogQinglanEditor, Warning, TEXT("Guard term without a kind skipped"));
+			return false;
+		}
+		if (Out.Kind == FName(TEXT("event")))
+		{
+			Out.Event = JName(Json, TEXT("event"));
+			return !Out.Event.IsNone();
+		}
+		if (Out.Kind == FName(TEXT("event_count")))
+		{
+			Out.Event = JName(Json, TEXT("event"));
+			Out.Count = FMath::Max(1, static_cast<int32>(JNum(Json, TEXT("count"), 1.0)));
+			return !Out.Event.IsNone();
+		}
+		if (Out.Kind == FName(TEXT("ordered")))
+		{
+			Out.OrderedSteps = JNameArray(Json, TEXT("steps"));
+			return Out.OrderedSteps.Num() > 0;
+		}
+		if (Out.Kind == FName(TEXT("delivery")))
+		{
+			Out.Quest = JName(Json, TEXT("quest"));
+			return !Out.Quest.IsNone();
+		}
+		if (Out.Kind == FName(TEXT("time_advance")))
+		{
+			Out.GameHours = JNum(Json, TEXT("game_hours"));
+			return Out.GameHours > 0.0;
+		}
+		if (Out.Kind == FName(TEXT("flag")))
+		{
+			Out.Flag = JName(Json, TEXT("flag"));
+			return !Out.Flag.IsNone();
+		}
+		UE_LOG(LogQinglanEditor, Warning, TEXT("Unknown guard term kind '%s' skipped"), *Out.Kind.ToString());
+		return false;
+	}
+
+	/** Fills a conjunction guard from a JSON object carrying `all_of`. */
+	void FillGuard(const TSharedRef<FJsonObject>& Json, FQinglanRegistryGuard& Out)
+	{
+		Out.AllOf.Reset();
+		for (const TSharedPtr<FJsonValue>& Value : JArr(Json, TEXT("all_of")))
+		{
+			if (!Value.IsValid() || Value->IsNull() || !Value->AsObject().IsValid())
+			{
+				continue;
+			}
+			FQinglanRegistryGuardTerm Term;
+			if (ParseGuardTerm(Value->AsObject().ToSharedRef(), Term))
+			{
+				Out.AllOf.Add(Term);
+			}
+		}
+	}
+
 	void FillObjective(const TSharedRef<FJsonObject>& Json, FQinglanRegistryObjective& Out)
 	{
 		Out.ObjectiveId = JName(Json, TEXT("id"));
 		Out.TextKey = JName(Json, TEXT("text_key"));
 		Out.Completion = JStr(Json, TEXT("completion"));
+		if (const TSharedPtr<FJsonObject> Proof = JObj(Json, TEXT("proof")))
+		{
+			FillGuard(Proof.ToSharedRef(), Out.Guard);
+		}
 	}
 
 	void FillScene(const TSharedRef<FJsonObject>& Json, FQinglanRegistryScene& Out)
@@ -1351,11 +1474,21 @@ namespace
 		Out.SetsFlags = JNameArray(Json, TEXT("sets_flags"));
 		Out.NextSceneIds = JNameArray(Json, TEXT("next_scene_ids"));
 		Out.RetryKey = JName(Json, TEXT("retry_key"));
-		// The scaffold field is a FName; the JSON payload is an English QA prose
-		// sentence, so a stable derived token is stored and the prose is logged.
-		Out.ConfirmationGuard = JName(Json, TEXT("confirmation_guard")).IsNone()
-			? NAME_None
-			: FName(*FString::Printf(TEXT("guard.%s"), *Out.SceneId.ToString()));
+		// The scaffold field is a FName, but the JSON payload is either the
+		// older English QA prose or the structured {"all_of":[...]} guard
+		// (AUD-11). Presence of either form yields the stable derived token;
+		// the runtime evaluator reads the structured form from the registry.
+		Out.ConfirmationGuard = Json->HasField(TEXT("confirmation_guard"))
+			? FName(*FString::Printf(TEXT("guard.%s"), *Out.SceneId.ToString()))
+			: NAME_None;
+		// Structured guard form (AUD-10/AUD-11). The legacy prose form is not
+		// an object, so JObj returns null and the token above stays the only
+		// trace; only the structured form gains evaluable terms.
+		if (const TSharedPtr<FJsonObject> ConfirmationGuard = JObj(Json, TEXT("confirmation_guard")))
+		{
+			FillGuard(ConfirmationGuard.ToSharedRef(), Out.ConfirmationGuardTerms);
+		}
+		Out.ScriptTrigger = JName(Json, TEXT("script_trigger"));
 		Out.JournalKey = JName(Json, TEXT("journal_key"));
 		Out.AdvanceDeliveryKey = JName(Json, TEXT("advance_delivery_key"));
 		Out.DeliveryTimeKey = JName(Json, TEXT("delivery_time_key"));
@@ -1583,6 +1716,64 @@ namespace
 		{
 			Table->SetSourceString(FTextKey(Key), SourceKeys->FindChecked(Key), FString());
 		}
+		// AUD-50: assert the generated table carries every imported key; a
+		// silently truncated table is exactly the drift this audit found.
+		int32 WrittenKeys = 0;
+		Table->EnumerateKeysAndSourceStrings([&WrittenKeys](const FTextKey&, const FString&) { ++WrittenKeys; return true; });
+		UE_LOG(LogQinglanEditor, Display, TEXT("ST_Game: %d keys written (source locale %s)"),
+			WrittenKeys, StringTableSourceCulture);
+		if (WrittenKeys != SourceKeys->Num())
+		{
+			AddError(Errors, TEXT("ST_Game"), FString::Printf(
+				TEXT("string table holds %d keys but the locale defines %d"), WrittenKeys, SourceKeys->Num()));
+			return false;
+		}
+		return SaveImportedAsset(Raw, Errors);
+	}
+
+	/**
+	 * AUD-48: bake both shipped locales into DT_Localization so the runtime
+	 * service can switch languages without repository JSON and without the
+	 * offline container running the engine's gather/compile .locres pipeline.
+	 * Parity was validated above; missing zh rows still fall back to en.
+	 */
+	bool ImportBilingualTable(const FQinglanLocaleData& Locales, TArray<FString>& Errors)
+	{
+		const TMap<FString, FString>* EnglishKeys = Locales.CultureKeys.Find(RequiredCultureEnUs);
+		const TMap<FString, FString>* ChineseKeys = Locales.CultureKeys.Find(RequiredCultureZhHans);
+		if (EnglishKeys == nullptr || ChineseKeys == nullptr)
+		{
+			AddError(Errors, TEXT("DT_Localization"), TEXT("both en-US and zh-Hans key sets are required"));
+			return false;
+		}
+
+		UObject* Raw = CreateFreshAsset(BilingualTableAssetPath, UDataTable::StaticClass(), Errors);
+		if (Raw == nullptr) { return false; }
+		UDataTable* Table = static_cast<UDataTable*>(Raw);
+		Table->RowStruct = FQinglanLocalizedTextRow::StaticStruct();
+
+		// Sorted row insertion => byte-stable asset across machines.
+		TArray<FString> SortedKeys;
+		EnglishKeys->GetKeys(SortedKeys);
+		SortedKeys.Sort();
+		for (const FString& Key : SortedKeys)
+		{
+			FQinglanLocalizedTextRow Row;
+			Row.TextEn = EnglishKeys->FindChecked(Key);
+			if (const FString* ChineseText = ChineseKeys->Find(Key))
+			{
+				Row.TextZh = *ChineseText;
+			}
+			else
+			{
+				// ValidateLocaleParity already reported the mismatch; keep the
+				// runtime table complete so Chinese never renders blank.
+				Row.TextZh = Row.TextEn;
+			}
+			Table->AddRow(FName(*Key), Row);
+		}
+
+		UE_LOG(LogQinglanEditor, Display, TEXT("DT_Localization: %d bilingual rows"), SortedKeys.Num());
 		return SaveImportedAsset(Raw, Errors);
 	}
 } // namespace
@@ -1597,8 +1788,8 @@ UQinglanDataImportCommandlet::UQinglanDataImportCommandlet()
 	IsServer = false;
 	LogToConsole = true;
 	// UE 5.8 UCommandlet help fields (HelpToRunCmdlet no longer exists).
-	HelpDescription = TEXT("Regenerates ST_Game, DA_StoryRegistry, DA_Tech_<id>, and DA_Realm_<id> from the repository data directory.");
-	HelpUsage = TEXT("QinglanDataImport -data=<repo data dir> [-loc=<localization dir>]");
+	HelpDescription = TEXT("Regenerates ST_Game, DT_Localization (en-US + zh-Hans), DA_StoryRegistry, DA_Tech_<id>, and DA_Realm_<id> from the repository data directory.");
+	HelpUsage = TEXT("QinglanDataImport -data=<repo data dir> [-loc=<localization dir>] [-localizationonly]");
 }
 
 int32 UQinglanDataImportCommandlet::Main(const FString& Params)
@@ -1719,6 +1910,21 @@ int32 UQinglanDataImportCommandlet::Main(const FString& Params)
 
 	// --- Import (validation passed; every asset regenerates from data) ------------------
 	bool bAllSaved = ImportStringTable(Locales, Errors);
+	// AUD-48: the runtime service reads this bilingual table; keep it in the
+	// same regeneration pass so it can never drift from ST_Game's key set.
+	if (!ImportBilingualTable(Locales, Errors)) { bAllSaved = false; }
+	// Release builds can refresh text without replacing technique assets whose
+	// montage/cue references are authored by later bootstrap passes.
+	if (FParse::Param(*Params, TEXT("localizationonly")))
+	{
+		for (const FString& Error : Errors)
+		{
+			UE_LOG(LogQinglanEditor, Error, TEXT("%s"), *Error);
+		}
+		UE_LOG(LogQinglanEditor, Display, TEXT("QinglanDataImport localization-only complete: %s"),
+			bAllSaved && Errors.IsEmpty() ? TEXT("success") : TEXT("failed"));
+		return bAllSaved && Errors.IsEmpty() ? 0 : 1;
+	}
 	if (!ImportStoryRegistry(StoryFiles, Errors)) { bAllSaved = false; }
 
 	{

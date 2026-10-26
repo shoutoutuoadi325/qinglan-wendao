@@ -1,12 +1,22 @@
 // Sword combo implementation. All timings from docs/02-combat-and-camera.md §4:
 // Cut1 0.14/0.10/0.22 x0.8, Cut2 0.16/0.10/0.24 x0.9, Cut3 0.22/0.12/0.32 x1.3;
 // combo window 0.35 s after recovery begins; single-slot buffer 0.15 s (§3);
-// sweeps between previous and current blade sockets with substeps; one damage
-// per victim per swing; energy restore hooks into UQinglanCombatComponent.
+// blade sockets are sampled every active tick (moving or stationary) with
+// substeps and per-swing dedupe; one damage per victim per swing; energy
+// restore hooks into UQinglanCombatComponent.
+//
+// AUD-44 STATUS: OPEN. The swing montage assets are authored by
+// QinglanAnimBootstrap as /Game/Qinglan/Characters/Human/Montages/
+// AM_Human_SwordCut_1..3 (slot "DefaultSlot"); the rig itself is still the
+// shared AnimationSingleNode idle loop plus montage/notify overlays. A full
+// AnimBP locomotion/aim/combat state machine is NOT implemented. Editor
+// verification: montage slot DefaultSlot, sword sockets sword_base/sword_tip,
+// cast socket cast_source (see AQinglanCharacter::ResolveAim).
 #include "Combat/QinglanSwordComponent.h"
 
 #include "QinglanAscension.h"
 #include "Abilities/QinglanBlessingLibrary.h"
+#include "Combat/QinglanCharacter.h"
 #include "Combat/QinglanCombatComponent.h"
 #include "Core/QinglanAudioSubsystem.h"
 #include "GameFramework/Character.h"
@@ -14,7 +24,11 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
+#include "Engine/OverlapResult.h" // FOverlapResult full type (UE 5.8 split from EngineTypes)
 #include "Engine/World.h"
+#include "Engine/GameInstance.h"
+#include "Narrative/QinglanStoryRuntime.h"
+#include "Narrative/QinglanStorySubsystem.h"
 #include "Progression/QinglanEconomyLibrary.h"
 
 namespace
@@ -40,11 +54,14 @@ UQinglanSwordComponent::UQinglanSwordComponent()
 		FQinglanSwordCut{ 0.22f, 0.12f, 0.32f, 1.3f }  // Cut 3
 	};
 
-	// Convention paths authored by QinglanAnimBootstrap (config-overridable).
+	// Convention paths authored by QinglanAnimBootstrap: object name matches the
+	// package file name, and the package lives in its own asset path (AUD-45).
+	// Full object-path form is used so a stray package/object mismatch is
+	// reported by the loader instead of silently resolving another package.
 	SwingMontageSoftPaths = {
-		FSoftObjectPath(TEXT("/Game/Qinglan/Characters/Human/Montages/AM_SwordCut_1")),
-		FSoftObjectPath(TEXT("/Game/Qinglan/Characters/Human/Montages/AM_SwordCut_2")),
-		FSoftObjectPath(TEXT("/Game/Qinglan/Characters/Human/Montages/AM_SwordCut_3")),
+		FSoftObjectPath(TEXT("/Game/Qinglan/Characters/Human/Montages/AM_Human_SwordCut_1.AM_Human_SwordCut_1")),
+		FSoftObjectPath(TEXT("/Game/Qinglan/Characters/Human/Montages/AM_Human_SwordCut_2.AM_Human_SwordCut_2")),
+		FSoftObjectPath(TEXT("/Game/Qinglan/Characters/Human/Montages/AM_Human_SwordCut_3.AM_Human_SwordCut_3")),
 	};
 }
 
@@ -54,9 +71,24 @@ UAnimMontage* UQinglanSwordComponent::ResolveSwingMontageSoft(int32 CutIndex)
 	{
 		return nullptr;
 	}
+	const FString PathString = SwingMontageSoftPaths[CutIndex].ToString();
 	if (UObject* Resolved = SwingMontageSoftPaths[CutIndex].TryLoad())
 	{
-		return Cast<UAnimMontage>(Resolved);
+		if (UAnimMontage* Montage = Cast<UAnimMontage>(Resolved))
+		{
+			return Montage;
+		}
+		UE_LOG(LogQinglanCombat, Warning, TEXT("Swing montage path %s resolved to a non-montage; phase timers continue"), *PathString);
+		return nullptr;
+	}
+	// Missing assets degrade to "no animation": phase timers and blade sweeps
+	// stay authoritative, and the log is emitted once per path to avoid spam.
+	if (!MissingSwingMontagePathsLogged.Contains(PathString))
+	{
+		MissingSwingMontagePathsLogged.Add(PathString);
+		UE_LOG(LogQinglanCombat, Warning,
+			TEXT("Swing montage missing at %s (cut %d); running without animation. Run QinglanAnimBootstrap."),
+			*PathString, CutIndex + 1);
 	}
 	return nullptr;
 }
@@ -107,6 +139,16 @@ bool UQinglanSwordComponent::CanStartSwing() const
 	if (!OwnerCombat || !OwnerCombat->IsAlive())
 	{
 		return false; // Dead outranks everything (docs/02 §3 priority).
+	}
+	// AUD-32: committed casts cannot be canceled by a normal attack (this
+	// includes post-release recovery); dodge, hit reaction, and open scene
+	// choices are also excluded by the character's unified action gate.
+	if (const AQinglanCharacter* const Character = Cast<AQinglanCharacter>(GetOwner()))
+	{
+		if (!Character->CanStartAction(EQinglanActionKind::Sword))
+		{
+			return false;
+		}
 	}
 	return !Cuts.IsEmpty();
 }
@@ -367,28 +409,70 @@ USkeletalMeshComponent* UQinglanSwordComponent::GetOwnerMesh() const
 
 FVector UQinglanSwordComponent::GetBladeSocketLocation(FName SocketName) const
 {
-	USkeletalMeshComponent* const MeshComp = GetOwnerMesh();
-	if (MeshComp)
+	if (USkeletalMeshComponent* const MeshComp = GetOwnerMesh())
 	{
-		if (!MeshComp->DoesSocketExist(SocketName))
+		if (MeshComp->DoesSocketExist(SocketName))
 		{
-			UE_LOG(LogQinglanCombat, Verbose, TEXT("Sword socket '%s' missing on owner mesh; using component origin"), *SocketName.ToString());
-			return MeshComp->GetComponentLocation();
+			return MeshComp->GetSocketLocation(SocketName);
 		}
-		return MeshComp->GetSocketLocation(SocketName);
 	}
-	return GetOwner() ? GetOwner()->GetActorLocation() : FVector::ZeroVector;
+
+	// AUD-44 fallback: sockets are not authored in the scaffold rig. Prefer a
+	// weapon/sword-named scene component (the intended "weapon component"
+	// position), then the owner mesh origin, then the actor origin. Every
+	// fallback is logged; none of them can crash the sweep.
+	AActor* const OwnerActor = GetOwner();
+	if (OwnerActor)
+	{
+		TArray<UActorComponent*> Components;
+		OwnerActor->GetComponents(Components);
+		for (UActorComponent* Component : Components)
+		{
+			USceneComponent* const SceneComp = Cast<USceneComponent>(Component);
+			const FString ComponentName = Component ? Component->GetName() : FString();
+			if (SceneComp && SceneComp != GetOwnerMesh()
+				&& (ComponentName.Contains(TEXT("weapon"), ESearchCase::IgnoreCase)
+					|| ComponentName.Contains(TEXT("sword"), ESearchCase::IgnoreCase)))
+			{
+				UE_LOG(LogQinglanCombat, Verbose,
+					TEXT("Sword socket '%s' missing; using weapon component '%s' position"),
+					*SocketName.ToString(), *ComponentName);
+				return SceneComp->GetComponentLocation();
+			}
+		}
+	}
+	if (USkeletalMeshComponent* const MeshComp = GetOwnerMesh())
+	{
+		UE_LOG(LogQinglanCombat, Verbose,
+			TEXT("Sword socket '%s' missing and no weapon component found; using owner mesh origin"),
+			*SocketName.ToString());
+		return MeshComp->GetComponentLocation();
+	}
+	return OwnerActor ? OwnerActor->GetActorLocation() : FVector::ZeroVector;
 }
 
 void UQinglanSwordComponent::TickSweep()
 {
-	// Sweep between previous and current blade socket positions (docs/02 §4).
+	// Sample the blade at its current position every active tick. Moving sockets
+	// additionally sweep the segment from the previous tick so fast cuts cannot
+	// tunnel; stationary sockets still sample (AUD-44) and dedupe through the
+	// per-swing victim set.
 	const FVector TipLocation = GetBladeSocketLocation(BladeTipSocketName);
 	const FVector BaseLocation = GetBladeSocketLocation(BladeStartSocketName);
+	// The full blade can strike a capsule between its endpoints. Sampling
+	// only the hilt and tip leaves a gap through the middle of a standing cut.
+	SweepSocketSegment(BaseLocation, TipLocation);
 	if (bHavePreviousSocketLocations)
 	{
 		SweepSocketSegment(PreviousTipLocation, TipLocation);
 		SweepSocketSegment(PreviousBaseLocation, BaseLocation);
+	}
+	else
+	{
+		// First active tick: the previous reference frame is intentionally not
+		// inherited from the last swing, so sample the current blade directly.
+		SampleSocketAt(TipLocation);
+		SampleSocketAt(BaseLocation);
 	}
 	PreviousTipLocation = TipLocation;
 	PreviousBaseLocation = BaseLocation;
@@ -407,6 +491,9 @@ void UQinglanSwordComponent::SweepSocketSegment(const FVector& From, const FVect
 	const float SegmentLength = FVector::Dist(From, To);
 	if (SegmentLength < KINDA_SMALL_NUMBER)
 	{
+		// AUD-44: a socket that did not move still samples its position; the old
+		// early-return silently skipped hits on a held/stationary blade.
+		SampleSocketAt(To);
 		return;
 	}
 
@@ -425,9 +512,61 @@ void UQinglanSwordComponent::SweepSocketSegment(const FVector& From, const FVect
 		const FVector Start = FMath::Lerp(From, To, AlphaStart);
 		const FVector End = FMath::Lerp(From, To, AlphaEnd);
 
-		FHitResult Hit;
-		const bool bBlocking = World->SweepSingleByObjectType(Hit, Start, End, FQuat::Identity, ObjectQuery, SweepShape, QueryParams);
-		AActor* Victim = bBlocking ? Hit.GetActor() : nullptr;
+		TArray<FHitResult> Hits;
+		World->SweepMultiByObjectType(Hits, Start, End, FQuat::Identity, ObjectQuery, SweepShape, QueryParams);
+		// Deterministic ordering: sweep time first, then stable actor name.
+		Hits.Sort([](const FHitResult& A, const FHitResult& B)
+		{
+			if (!FMath::IsNearlyEqual(A.Time, B.Time))
+			{
+				return A.Time < B.Time;
+			}
+			const AActor* ActorA = A.GetActor();
+			const AActor* ActorB = B.GetActor();
+			return ActorA && ActorB ? ActorA->GetName() < ActorB->GetName() : ActorA != nullptr;
+		});
+		for (const FHitResult& Hit : Hits)
+		{
+			AActor* const Victim = Hit.GetActor();
+			if (Victim && !SwingVictims.Contains(Victim))
+			{
+				ApplyHit(Victim);
+			}
+		}
+	}
+}
+
+void UQinglanSwordComponent::SampleSocketAt(const FVector& Location)
+{
+	UWorld* const World = GetWorld();
+	AActor* const OwnerActor = GetOwner();
+	if (!World || !OwnerActor)
+	{
+		return;
+	}
+
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(QinglanBladeSample), /*bTraceComplex=*/false, OwnerActor);
+	QueryParams.AddIgnoredActor(OwnerActor);
+	TArray<FOverlapResult> Overlaps;
+	World->OverlapMultiByObjectType(Overlaps, Location, FQuat::Identity,
+		FCollisionObjectQueryParams(ECC_Pawn), FCollisionShape::MakeSphere(BladeSweepRadius), QueryParams);
+
+	// Deterministic nearest-first ordering, then stable name (no RNG anywhere).
+	Overlaps.Sort([Location](const FOverlapResult& A, const FOverlapResult& B)
+	{
+		const AActor* ActorA = A.GetActor();
+		const AActor* ActorB = B.GetActor();
+		const float DistA = FVector::DistSquared(ActorA ? ActorA->GetActorLocation() : Location, Location);
+		const float DistB = FVector::DistSquared(ActorB ? ActorB->GetActorLocation() : Location, Location);
+		if (!FMath::IsNearlyEqual(DistA, DistB))
+		{
+			return DistA < DistB;
+		}
+		return ActorA && ActorB ? ActorA->GetName() < ActorB->GetName() : ActorA != nullptr;
+	});
+	for (const FOverlapResult& Overlap : Overlaps)
+	{
+		AActor* const Victim = Overlap.GetActor();
 		if (Victim && !SwingVictims.Contains(Victim))
 		{
 			ApplyHit(Victim);
@@ -475,7 +614,24 @@ void UQinglanSwordComponent::ApplyHit(AActor* Victim)
 		* (1.f + SwingSwordDamagePercent / 100.f);
 	Event.Timestamp = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f; // paused-game-time timestamp
 
-	VictimCombat->ApplyDamage(Event);
+	if (!VictimCombat->ApplyDamage(Event))
+	{
+		return; // rejected/invulnerable damage grants neither proof nor energy
+	}
+	// The resolved-damage delegate belongs to the victim's Combat component;
+	// the player's own component therefore cannot observe outgoing sword
+	// hits. Publish proof here, after an accepted real sword collision, rather
+	// than from a dummy target or a test-only event injection.
+	if (const AQinglanCharacter* Player = Cast<AQinglanCharacter>(GetOwner()))
+	{
+		if (UGameInstance* Instance = Player->GetGameInstance())
+		{
+			if (UQinglanStorySubsystem* Story = Instance->GetSubsystem<UQinglanStorySubsystem>())
+			{
+				QinglanStoryRuntime::NotifyGameplayEvent(Story, FName(TEXT("combat.sword_hit")), {});
+			}
+		}
+	}
 
 	// Energy restore hook (docs/02 §4): 4 energy per unique target, capped 8 per swing;
 	// training targets cannot generate campaign resources. The cap bookkeeping lives in
@@ -505,11 +661,25 @@ void UQinglanSwordComponent::PlaySwingMontage()
 	if (AnimInstance && Montage)
 	{
 		// Cosmetic only: phase timers above stay authoritative; notifies refine the window.
-		const float Duration = AnimInstance->Montage_Play(Montage, 1.f);
+		// Each StartSwing call (including buffered chains into the next cut) plays
+		// the montage for that cut; Montage_Play replaces the previous cut's pose.
+		const FQinglanSwordCut& Cut = Cuts[ComboIndex];
+		const float CutDuration = Cut.WindupSeconds + Cut.ActiveSeconds + Cut.RecoverySeconds;
+		const float PlayRate = Montage->GetPlayLength() / FMath::Max(CutDuration, UE_SMALL_NUMBER);
+		const float Duration = AnimInstance->Montage_Play(Montage, PlayRate);
 		if (Duration <= 0.f)
 		{
-			UE_LOG(LogQinglanCombat, Verbose, TEXT("Sword montage failed to start for %s"), *GetNameSafe(OwnerCharacter));
+			UE_LOG(LogQinglanCombat, Warning, TEXT("Sword montage %s failed to start for %s; phase timers continue"),
+				*Montage->GetName(), *GetNameSafe(OwnerCharacter));
 		}
+	}
+	else if (Montage && !AnimInstance)
+	{
+		// AUD-44 open gap: AnimationSingleNode/no AnimInstance rigs cannot blend
+		// the montage; the timer-driven swing still resolves all damage.
+		UE_LOG(LogQinglanCombat, Verbose,
+			TEXT("Sword montage %s skipped: owner has no animation instance (AUD-44 state-machine gap)"),
+			*Montage->GetName());
 	}
 }
 

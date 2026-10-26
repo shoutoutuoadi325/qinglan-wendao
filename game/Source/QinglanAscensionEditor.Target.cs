@@ -9,6 +9,12 @@ public class QinglanAscensionEditorTarget : TargetRules
 		Type = TargetType.Editor;
 		DefaultBuildSettings = BuildSettingsVersion.Latest;
 		IncludeOrderVersion = EngineIncludeOrderVersion.Latest;
+		// CI's Windows disk optimization must not invalidate every native Mac
+		// engine object or change its debugging policy.
+		if (Target.Platform == UnrealTargetPlatform.Win64)
+		{
+			bOmitPCDebugInfoInDevelopment = true;
+		}
 		ExtraModuleNames.Add("QinglanAscension");
 		ExtraModuleNames.Add("QinglanAscensionEditor");
 	}

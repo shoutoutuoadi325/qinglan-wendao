@@ -2,11 +2,21 @@
 #include "Abilities/QinglanTechniqueExecutors.h"
 
 #include "Abilities/QinglanProjectile.h"
+#include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
+#include "Combat/QinglanCharacter.h"
 #include "Combat/QinglanCombatComponent.h"
+#include "Combat/QinglanDodgeComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Engine/GameInstance.h"
 #include "Engine/OverlapResult.h" // FOverlapResult full type (UE 5.8 split from EngineTypes)
+#include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "Materials/MaterialInterface.h"
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
 #include "Platform/QinglanGraphicsSettingsService.h"
@@ -54,6 +64,92 @@ namespace
 		}
 		return Selected.IsNull() ? nullptr : Selected.LoadSynchronous(); // refs are cook-validated (blueprint §3)
 	}
+
+	/**
+	 * AUD-44: the release notify is the moment the cast identity is committed, so
+	 * the technique's cosmetic CastMontage belongs here (it was authored into the
+	 * data assets by QinglanAnimBootstrap but never played before). Missing
+	 * montages, mesh animation instances, or sockets only log; gameplay has
+	 * already resolved or will resolve regardless of whether the pose plays.
+	 */
+	void PlayReleaseCastMontage(const FQinglanTechniqueCastContext& Context)
+	{
+		const UQinglanTechniqueDataAsset* Technique = Context.Technique;
+		AActor* Caster = Context.Caster.Get();
+		if (!Technique || !Caster)
+		{
+			return;
+		}
+		if (Technique->CastMontage.IsNull())
+		{
+			UE_LOG(LogQinglanCombat, Verbose, TEXT("Technique %s has no CastMontage; release pose skipped"),
+				*Technique->TechniqueId.ToString());
+			return;
+		}
+		UAnimMontage* Montage = Technique->CastMontage.LoadSynchronous();
+		ACharacter* Character = Cast<ACharacter>(Caster);
+		USkeletalMeshComponent* MeshComp = Character ? Character->GetMesh() : nullptr;
+		UAnimInstance* AnimInstance = MeshComp ? MeshComp->GetAnimInstance() : nullptr;
+		if (!Montage || !AnimInstance)
+		{
+			// AUD-44 open gap: a pure-C++ pawn without an AnimInstance cannot
+			// montage-blend. The shared idle/montage overlay is the whole rig
+			// presentation; no full AnimBP state machine exists yet.
+			UE_LOG(LogQinglanCombat, Warning,
+				TEXT("Technique %s CastMontage could not play (montage=%s animinstance=%s); gameplay continues"),
+				*Technique->TechniqueId.ToString(), Montage ? TEXT("ok") : TEXT("missing"),
+				AnimInstance ? TEXT("ok") : TEXT("missing"));
+			return;
+		}
+		if (AnimInstance->Montage_Play(Montage, 1.f) <= 0.f)
+		{
+			UE_LOG(LogQinglanCombat, Warning, TEXT("Technique %s CastMontage failed to start; gameplay continues"),
+				*Technique->TechniqueId.ToString());
+		}
+	}
+
+	/**
+	 * AUD-42 placeholder presentation: when a stage has no Niagara system (the
+	 * current content set has none), spawn a short-lived engine-shape marker so
+	 * the cue is still visible. No dynamic light is created, so low-flash and
+	 * Low quality keep the same silhouette; this is explicitly a placeholder
+	 * until authored Niagara/audio assets land.
+	 */
+	void SpawnFallbackCueMarker(UWorld* World, const FQinglanCueEvent& Cue)
+	{
+		if (!World)
+		{
+			return;
+		}
+		FActorSpawnParameters SpawnParams;
+		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		SpawnParams.ObjectFlags |= RF_Transient;
+		AActor* Marker = World->SpawnActor<AActor>(AActor::StaticClass(),
+			Cue.SourceTransform.GetLocation(), FRotator::ZeroRotator, SpawnParams);
+		if (!Marker)
+		{
+			UE_LOG(LogQinglanCombat, Warning, TEXT("Cue placeholder spawn failed for stage %s"),
+				*Cue.StageId.ToString());
+			return;
+		}
+
+		UStaticMeshComponent* MeshComp = NewObject<UStaticMeshComponent>(Marker);
+		Marker->SetRootComponent(MeshComp);
+		MeshComp->SetStaticMesh(LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Sphere")));
+		MeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		MeshComp->SetGenerateOverlapEvents(false);
+		MeshComp->SetWorldLocation(Cue.SourceTransform.GetLocation());
+		MeshComp->SetWorldScale3D(FVector(0.4f));
+		if (UMaterialInterface* Material = LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/EngineMaterials/DefaultMaterial")))
+		{
+			MeshComp->SetMaterial(0, Material);
+		}
+		MeshComp->RegisterComponent();
+		Marker->SetLifeSpan(0.6f);
+		UE_LOG(LogQinglanCombat, Warning,
+			TEXT("Cue %s stage %s has no Niagara system; using placeholder marker (AUD-42 open)"),
+			*Cue.TechniqueId.ToString(), *Cue.StageId.ToString());
+	}
 }
 
 bool UQinglanTechniqueExecutors::Execute(const FQinglanTechniqueCastContext& Context)
@@ -66,6 +162,9 @@ bool UQinglanTechniqueExecutors::Execute(const FQinglanTechniqueCastContext& Con
 		UE_LOG(LogQinglanCombat, Warning, TEXT("Execute rejected: missing caster/technique/world"));
 		return false;
 	}
+
+	// AUD-44: release pose (cosmetic only; never gates execution).
+	PlayReleaseCastMontage(Context);
 
 	switch (Technique->Targeting)
 	{
@@ -137,6 +236,7 @@ void UQinglanTechniqueExecutors::ExecuteSelfArc(const FQinglanTechniqueCastConte
 	Shot->SetupLinear(Context.CastId, Context.Technique->TechniqueId, Context.Technique->Element,
 		Caster, Context.AimDirection, ArcSpeedCmPerSec, ArcRangeCm, Raw,
 		false /*bAppliesBurn*/, true /*bPiercing*/, 1.f /*multiplier already applied*/);
+	Shot->SetCueContext(Context); // AUD-42: impact cues keep the technique identity
 
 	FQinglanCueEvent Cue;
 	Cue.CastId = Context.CastId;
@@ -164,6 +264,7 @@ void UQinglanTechniqueExecutors::ExecuteProjectile(const FQinglanTechniqueCastCo
 	Shot->SetupLinear(Context.CastId, Context.Technique->TechniqueId, Context.Technique->Element,
 		Caster, Context.AimDirection, ProjectileSpeedCmPerSec, ProjectileMaxRangeCm, Raw,
 		true /*bAppliesBurn*/, false /*single target*/, 1.f, BurnDuration);
+	Shot->SetCueContext(Context); // AUD-42: impact cues keep the technique identity
 
 	FQinglanCueEvent Cue;
 	Cue.CastId = Context.CastId;
@@ -222,6 +323,7 @@ void UQinglanTechniqueExecutors::ExecuteSelfHeal(const FQinglanTechniqueCastCont
 	// Duration rides the Range field (heal has no range); docs default 4 s.
 	const float Duration = Context.Technique->Range > 0.f ? Context.Technique->Range : 4.f;
 	Effect->SetupHealOverTime(Context.CastId, Context.Technique->TechniqueId, Caster, TotalHeal, Duration, 1.f);
+	Effect->SetCueContext(Context);
 
 	FQinglanCueEvent Cue;
 	Cue.CastId = Context.CastId;
@@ -267,15 +369,11 @@ void UQinglanTechniqueExecutors::ExecuteGroundStrike(const FQinglanTechniqueCast
 
 void UQinglanTechniqueExecutors::ExecuteSelfDash(const FQinglanTechniqueCastContext& Context)
 {
-	// mist_step: enhanced dodge, 600 cm travel (docs/02 §6). Uses controlled
-	// capsule movement via LaunchCharacter so it cannot pass through walls
-	// (docs/02 §2 dodge rule); distance comes from the technique magnitude.
-	//
-	// FIXME-CONTRACT: the combat component scaffold exposes no public
-	// dodge-window trigger (only IsInvulnerable), so mist_step cannot grant
-	// its i-frames through the fixed scaffold. When the combat module adds a
-	// BeginDodgeWindow-style entry point, wire it here - travel and cost
-	// semantics are already complete.
+	// mist_step: enhanced dodge, 600 cm travel (docs/02 §6). Travel reuses the
+	// character's dodge machinery (UQinglanDodgeComponent): constant-speed
+	// capsule sweeps through the movement component stop at blockers, and the
+	// authored i-frame window (0.10-0.28 s of 0.45 s) flows through the same
+	// dodge-state observation the regular dodge's immunity uses (docs/02 §2).
 	AActor* Caster = Context.Caster.Get();
 	ACharacter* Character = Cast<ACharacter>(Caster);
 	if (!Character)
@@ -283,15 +381,36 @@ void UQinglanTechniqueExecutors::ExecuteSelfDash(const FQinglanTechniqueCastCont
 		UE_LOG(LogQinglanCombat, Warning, TEXT("SelfDash rejected: caster is not a character"));
 		return;
 	}
-	const float DashDistance = ComputeMagnitude(Context) > 0.f ? ComputeMagnitude(Context) : 600.f; // docs/02 §6
+	const float DashDistance = ComputeMagnitude(Context) > 0.f ? ComputeMagnitude(Context) : DashDistanceCm; // docs/02 §6
 	const FVector HorizontalDirection = Context.AimDirection.GetSafeNormal2D().GetSafeNormal();
 	if (HorizontalDirection.IsNearlyZero())
 	{
 		return;
 	}
-	const FVector LaunchVelocity = HorizontalDirection * (DashDistance / DashDurationSeconds)
-		+ FVector(0.f, 0.f, DashHeightVelocityCmPerSec);
-	Character->LaunchCharacter(LaunchVelocity, true /*bXYOverride*/, false /*bZOverride*/);
+
+	AQinglanCharacter* QinglanCharacter = Cast<AQinglanCharacter>(Character);
+	UQinglanDodgeComponent* Dodge = QinglanCharacter ? QinglanCharacter->FindComponentByClass<UQinglanDodgeComponent>() : nullptr;
+	if (Dodge)
+	{
+		// Mirror AQinglanCharacter::TryDodge: raise MaxWalkSpeed to the dash
+		// speed so the movement component never clamps the driven velocity; the
+		// character's dodge-finished handler restores it when the dash ends.
+		if (UCharacterMovementComponent* Movement = Character->GetCharacterMovement())
+		{
+			Movement->MaxWalkSpeed = FMath::Max(Movement->MaxWalkSpeed, DashDistance / DashDurationSeconds);
+		}
+		if (!Dodge->StartDodge(HorizontalDirection, DashDistance, DashDurationSeconds,
+				QinglanCharacter->GetDodgeIFrameStart(), QinglanCharacter->GetDodgeIFrameEnd()))
+		{
+			// One dodge at a time: an in-flight dodge keeps its own clock; the
+			// release still cleanses and cues below.
+			UE_LOG(LogQinglanCombat, Verbose, TEXT("SelfDash: dodge already active; travel skipped"));
+		}
+	}
+	else
+	{
+		UE_LOG(LogQinglanCombat, Warning, TEXT("SelfDash: caster has no dodge component; travel skipped"));
+	}
 
 	// Water technique: cleanse one Burn application from self (docs/02 §7).
 	UQinglanCombatComponent* Combat = Caster->FindComponentByClass<UQinglanCombatComponent>();
@@ -301,25 +420,18 @@ void UQinglanTechniqueExecutors::ExecuteSelfDash(const FQinglanTechniqueCastCont
 	}
 
 	// mist_step is the "specified Water attack" that applies Wet (docs/02 §7):
-	// enemies touched by the dash path soak for the Conduct setup. Sample the
-	// dash segment at its checkpoints; the blessing WetDurationBonus folds in
-	// through ApplyStatus' magnitude (reaction mods affect Conduct only).
+	// the pooled Wet trail samples the owner's actual swept position every
+	// tick with one deduplicated victim set, so enemies at the path's start,
+	// middle, and end soak exactly once and wall-separated or unreachable
+	// targets never do. The blessing WetDurationBonus folds in through
+	// ApplyStatus' magnitude (reaction mods affect Conduct only).
 	if (Context.Technique->Element == EQinglanElement::Water)
 	{
-		TArray<AActor*> Soaked;
-		const FVector Start = Character->GetActorLocation();
-		constexpr int32 PathSamples = 4;
-		for (int32 Sample = 0; Sample < PathSamples; ++Sample)
+		if (AQinglanProjectile* Trail = FQinglanProjectilePool::Acquire(Caster->GetWorld()))
 		{
-			const FVector Point = Start + HorizontalDirection * DashDistance * (Sample + 1) / PathSamples;
-			GatherVictims(Context, Point, 220.f, Soaked); // generous capsule-side reach
-		}
-		for (AActor* Victim : Soaked)
-		{
-			if (UQinglanCombatComponent* VictimCombat = Victim ? Victim->FindComponentByClass<UQinglanCombatComponent>() : nullptr)
-			{
-				VictimCombat->ApplyStatus(EQinglanStatus::Wet);
-			}
+			Trail->SetupWetTrail(Context.CastId, Context.Technique->TechniqueId, Caster,
+				DashWetRadiusCm, Context.Blessings.WetDurationBonus);
+			Trail->SetCueContext(Context);
 		}
 	}
 
@@ -349,6 +461,7 @@ void UQinglanTechniqueExecutors::ExecuteSelfPulses(const FQinglanTechniqueCastCo
 	const int32 PulseCount = Context.Technique->Magnitude > 0.f ? FMath::RoundToInt(Context.Technique->Magnitude) : OrbitPulseCount;
 	Effect->SetupOrbitPulses(Context.CastId, Context.Technique->TechniqueId, Context.Technique->Element,
 		Caster, Raw, PulseCount, OrbitPulseInterval, OrbitPulseRadiusCm, 2 /*max targets/pulse*/, 1.f);
+	Effect->SetCueContext(Context);
 
 	FQinglanCueEvent Cue;
 	Cue.CastId = Context.CastId;
@@ -443,12 +556,14 @@ void UQinglanTechniqueExecutors::PublishCue(const FQinglanTechniqueCastContext& 
 		return;
 	}
 
-	const FName TechniqueId = Context.Technique ? Context.Technique->TechniqueId : NAME_None;
+	const FName TechniqueId = Context.Technique ? Context.Technique->TechniqueId : Cue.TechniqueId;
 	UE_LOG(LogQinglanCombat, Verbose, TEXT("Cue %s stage=%s element=%d cast_serial=%d"),
 		*TechniqueId.ToString(), *Cue.StageId.ToString(), static_cast<int32>(Cue.Element), Cue.CastId.Serial);
 
 	if (!IsCueAllowed(Cue, World))
 	{
+		UE_LOG(LogQinglanCombat, Verbose, TEXT("Cue %s stage %s culled by the quality feature gate"),
+			*TechniqueId.ToString(), *Cue.StageId.ToString());
 		return;
 	}
 	UNiagaraSystem* System = ResolveStageCue(Context.Technique, Cue.StageId);
@@ -458,5 +573,16 @@ void UQinglanTechniqueExecutors::PublishCue(const FQinglanTechniqueCastContext& 
 		UNiagaraFunctionLibrary::SpawnSystemAtLocation(World, System, Cue.SourceTransform.GetLocation(),
 			Cue.SourceTransform.GetRotation().Rotator(), FVector::OneVector, false /*bAutoDestroy*/,
 			true /*bAutoActivate*/, ENCPoolMethod::AutoRelease, true /*bPreCullCheck*/);
+		return;
 	}
+
+	// AUD-42: a cue must never fail silently. The placeholder marker is
+	// gameplay-neutral, visible at every quality tier, and light-free so
+	// low-flash mode stays compliant. Replaced when authored Niagara exists.
+	FQinglanCueEvent PlaceholderCue = Cue;
+	if (PlaceholderCue.TechniqueId.IsNone())
+	{
+		PlaceholderCue.TechniqueId = TechniqueId;
+	}
+	SpawnFallbackCueMarker(World, PlaceholderCue);
 }

@@ -1,0 +1,12 @@
+--- a/Engine/Source/Programs/UnrealBuildTool/Platform/Apple/AppleToolChain.cs
++++ b/Engine/Source/Programs/UnrealBuildTool/Platform/Apple/AppleToolChain.cs
+@@ -1124,6 +1124,9 @@
+ 
+ 					Process LocalProcess = new Process();
+ 					LocalProcess.StartInfo = new ProcessStartInfo("/usr/bin/env", String.Join(" ", Arguments));
++					// UBA recursive workers may inherit a closed fd 0 on macOS.
++					// Xcode shell pre-actions require valid stdin even without input.
++					LocalProcess.StartInfo.RedirectStandardInput = true;
+ 					LocalProcess.OutputDataReceived += (Sender, Args) => { LocalProcessOutput(Args, false, Logger); };
+ 					LocalProcess.ErrorDataReceived += (Sender, Args) =>
+ 					{

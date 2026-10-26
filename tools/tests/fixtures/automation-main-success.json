@@ -1,0 +1,39 @@
+{
+  "devices": [],
+  "reportCreatedOn": "2026.10.20-00.00.00",
+  "succeeded": 1,
+  "succeededWithWarnings": 0,
+  "failed": 0,
+  "notRun": 0,
+  "inProcess": 0,
+  "totalDuration": 1.0,
+  "comparisonExported": false,
+  "comparisonExportDirectory": "",
+  "tests": [
+    {
+      "testDisplayName": "NewProfileMainJourney",
+      "fullTestPath": "Qinglan.Campaign.NewProfileMainJourney",
+      "tags": [],
+      "state": "Success",
+      "deviceInstance": ["synthetic-fixture-device"],
+      "duration": 1.0,
+      "dateTime": "2026.10.20-00.00.00",
+      "entries": [
+        {
+          "event": {
+            "type": "Info",
+            "message": "Campaign manifest: 30/30 scenes passed, 0 blocked",
+            "context": "",
+            "artifact": "00000000000000000000000000000000"
+          },
+          "filename": "",
+          "lineNumber": -1,
+          "timestamp": "2026.10.20-00.00.00"
+        }
+      ],
+      "warnings": 0,
+      "errors": 0,
+      "artifacts": []
+    }
+  ]
+}

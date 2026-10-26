@@ -1,6 +1,6 @@
 # Narrative Bible — The River Beneath the Mountain
 
-Status: fully authored narrative baseline, including complete paired text and production registries; gameplay implementation remains future work. Development language is English; every player-facing string is paired in English and Simplified Chinese resources. This document defines canon for all scripts.
+Status: fully authored narrative baseline, including complete paired text and production registries. Runtime implementation exists: the registry/dispatcher and all scenes play in the functional journeys (30/30 main, 24/24 side); a complete interactive playthrough remains an acceptance gate. Development language is English; every player-facing string is paired in English and Simplified Chinese resources. This document defines canon for all scripts.
 
 ## 1. Dramatic premise
 

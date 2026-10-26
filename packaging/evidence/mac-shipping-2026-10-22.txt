@@ -1,0 +1,55 @@
+# Mac (Apple Silicon) Shipping package evidence - 2026-10-22
+
+Produced by tools/build/run-acceptance.sh after repairing the corrupted
+2026-10-22 character-source batch (commit 01ab3c9). No engine or platform
+configuration changed.
+
+Host: macOS 27.0.1 (26A434), Mac16,12, Apple M4, 32 GiB RAM.
+Acceptance run: .local/acceptance/20261022T054734.545856Z
+Status: passed
+Project revision: 01ab3c9bb0f0553f70d7df636672247ff7d2bd8d (fix/audit-repairs)
+Project dirty at start: True (untracked Windows CI files only:
+  .github/workflows/windows-build.yml, docs/dev/github-windows-build.md,
+  tools/ci/)
+Engine revision: 396c9f059903aed5fec78ecd3d437a40c6415368
+Engine version: {"MajorVersion": 5, "MinorVersion": 8, "PatchVersion": 3, "CompatibleChangelist": 55116800, "BranchName": "UE5"}
+
+Steps:
+  01-build-editor        passed  19.9s
+  02-regenerate-content  passed  58.4s
+  03-suite               passed  29.2s
+  04-main-campaign       passed  15.5s
+  05-side-campaign       passed  15.0s
+  06-package             passed 100.3s
+
+Named suite results: 90/90; main campaign 30/30 scenes, 0 blocked; side
+campaign 24/24 stages, 0 blocked.
+
+Packaged artifacts (SHA-256, from package-artifacts.json):
+  da52a018fad8e2d30de685f0f9d3eb2c4af6c0c7072e95d362e4edc8309a0110     321922480  Mac/QinglanAscension-Mac-Shipping.app/Contents/MacOS/QinglanAscension-Mac-Shipping
+  bd9810de3db9076a829a3d8ef3c954ef7c55092dbd05510cc74e8baeb89f1006      15644882  Mac/QinglanAscension-Mac-Shipping.app/Contents/UE/QinglanAscension/Content/Paks/QinglanAscension-Mac.pak
+  93dabdac756814047548fd7aac2c6980aea5538b9039dbebad5e989ab3711b8f     447205616  Mac/QinglanAscension-Mac-Shipping.app/Contents/UE/QinglanAscension/Content/Paks/QinglanAscension-Mac.ucas
+  0efda0038bfe70542a8769008a092713b3174eb541a32b4800ffaad9e0dece50        289422  Mac/QinglanAscension-Mac-Shipping.app/Contents/UE/QinglanAscension/Content/Paks/QinglanAscension-Mac.utoc
+  12e7f0f9f723f7e3c5bf987dbc35f7fd1d123536e984b66f83d65b8bcbf17ed5       3250000  Mac/QinglanAscension-Mac-Shipping.app/Contents/UE/QinglanAscension/Content/Paks/global.ucas
+  4e449b35aec1915cb44596e21121b67a02b9bd393d93799ff87f8f0fa3d06af1           794  Mac/QinglanAscension-Mac-Shipping.app/Contents/UE/QinglanAscension/Content/Paks/global.utoc
+
+Configuration: Shipping, platform Mac, arm64.
+Cook: UAT BuildCookRun -build ... -cook -stage -pak -compressed, rc=0.
+
+Repair scope: restored the character files from 8ae7356 and re-applied the
+intended changes from 93fd9de (complete .Object animation paths and hit-react
+montage), 78d2b6b (interaction aim above the anchor), ddcf6b7
+(HasSceneScriptExhaustedForInspection), and cac8bd7 (-QinglanAutoSlot).
+See commit 01ab3c9. The content regeneration re-saved 120 tracked .uasset
+files; those regenerated files are committed with this evidence so the
+release tag matches the cooked package.
+
+Release DMG:
+  dist/mac/Qinglan-0.1.0-alpha.2-macOS-arm64.dmg
+  585319245 bytes
+  73be003f8f5cd6242e7a124216fc0bc9207876a50e57ee689939a277d3b7e366
+
+Smoke test: the re-signed DMG app booted with -windowed, wrote
+~/Library/Containers/io.github.shoutoutuoadi325.qinglan/Data/Library/
+Application Support/Epic/QinglanAscension/Saved/Screenshots/
+qinglan_shot_release-alpha2-smoke.png, and exited through the capture hook.

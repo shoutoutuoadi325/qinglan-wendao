@@ -13,9 +13,15 @@
 #include "Misc/AutomationTest.h"
 
 #include "Abilities/QinglanBlessingLibrary.h"
+#include "AI/QinglanEnemyCatalog.h"
+#include "AI/QinglanEnemyTypes.h"
 #include "Combat/QinglanCombatComponent.h"
 #include "Combat/QinglanDamageMath.h"
+#include "Core/QinglanTrialDirector.h"
 #include "Narrative/QinglanEndingRules.h"
+#include "Narrative/QinglanStoryDataTypes.h"
+#include "Narrative/QinglanStoryRuntime.h"
+#include "Narrative/QinglanStorySubsystem.h"
 #include "Persistence/QinglanSaveMigration.h"
 #include "Persistence/QinglanSaveSubsystem.h"
 #include "Progression/QinglanEconomyLibrary.h"
@@ -27,8 +33,14 @@
 #include "EngineDefines.h" // UE 5.8: lives at Runtime/Engine/Public root, not Engine/
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/PlayerController.h"
+#include "Engine/Engine.h"
 #include "HAL/FileManager.h"
+#include "Kismet/GameplayStatics.h"
+#include "Math/RandomStream.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonReader.h"
@@ -480,7 +492,10 @@ bool FAutomationTestQinglanRankCosts::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Breakthrough blocked without boss proof"), Profile->TryBreakthrough(FName(TEXT("bt_foundation"))));
 	TestFalse(TEXT("CanAttemptBreakthrough false"), Profile->CanAttemptBreakthrough(Reason));
 	Profile->SetCampaignFlag(FName(QinglanProgression::BambooClearedCampaignFlag));
-	TestTrue(TEXT("Gate open with boss proof"), Profile->CanAttemptBreakthrough(Reason));
+	TestFalse(TEXT("Foundation still requires its actual trial"), Profile->CanAttemptBreakthrough(Reason));
+	TestFalse(TEXT("Boss proof cannot bypass Foundation trial"), Profile->TryBreakthrough(FName(TEXT("bt_foundation"))));
+	Profile->SetCampaignFlag(FName(QinglanProgression::FoundationTrialPassedCampaignFlag));
+	TestTrue(TEXT("Gate open with boss and trial proof"), Profile->CanAttemptBreakthrough(Reason));
 	TestTrue(TEXT("Foundation breakthrough committed"), Profile->TryBreakthrough(FName(TEXT("bt_foundation"))));
 	TestEqual(TEXT("Stage advanced to Foundation"), Profile->GetCultivationStage(), EQinglanStage::FoundationEstablishment);
 	TestEqual(TEXT("Rank reset on breakthrough"), Profile->GetCultivationRank(), 0);
@@ -957,5 +972,654 @@ bool FAutomationTestQinglanEndingRulesJsonDrift::RunTest(const FString& Paramete
 		TestFalse(TEXT("Preview sets no ending_seal flag"), SetsFlags.Contains(FName(QinglanEnding::EndingSealId)));
 		TestFalse(TEXT("Preview sets no ending_shared flag"), SetsFlags.Contains(FName(QinglanEnding::EndingSharedId)));
 	}
+	return true;
+}
+
+// ===========================================================================
+// AUD-20 trial specs: catalog contract, deterministic hazard placement, and
+// the two-phase survival machine (clock expiry requires the kill; Golden Core
+// story beats fire in authored order).
+//
+// The phase-machine specs drive a full throwaway world: game instance (its
+// Init() instantiates the subsystems), a private game world in the file's
+// manual-time pattern, and a possessed player pawn so GetPlayerCharacter's
+// controller-iterator fallback resolves it. Non-exported runtime classes (the
+// pawn, the wave engine, enemies) are reached only through engine-level calls
+// (reflection-loaded UClass spawn, virtual Tick, FindComponentByClass), so the
+// modular editor build links against exported symbols alone; AQinglanTrialDirector
+// and the trial-storm placement function are linkage-exported for these specs.
+// ===========================================================================
+namespace
+{
+	/**
+	 * Throwaway trial world: game instance + subsystems + player pawn. The
+	 * destructor always clears the story-registry injection (its contract).
+	 */
+	class FQinglanTrialWorld
+	{
+	public:
+		FQinglanTrialWorld()
+		{
+			Instance = NewObject<UGameInstance>(GetTransientPackage());
+			if (Instance == nullptr) { return; }
+			World = UWorld::CreateWorld(EWorldType::Game, false);
+			if (World == nullptr) { return; }
+			// Register a world context: without one the world is absent from
+			// the engine's world list, controller SpawnActor fails silently,
+			// and every enemy is dropped as "controller-less".
+			if (GEngine != nullptr)
+			{
+				FWorldContext& Context = GEngine->CreateNewWorldContext(EWorldType::Game);
+				Context.SetCurrentWorld(World);
+			}
+			World->SetGameInstance(Instance);
+			Instance->Init(); // instantiates the game-instance subsystems
+
+			FActorSpawnParameters SpawnParams;
+			SpawnParams.ObjectFlags |= RF_Transient;
+			PlayerController = World->SpawnActor<APlayerController>(
+				APlayerController::StaticClass(), FTransform::Identity, SpawnParams);
+			// AQinglanCharacter is not API-exported; resolve the class by
+			// reflection (no symbol linkage) and spawn through the engine type.
+			UClass* PawnClass = FindObject<UClass>(nullptr, TEXT("/Script/QinglanAscension.QinglanCharacter"));
+			APawn* Pawn = (PlayerController && PawnClass)
+				? World->SpawnActor<APawn>(PawnClass, FTransform::Identity, SpawnParams)
+				: nullptr;
+			if (PlayerController && Pawn)
+			{
+				PlayerController->Possess(Pawn);
+			}
+			// Begin play so pawns with PlacedInWorldOrSpawned AI receive
+			// their controller at spawn: the encounter director rejects
+			// controller-less enemies, which would silently drop every wave
+			// and the required boss in this headless world. BeginPlay()
+			// dispatches actor callbacks; SetBegunPlay flips the flag
+			// PostInitializeComponents consults for at-spawn possession.
+			World->BeginPlay();
+			World->SetBegunPlay(true);
+		}
+
+		~FQinglanTrialWorld()
+		{
+#if WITH_DEV_AUTOMATION_TESTS
+			QinglanStoryRuntime::SetRegistryForTesting(nullptr); // injection contract: always clear
+#endif
+			if (World != nullptr)
+			{
+				if (GEngine != nullptr)
+				{
+					GEngine->WorldDestroyed(World); // drop the fixture's world context
+				}
+				World->DestroyWorld(false);
+			}
+		}
+
+		UQinglanCombatComponent* PlayerCombat() const
+		{
+			// The bare CreateWorld fixture never registers a local player, so
+			// GetPlayerCharacter would return null here; the possessed pawn is the
+			// authority the director and these specs actually exercise.
+			APawn* Pawn = PlayerController ? PlayerController->GetPawn() : nullptr;
+			return Pawn ? Pawn->FindComponentByClass<UQinglanCombatComponent>() : nullptr;
+		}
+
+		UGameInstance* Instance = nullptr;
+		UWorld* World = nullptr;
+		APlayerController* PlayerController = nullptr;
+	};
+
+	/**
+	 * Minimal story registry: both trial scenes with their authored objective
+	 * ids (data/story main-early.json CH03_S02_OBJECTIVE, main-late.json
+	 * s02.objective), no prerequisites and no choices, so admission passes and
+	 * the objective commit completes the scene headlessly.
+	 */
+	UQinglanStoryRegistry* MakeTrialStoryRegistry()
+	{
+		UQinglanStoryRegistry* Registry = NewObject<UQinglanStoryRegistry>(GetTransientPackage());
+		FQinglanRegistryScene FoundationScene;
+		FoundationScene.SceneId = FName(TEXT("CH03_S02"));
+		FQinglanRegistryObjective FoundationObjective;
+		FoundationObjective.ObjectiveId = FName(TEXT("CH03_S02_OBJECTIVE"));
+		FoundationScene.Objectives.Add(FoundationObjective);
+		FQinglanRegistryScene GoldenScene;
+		GoldenScene.SceneId = FName(TEXT("CH06_S02"));
+		FQinglanRegistryObjective GoldenObjective;
+		GoldenObjective.ObjectiveId = FName(TEXT("s02.objective"));
+		GoldenScene.Objectives.Add(GoldenObjective);
+		Registry->MainScenes.Add(FoundationScene);
+		Registry->MainScenes.Add(GoldenScene);
+		return Registry;
+	}
+
+	/** Purchases the current stage's three ranks with journaled test funds. */
+	void AdvanceThreeTrialRanks(UGameInstance* Instance, const TCHAR* TxPrefix)
+	{
+		UQinglanProfileSubsystem* Profile = Instance ? Instance->GetSubsystem<UQinglanProfileSubsystem>() : nullptr;
+		if (Profile == nullptr) { return; }
+		for (int32 Rank = 0; Rank < QinglanProgression::RanksPerStage; ++Rank)
+		{
+			int64 Shards = 0;
+			int64 MaterialCount = 0;
+			FName Material(NAME_None);
+			if (!UQinglanEconomyLibrary::GetRankCost(Profile->GetCultivationStage(), Rank, Shards, MaterialCount, Material))
+			{
+				return;
+			}
+			FQinglanInventory Funds;
+			Funds.SpiritShards = Shards;
+			if (Material == FName(TEXT("spirit_herb")))
+			{
+				Funds.SpiritHerb = MaterialCount;
+			}
+			else
+			{
+				Funds.VeinCrystal = MaterialCount;
+			}
+			Profile->TryGrant(FName(*FString::Printf(TEXT("%s.grant.%d"), TxPrefix, Rank)), Funds);
+			Profile->TryAdvanceRank(FName(*FString::Printf(TEXT("%s.rank.%d"), TxPrefix, Rank)));
+		}
+	}
+
+	/** Qi Refining rank 3 + bamboo proof: exactly the Foundation admission. */
+	void GrindTrialProfileToFoundationReady(UGameInstance* Instance)
+	{
+		AdvanceThreeTrialRanks(Instance, TEXT("tx.test.trial.f"));
+		if (UQinglanProfileSubsystem* Profile = Instance ? Instance->GetSubsystem<UQinglanProfileSubsystem>() : nullptr)
+		{
+			Profile->SetCampaignFlag(FName(QinglanProgression::BambooClearedCampaignFlag));
+		}
+	}
+
+	/** FoundationEstablishment rank 3 + ashen proof: the Golden Core admission. */
+	void GrindTrialProfileToGoldenCoreReady(UGameInstance* Instance)
+	{
+		GrindTrialProfileToFoundationReady(Instance);
+		UQinglanProfileSubsystem* Profile = Instance ? Instance->GetSubsystem<UQinglanProfileSubsystem>() : nullptr;
+		if (Profile == nullptr) { return; }
+		Profile->SetCampaignFlag(FName(QinglanProgression::FoundationTrialPassedCampaignFlag));
+		Profile->TryBreakthrough(FName(TEXT("tx.test.trial.bt_foundation")));
+		AdvanceThreeTrialRanks(Instance, TEXT("tx.test.trial.c"));
+		Profile->SetCampaignFlag(FName(QinglanProgression::AshenClearedCampaignFlag));
+	}
+
+	AQinglanTrialDirector* SpawnTrialDirector(UWorld* World)
+	{
+		if (World == nullptr) { return nullptr; }
+		FActorSpawnParameters SpawnParams;
+		SpawnParams.ObjectFlags |= RF_Transient;
+		return World->SpawnActor<AQinglanTrialDirector>(
+			AQinglanTrialDirector::StaticClass(), FTransform::Identity, SpawnParams);
+	}
+
+	/** The wave engine: the one actor the trial director owns. */
+	AActor* FindTrialWaveEngine(FQinglanTrialWorld& Fix, AQinglanTrialDirector* Director)
+	{
+		if (Fix.World == nullptr || Director == nullptr) { return nullptr; }
+		for (TActorIterator<AActor> It(Fix.World); It; ++It)
+		{
+			if (It->GetOwner() == Director)
+			{
+				return *It;
+			}
+		}
+		return nullptr;
+	}
+
+	/** The required elite once the director has sighted it alive. The
+	 *  director already tracks this in production; reading the same field
+	 *  exercises that tracking instead of re-deriving ownership in the test. */
+	ACharacter* FindTrialEnginePawn(FQinglanTrialWorld& /*Fix*/, AQinglanTrialDirector* Director)
+	{
+		return Director ? Cast<ACharacter>(Director->GetRequiredTarget()) : nullptr;
+	}
+
+	/**
+	 * One manual world step, in dependency order: wave engine (portal trickle,
+	 * materialization, encounter completion), then enemies + their controllers
+	 * (FSM + portal warning), then the director, then a player top-up - the
+	 * specs verify the phase machine, not the health bar.
+	 */
+	void TickTrialWorld(FQinglanTrialWorld& Fix, AQinglanTrialDirector* Director, float DeltaSeconds)
+	{
+		if (Fix.World == nullptr || Director == nullptr) { return; }
+
+		if (AActor* Engine = FindTrialWaveEngine(Fix, Director))
+		{
+			Engine->Tick(DeltaSeconds);
+		}
+
+		if (AActor* Engine = FindTrialWaveEngine(Fix, Director))
+		{
+			TArray<ACharacter*> Enemies;
+			const APawn* PlayerPawn = Fix.PlayerController ? Fix.PlayerController->GetPawn() : nullptr;
+			for (TActorIterator<ACharacter> It(Fix.World); It; ++It)
+			{
+				ACharacter* Character = *It;
+				// Tick every non-player character in this dedicated test world;
+				// enemies and the required elite both live here and possession
+				// rewrites Owner, so engine identity is not re-derived here.
+				if (Character != nullptr && Character != PlayerPawn)
+				{
+					Enemies.Add(Character);
+				}
+			}
+			for (ACharacter* Enemy : Enemies)
+			{
+				Enemy->Tick(DeltaSeconds);
+				if (AController* Controller = Enemy->GetController())
+				{
+					Controller->Tick(DeltaSeconds);
+				}
+			}
+		}
+
+		Director->Tick(DeltaSeconds);
+
+		if (UQinglanCombatComponent* Combat = Fix.PlayerCombat())
+		{
+			Combat->Heal(1000.f);
+		}
+	}
+} // namespace
+
+// ---------------------------------------------------------------------------
+// Qinglan.Trial.TrialCatalogSpecs - AUD-20 catalog contract: elite construct
+// boss spec, Broken Guardian strike warning, boss array order
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanTrialCatalogSpecs, "Qinglan.Trial.TrialCatalogSpecs", QinglanTestFlags)
+bool FAutomationTestQinglanTrialCatalogSpecs::RunTest(const FString& Parameters)
+{
+	// --- elite_construct: the Foundation trial's required kill ---
+	const FQinglanArchetypeSpec* Elite = QinglanEnemyCatalog::FindSpec(FName(TEXT("elite_construct")));
+	if (!TestNotNull(TEXT("elite_construct spec exists"), Elite))
+	{
+		return false;
+	}
+	TestTrue(TEXT("elite_construct is a boss"), Elite->bBoss);
+	TestEqual(TEXT("elite_construct health"), Elite->Health, 620.f);
+	TestEqual(TEXT("elite_construct defense"), Elite->Defense, 12.f);
+	TestEqual(TEXT("elite_construct move speed"), Elite->MoveSpeed, 260.f);
+	TestEqual(TEXT("elite_construct arena is the 60 m storm platform"), Elite->ArenaDiameter, 6000.f);
+	TestEqual(TEXT("elite_construct enrage-lite at half health"), Elite->PhaseTwoAtHealthFraction, 0.5f);
+	TestEqual(TEXT("elite_construct carries exactly two patterns"), Elite->Patterns.Num(), 2);
+
+	const FQinglanBossPattern* Sweep = nullptr;
+	const FQinglanBossPattern* Strike = nullptr;
+	for (const FQinglanBossPattern& Pattern : Elite->Patterns)
+	{
+		if (Pattern.PatternId == QinglanPatternIds::SweepingBlade()) { Sweep = &Pattern; }
+		else if (Pattern.PatternId == QinglanPatternIds::DelayedRoots()) { Strike = &Pattern; }
+	}
+	if (TestNotNull(TEXT("sweeping blade pattern present"), Sweep))
+	{
+		TestEqual(TEXT("sweeping blade weight"), Sweep->Weight, 2.f);
+		TestTrue(TEXT("sweeping blade telegraph keeps the >= 0.9 s trial warning"), Sweep->TelegraphDuration >= 0.9f);
+		TestEqual(TEXT("sweeping blade telegraph"), Sweep->TelegraphDuration, 1.1f);
+		TestEqual(TEXT("sweeping blade damage"), Sweep->Damage, 24.f);
+		TestEqual(TEXT("sweeping blade range"), Sweep->Range, 420.f);
+		TestEqual(TEXT("sweeping blade resolves as a frontal cone"),
+			static_cast<int32>(QinglanEnemyCatalog::ShapeOfPattern(*Sweep)),
+			static_cast<int32>(EQinglanAttackShape::MeleeCone));
+	}
+	if (TestNotNull(TEXT("delayed ground strike pattern present"), Strike))
+	{
+		TestEqual(TEXT("ground strike weight"), Strike->Weight, 3.f);
+		TestTrue(TEXT("ground strike telegraph keeps the >= 0.9 s trial warning"), Strike->TelegraphDuration >= 0.9f);
+		TestEqual(TEXT("ground strike telegraph"), Strike->TelegraphDuration, 1.0f);
+		TestEqual(TEXT("ground strike damage"), Strike->Damage, 20.f);
+		TestEqual(TEXT("ground strike range"), Strike->Range, 550.f);
+		TestTrue(TEXT("ground strike marks a persistent outline"), Strike->bGroundMarker);
+		TestEqual(TEXT("ground strike resolves as a ground ring"),
+			static_cast<int32>(QinglanEnemyCatalog::ShapeOfPattern(*Strike)),
+			static_cast<int32>(EQinglanAttackShape::GroundRing));
+	}
+
+	// --- broken_guardian: the Golden Core required kill keeps its contract ---
+	const FQinglanArchetypeSpec* Guardian = QinglanEnemyCatalog::FindSpec(FName(TEXT("broken_guardian")));
+	if (!TestNotNull(TEXT("broken_guardian spec exists"), Guardian))
+	{
+		return false;
+	}
+	TestEqual(TEXT("broken_guardian enrage-lite at half health"), Guardian->PhaseTwoAtHealthFraction, 0.5f);
+	const FQinglanBossPattern* Volley = nullptr;
+	for (const FQinglanBossPattern& Pattern : Guardian->Patterns)
+	{
+		if (Pattern.PatternId == QinglanPatternIds::StormBoltVolley()) { Volley = &Pattern; }
+	}
+	if (TestNotNull(TEXT("storm bolt volley pattern present"), Volley))
+	{
+		TestTrue(TEXT("storm volley telegraph keeps the >= 0.9 s trial warning"), Volley->TelegraphDuration >= 0.9f);
+		TestTrue(TEXT("storm volley marks ground outlines"), Volley->bGroundMarker);
+		TestEqual(TEXT("storm volley resolves as multi ground strikes"),
+			static_cast<int32>(QinglanEnemyCatalog::ShapeOfPattern(*Volley)),
+			static_cast<int32>(EQinglanAttackShape::MultiGroundStrikes));
+	}
+
+	// --- Array order: the expedition fallback reads Bosses[0] ---
+	const TArray<FQinglanArchetypeSpec>& Bosses = QinglanEnemyCatalog::GetAllBosses();
+	TestEqual(TEXT("Four bosses ship"), Bosses.Num(), 4);
+	if (Bosses.Num() >= 4)
+	{
+		TestEqual(TEXT("bamboo_guardian keeps the Bosses[0] fallback slot"), Bosses[0].EnemyId, FName(TEXT("bamboo_guardian")));
+		TestEqual(TEXT("elite_construct appends last"), Bosses[3].EnemyId, FName(TEXT("elite_construct")));
+	}
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// Qinglan.Trial.HazardPlacementDeterministic - same seed replays the same
+// volley; centers honor the offset band, pairwise separation, and live cap
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanTrialHazardPlacement, "Qinglan.Trial.HazardPlacementDeterministic", QinglanTestFlags)
+bool FAutomationTestQinglanTrialHazardPlacement::RunTest(const FString& Parameters)
+{
+	const FVector Anchor(100.f, -200.f, 0.f);
+
+	// Contract constants (authorized spec; >= 0.9 s warnings, 300 cm radius).
+	TestTrue(TEXT("Strike warning keeps the >= 0.9 s contract"), QinglanTrialStorm::StrikeWarnSeconds >= 0.9f);
+	TestEqual(TEXT("Strike radius is 300 cm"), QinglanTrialStorm::StrikeRadiusCm, 300.f);
+	TestEqual(TEXT("Live outline cap is four"), QinglanTrialStorm::MaxSimultaneousStrikes, 4);
+
+	auto CheckVolley = [this, &Anchor](const TArray<FVector>& Centers, const TCHAR* Label) -> bool
+	{
+		bool bGeometry = true;
+		for (int32 A = 0; A < Centers.Num(); ++A)
+		{
+			bGeometry = bGeometry && FVector::Dist2D(Centers[A], Anchor) <= QinglanTrialStorm::StrikeMaxOffsetCm + 1.0;
+			for (int32 B = A + 1; B < Centers.Num(); ++B)
+			{
+				bGeometry = bGeometry && FVector::Dist2D(Centers[A], Centers[B]) >= QinglanTrialStorm::StrikeMinSeparationCm;
+			}
+		}
+		return TestTrue(FString::Printf(TEXT("%s: centers within %.0f cm of the anchor, pairwise >= %.0f cm apart"),
+			Label, QinglanTrialStorm::StrikeMaxOffsetCm, QinglanTrialStorm::StrikeMinSeparationCm), bGeometry);
+	};
+
+	// Determinism + geometry across every authored volley size.
+	for (int32 Count = 1; Count <= QinglanTrialStorm::MaxSimultaneousStrikes; ++Count)
+	{
+		FRandomStream First;
+		First.Initialize(9137 + Count);
+		FRandomStream Second;
+		Second.Initialize(9137 + Count);
+		const TArray<FVector> VolleyA = QinglanTrialStorm::PickStrikeVolley(
+			First, Anchor, Count, QinglanTrialStorm::StrikeMinSeparationCm, TArray<FVector>());
+		const TArray<FVector> VolleyB = QinglanTrialStorm::PickStrikeVolley(
+			Second, Anchor, Count, QinglanTrialStorm::StrikeMinSeparationCm, TArray<FVector>());
+		TestEqual(FString::Printf(TEXT("Count %d replays the same volley size"), Count), VolleyA.Num(), VolleyB.Num());
+		bool bSame = VolleyA.Num() == VolleyB.Num();
+		for (int32 Index = 0; bSame && Index < VolleyA.Num(); ++Index)
+		{
+			bSame = VolleyA[Index].Equals(VolleyB[Index], 0.01f);
+		}
+		TestTrue(FString::Printf(TEXT("Count %d: same seed, same centers"), Count), bSame);
+		CheckVolley(VolleyA, *FString::Printf(TEXT("Count %d"), Count));
+	}
+
+	// Live-outline cap: an over-asked volley never exceeds the maximum.
+	FRandomStream Cap;
+	Cap.Initialize(424242);
+	TestTrue(TEXT("An over-asked volley caps at the simultaneous maximum"),
+		QinglanTrialStorm::PickStrikeVolley(Cap, Anchor, 9, QinglanTrialStorm::StrikeMinSeparationCm, TArray<FVector>()).Num()
+			<= QinglanTrialStorm::MaxSimultaneousStrikes);
+
+	// Occupied field: the avoid set shrinks the budget, never the separation.
+	TArray<FVector> Occupied;
+	Occupied.Add(FVector(Anchor.X + 700.f, Anchor.Y, Anchor.Z));
+	Occupied.Add(FVector(Anchor.X - 700.f, Anchor.Y, Anchor.Z));
+	Occupied.Add(FVector(Anchor.X, Anchor.Y + 700.f, Anchor.Z));
+	FRandomStream Avoid;
+	Avoid.Initialize(777);
+	const TArray<FVector> Extra = QinglanTrialStorm::PickStrikeVolley(
+		Avoid, Anchor, 4, QinglanTrialStorm::StrikeMinSeparationCm, Occupied);
+	TestTrue(TEXT("Three live outlines leave room for at most one more"), Extra.Num() <= 1);
+	if (!Extra.IsEmpty())
+	{
+		bool bClear = true;
+		for (const FVector& Live : Occupied)
+		{
+			bClear = bClear && FVector::Dist2D(Extra[0], Live) >= QinglanTrialStorm::StrikeMinSeparationCm;
+		}
+		TestTrue(TEXT("The extra strike clears every live outline"), bClear);
+	}
+	Occupied.Add(FVector(Anchor.X, Anchor.Y - 700.f, Anchor.Z));
+	FRandomStream Saturated;
+	Saturated.Initialize(778);
+	TestEqual(TEXT("A saturated field schedules nothing"),
+		QinglanTrialStorm::PickStrikeVolley(Saturated, Anchor, 2, QinglanTrialStorm::StrikeMinSeparationCm, Occupied).Num(), 0);
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// Qinglan.Trial.TimerExpiryRequiresKill - outliving the Foundation clock
+// grants nothing: the phase machine moves to the required kill and proof is
+// withheld until the elite construct dies
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanTrialTimerExpiry, "Qinglan.Trial.TimerExpiryRequiresKill", QinglanTestFlags)
+bool FAutomationTestQinglanTrialTimerExpiry::RunTest(const FString& Parameters)
+{
+	FQinglanTrialWorld Fix;
+	if (!TestNotNull(TEXT("Trial world"), Fix.World) || !TestNotNull(TEXT("Game instance"), Fix.Instance))
+	{
+		return false;
+	}
+#if WITH_DEV_AUTOMATION_TESTS
+	QinglanStoryRuntime::SetRegistryForTesting(MakeTrialStoryRegistry());
+#endif
+	GrindTrialProfileToFoundationReady(Fix.Instance);
+	if (!TestNotNull(TEXT("Player controller"), Fix.PlayerController)
+		|| !TestNotNull(TEXT("Player pawn possessed"), Fix.PlayerController->GetPawn().Get())
+		|| !TestNotNull(TEXT("Player combat component"), Fix.PlayerCombat()))
+	{
+		return false;
+	}
+	AQinglanTrialDirector* Director = SpawnTrialDirector(Fix.World);
+	if (!TestNotNull(TEXT("Trial director spawned"), Director))
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("Foundation trial admitted"),
+		Director->BeginTrial(FName(TEXT("CH03_S02")), FName(TEXT("CH03_S02_OBJECTIVE")), 90.f, 1));
+	TestEqual(TEXT("New attempts start in the storm phase"), Director->GetTrialPhase(), EQinglanTrialPhase::Storm);
+	TestTrue(TEXT("The clock phase is the timed survival phase"), Director->IsTimedSurvivalActive());
+
+	// Manual 0.25 s steps past the 90 s clock. Enemies materialize and posture
+	// but never reach the player (no navmesh, no movement ticking); storm
+	// impacts are healed off between steps by the fixture.
+	for (float Elapsed = 0.f; Elapsed < 95.f; Elapsed += 0.25f)
+	{
+		TickTrialWorld(Fix, Director, 0.25f);
+		if (Director->GetTrialPhase() == EQinglanTrialPhase::RequiredKill)
+		{
+			break;
+		}
+	}
+	TestEqual(TEXT("Clock expiry enters the required-kill phase"), Director->GetTrialPhase(), EQinglanTrialPhase::RequiredKill);
+	TestFalse(TEXT("The timed-survival query closes with the clock"), Director->IsTimedSurvivalActive());
+	TestTrue(TEXT("The trial stays active until the required elite dies"), Director->IsTrialActive());
+	TestEqual(TEXT("The countdown reads zero past expiry"), Director->GetRemainingSeconds(), 0.f);
+
+	// The storm actually ran: the three authored Foundation wave beats, in order.
+	TArray<FName> Events;
+	Director->GetTrialEventLog(Events);
+	const FName WaveKeys[3] =
+	{
+		FName(TEXT("trial.lightning_wave_1")),
+		FName(TEXT("trial.lightning_wave_2")),
+		FName(TEXT("trial.lightning_wave_3")),
+	};
+	int32 LastIndex = INDEX_NONE;
+	bool bInOrder = true;
+	for (int32 Wave = 0; Wave < 3; ++Wave)
+	{
+		int32 Found = INDEX_NONE;
+		for (int32 Index = 0; Index < Events.Num(); ++Index)
+		{
+			if (Events[Index] == WaveKeys[Wave])
+			{
+				Found = Index;
+				break;
+			}
+		}
+		TestTrue(FString::Printf(TEXT("Foundation lightning wave %d beat fired"), Wave + 1), Found != INDEX_NONE);
+		bInOrder = bInOrder && Found != INDEX_NONE && Found > LastIndex;
+		LastIndex = Found;
+	}
+	TestTrue(TEXT("The wave beats fire in authored order"), bInOrder);
+
+	// The clock alone commits no proof.
+	UQinglanStorySubsystem* Story = Fix.Instance->GetSubsystem<UQinglanStorySubsystem>();
+	TestFalse(TEXT("Objective proof is withheld until the required kill"),
+		QinglanStoryRuntime::IsSceneObjectiveCompleted(Story, FName(TEXT("CH03_S02")), FName(TEXT("CH03_S02_OBJECTIVE"))));
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// Qinglan.Trial.GoldenCoreEventOrder - the 150 s storm + shell kill fires the
+// eight authored CH06_S02 beats exactly once, in order, and commits proof
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanTrialGoldenCoreOrder, "Qinglan.Trial.GoldenCoreEventOrder", QinglanTestFlags)
+bool FAutomationTestQinglanTrialGoldenCoreOrder::RunTest(const FString& Parameters)
+{
+	FQinglanTrialWorld Fix;
+	if (!TestNotNull(TEXT("Trial world"), Fix.World) || !TestNotNull(TEXT("Game instance"), Fix.Instance))
+	{
+		return false;
+	}
+#if WITH_DEV_AUTOMATION_TESTS
+	QinglanStoryRuntime::SetRegistryForTesting(MakeTrialStoryRegistry());
+#endif
+	GrindTrialProfileToGoldenCoreReady(Fix.Instance);
+	if (!TestNotNull(TEXT("Player controller"), Fix.PlayerController)
+		|| !TestNotNull(TEXT("Player pawn possessed"), Fix.PlayerController->GetPawn().Get())
+		|| !TestNotNull(TEXT("Player combat component"), Fix.PlayerCombat()))
+	{
+		return false;
+	}
+	AQinglanTrialDirector* Director = SpawnTrialDirector(Fix.World);
+	if (!TestNotNull(TEXT("Trial director spawned"), Director))
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("Golden Core trial admitted"),
+		Director->BeginTrial(FName(TEXT("CH06_S02")), FName(TEXT("s02.objective")), 150.f, 2));
+
+	// AUD-11 adds the authored objective-proof beat after the shell dies; the
+	// trial director emits it last so the guard sees the completed encounter.
+	const FName ExpectedOrder[9] =
+	{
+		FName(TEXT("storm_time_0")),
+		FName(TEXT("first_lightning_telegraph")),
+		FName(TEXT("storm_time_50")),
+		FName(TEXT("storm_time_100")),
+		FName(TEXT("storm_survived_150")),
+		FName(TEXT("shell_combat_started")),
+		FName(TEXT("first_shell_recovery_window")),
+		FName(TEXT("shell_defeated")),
+		FName(TEXT("trial.survived.golden_core")),
+	};
+	TArray<FName> Events;
+	Director->GetTrialEventLog(Events);
+	TestEqual(TEXT("BeginTrial fires only the storm's opening beat"), Events.Num(), 1);
+	if (Events.Num() >= 1)
+	{
+		TestEqual(TEXT("The opening beat is storm_time_0"), Events[0], ExpectedOrder[0]);
+	}
+
+	// --- Storm: drive the 150 s clock, checking each beat as it lands. ---
+	bool bSawTime50 = false;
+	bool bSawTime100 = false;
+	bool bSawSurvived = false;
+	for (float Elapsed = 0.f; Elapsed < 155.f; Elapsed += 0.25f)
+	{
+		TickTrialWorld(Fix, Director, 0.25f);
+		Director->GetTrialEventLog(Events);
+		if (!bSawTime50 && Events.Contains(ExpectedOrder[2]))
+		{
+			bSawTime50 = true;
+			TestFalse(TEXT("storm_time_100 has not fired at the 50 s beat"), Events.Contains(ExpectedOrder[3]));
+		}
+		if (bSawTime50 && !bSawTime100 && Events.Contains(ExpectedOrder[3]))
+		{
+			bSawTime100 = true;
+			TestFalse(TEXT("No shell beat fires before the clock expires"), Events.Contains(ExpectedOrder[5]));
+		}
+		if (!bSawSurvived && Events.Contains(ExpectedOrder[4]))
+		{
+			bSawSurvived = true;
+			TestEqual(TEXT("storm_survived_150 lands with the required-kill phase"),
+				Director->GetTrialPhase(), EQinglanTrialPhase::RequiredKill);
+		}
+		if (Director->GetTrialPhase() == EQinglanTrialPhase::RequiredKill)
+		{
+			break;
+		}
+	}
+	TestTrue(TEXT("The 50 s storm boundary beat fired"), bSawTime50);
+	TestTrue(TEXT("The 100 s storm boundary beat fired"), bSawTime100);
+	TestTrue(TEXT("The survived-150 beat fired"), bSawSurvived);
+	TestEqual(TEXT("Clock expiry enters the required-kill phase"), Director->GetTrialPhase(), EQinglanTrialPhase::RequiredKill);
+
+	// --- Required kill: sight the shell, force its recovery window, kill it. ---
+	ACharacter* Boss = nullptr;
+	for (int32 Step = 0; Step < 40 && Boss == nullptr; ++Step)
+	{
+		TickTrialWorld(Fix, Director, 0.25f);
+		Boss = FindTrialEnginePawn(Fix, Director);
+	}
+	if (!TestNotNull(TEXT("The Broken Guardian shell spawned"), Boss))
+	{
+		return false;
+	}
+	Director->GetTrialEventLog(Events);
+	TestTrue(TEXT("Sighting the shell fires shell_combat_started"), Events.Contains(ExpectedOrder[5]));
+
+	// Park the shell inside the player's band so the FSM walks
+	// Idle -> Acquire -> Approach -> Windup -> Attack -> Recover.
+	Boss->SetActorLocation(FVector(200.f, 0.f, 0.f));
+	bool bRecoveryWindow = false;
+	for (int32 Step = 0; Step < 300 && !bRecoveryWindow; ++Step)
+	{
+		TickTrialWorld(Fix, Director, 0.1f);
+		Director->GetTrialEventLog(Events);
+		bRecoveryWindow = Events.Contains(ExpectedOrder[6]);
+	}
+	TestTrue(TEXT("The shell's first recovery window fires"), bRecoveryWindow);
+
+	UQinglanCombatComponent* BossCombat = Boss->FindComponentByClass<UQinglanCombatComponent>();
+	if (!TestNotNull(TEXT("Shell combat component"), BossCombat))
+	{
+		return false;
+	}
+	FQinglanDamageEvent Lethal;
+	Lethal.CastId = UQinglanCombatComponent::NextCastId();
+	Lethal.HitOrdinal = 0;
+	Lethal.RawMagnitude = 99999.f;
+	TestTrue(TEXT("The shell dies to the killing blow"), BossCombat->ApplyDamage(Lethal));
+
+	for (int32 Step = 0; Step < 20 && Director->IsTrialActive(); ++Step)
+	{
+		TickTrialWorld(Fix, Director, 0.25f);
+	}
+	TestFalse(TEXT("The trial resolves after the required kill"), Director->IsTrialActive());
+	TestEqual(TEXT("A resolved trial rests in Idle"), Director->GetTrialPhase(), EQinglanTrialPhase::Idle);
+
+	Director->GetTrialEventLog(Events);
+	TestEqual(TEXT("Exactly the nine authored beats fired"), Events.Num(), 9);
+	bool bInOrder = Events.Num() == 9;
+	for (int32 Index = 0; bInOrder && Index < 9; ++Index)
+	{
+		bInOrder = Events[Index] == ExpectedOrder[Index];
+	}
+	TestTrue(TEXT("The beats fire in authored order"), bInOrder);
+
+	UQinglanStorySubsystem* Story = Fix.Instance->GetSubsystem<UQinglanStorySubsystem>();
+	TestTrue(TEXT("The Golden Core objective proof commits"),
+		QinglanStoryRuntime::IsSceneObjectiveCompleted(Story, FName(TEXT("CH06_S02")), FName(TEXT("s02.objective"))));
+	TestEqual(TEXT("The trial's breakthrough landed"),
+		Fix.Instance->GetSubsystem<UQinglanProfileSubsystem>()->GetCultivationStage(), EQinglanStage::GoldenCore);
 	return true;
 }

@@ -1,0 +1,246 @@
+name: Windows build
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - fix/audit-repairs
+      - codex/github-windows-build
+    paths:
+      - '.github/workflows/windows-build.yml'
+      - 'tools/ci/**'
+      - 'packaging/windows/**'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Build mode: preflight checks only, or full Win64 & Store packaging'
+        type: choice
+        options: [package, preflight]
+        default: package
+      engine_source:
+        description: 'Licensed engine source; see docs/dev/github-windows-build.md'
+        type: choice
+        options: [source, archive]
+        default: source
+      store_package:
+        description: 'Build Microsoft Store submission package'
+        type: boolean
+        default: true
+      store_package_format:
+        description: 'Store package format: msixvc (GDK), msix (Windows SDK), or both'
+        type: choice
+        options: [both, msixvc, msix]
+        default: both
+      store_identity_name:
+        description: 'Partner Center Package Identity Name (leave empty for default)'
+        type: string
+        default: ''
+      store_publisher_id:
+        description: 'Partner Center Publisher ID, e.g. CN=... (leave empty for default)'
+        type: string
+        default: ''
+      store_publisher_display_name:
+        description: 'Partner Center Publisher Display Name (leave empty for default)'
+        type: string
+        default: ''
+      store_product_id:
+        description: 'Partner Center 12-char Store ID / Product ID (optional)'
+        type: string
+        default: ''
+      store_package_version:
+        description: 'Package version (must end with .0, e.g. 0.1.0.0)'
+        type: string
+        default: '0.1.0.0'
+      editor_cache_run_id:
+        description: 'Optional Run ID to reuse compiled editor cache from (e.g. 40100842245)'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: windows-build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    # Standard public-repository runner; do not replace with a paid larger runner.
+    if: github.event.repository.private == false
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          lfs: false
+      - name: Check Windows toolchain, storage, and committed game content
+        shell: pwsh
+        run: ./tools/ci/windows-preflight.ps1 -ReportPath "$env:RUNNER_TEMP/windows-preflight.json" -RequireBuildTools
+      - name: Validate PowerShell entry points
+        shell: pwsh
+        run: |
+          Get-ChildItem tools/ci/*.ps1 | ForEach-Object {
+            $tokens = $null; $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors)
+            if ($errors.Count) { throw ($errors | Out-String) }
+          }
+      - name: Check repository contracts
+        shell: pwsh
+        run: |
+          python tools/validate_repository.py
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python tools/export_story_reading.py --check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Save preflight report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-preflight-${{ github.run_id }}
+          path: ${{ runner.temp }}/windows-preflight.json
+          retention-days: 1
+          if-no-files-found: warn
+
+  build-editor:
+    needs: preflight
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'package' && (!inputs.editor_cache_run_id)
+    runs-on: windows-2022
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          lfs: false
+      - name: "Configure 32GB pagefile on D:"
+        uses: al-cheb/configure-pagefile-action@v1.4
+        with:
+          minimum-size: 16GB
+          maximum-size: 32GB
+          disk-root: "D:"
+      - name: Configure Windows Defender performance exclusions
+        shell: pwsh
+        run: |
+          Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE"
+          Add-MpPreference -ExclusionPath "$env:RUNNER_TEMP"
+          Add-MpPreference -ExclusionProcess "cl.exe", "link.exe", "UnrealBuildTool.exe", "UnrealEditor.exe", "UnrealEditor-Cmd.exe"
+      - name: Prepare licensed Unreal Engine 5.8.3
+        shell: pwsh
+        env:
+          UE_SOURCE_TOKEN: ${{ secrets.UE_SOURCE_TOKEN }}
+          UE_WINDOWS_ARCHIVE_URL: ${{ secrets.UE_WINDOWS_ARCHIVE_URL }}
+          UE_WINDOWS_ARCHIVE_SHA256: ${{ vars.UE_WINDOWS_ARCHIVE_SHA256 }}
+        run: ./tools/ci/windows-engine.ps1 -Source '${{ inputs.engine_source }}'
+      - name: Compile and archive Unreal Engine Editor
+        shell: pwsh
+        run: |
+          ./tools/ci/windows-build-editor.ps1 -ArchiveDir "${{ runner.temp }}/editor-cache"
+      - name: Upload compiled Editor cache
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: qinglan-editor-cache-${{ github.run_id }}
+          path: ${{ runner.temp }}/editor-cache/**
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+      - name: Save editor build diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-editor-diagnostics-${{ github.run_id }}
+          path: ${{ runner.temp }}/qinglan-win64/reports/**
+          retention-days: 1
+          if-no-files-found: warn
+
+  package:
+    needs: [preflight, build-editor]
+    if: |
+      !cancelled() &&
+      github.event_name == 'workflow_dispatch' &&
+      inputs.mode == 'package' &&
+      needs.preflight.result == 'success' &&
+      (needs.build-editor.result == 'success' || needs.build-editor.result == 'skipped')
+    runs-on: windows-2022
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          lfs: false
+      - name: "Configure 32GB pagefile on D:"
+        uses: al-cheb/configure-pagefile-action@v1.4
+        with:
+          minimum-size: 16GB
+          maximum-size: 32GB
+          disk-root: "D:"
+      - name: Configure Windows Defender performance exclusions
+        shell: pwsh
+        run: |
+          Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE"
+          Add-MpPreference -ExclusionPath "$env:RUNNER_TEMP"
+          Add-MpPreference -ExclusionProcess "cl.exe", "link.exe", "UnrealBuildTool.exe", "UnrealEditor.exe", "UnrealEditor-Cmd.exe"
+      - name: Prepare licensed Unreal Engine 5.8.3
+        shell: pwsh
+        env:
+          UE_SOURCE_TOKEN: ${{ secrets.UE_SOURCE_TOKEN }}
+          UE_WINDOWS_ARCHIVE_URL: ${{ secrets.UE_WINDOWS_ARCHIVE_URL }}
+          UE_WINDOWS_ARCHIVE_SHA256: ${{ vars.UE_WINDOWS_ARCHIVE_SHA256 }}
+        run: ./tools/ci/windows-engine.ps1 -Source '${{ inputs.engine_source }}'
+      - name: Download compiled Editor cache
+        uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
+        with:
+          name: qinglan-editor-cache-${{ inputs.editor_cache_run_id || github.run_id }}
+          run-id: ${{ inputs.editor_cache_run_id || github.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: ${{ runner.temp }}/editor-cache
+      - name: Restore compiled Editor cache
+        shell: pwsh
+        run: |
+          ./tools/ci/windows-editor-cache.ps1 -Action restore -ArchiveDir "${{ runner.temp }}/editor-cache"
+      - name: Compile shipping, cook, and package Win64 & Microsoft Store
+        shell: pwsh
+        env:
+          STORE_PACKAGE: ${{ inputs.store_package }}
+          STORE_PACKAGE_FORMAT: ${{ inputs.store_package_format }}
+          STORE_IDENTITY_NAME: ${{ inputs.store_identity_name || vars.STORE_IDENTITY_NAME }}
+          STORE_PUBLISHER_ID: ${{ secrets.STORE_PUBLISHER_ID || inputs.store_publisher_id }}
+          STORE_PUBLISHER_DISPLAY_NAME: ${{ inputs.store_publisher_display_name || vars.STORE_PUBLISHER_DISPLAY_NAME }}
+          STORE_PRODUCT_ID: ${{ inputs.store_product_id || vars.STORE_PRODUCT_ID }}
+          STORE_PACKAGE_VERSION: ${{ inputs.store_package_version || '0.1.0.0' }}
+          GDK_ARCHIVE_URL: ${{ secrets.GDK_ARCHIVE_URL }}
+        run: |
+          ./tools/ci/windows-package.ps1 `
+            -UseCachedEditorTools `
+            -StorePackage:$([bool]('${{ inputs.store_package }}' -ne 'false')) `
+            -StoreFormat '${{ inputs.store_package_format || 'both' }}' `
+            -IdentityName ($env:STORE_IDENTITY_NAME) `
+            -PublisherId ($env:STORE_PUBLISHER_ID) `
+            -PublisherDisplayName ($env:STORE_PUBLISHER_DISPLAY_NAME) `
+            -StoreId ($env:STORE_PRODUCT_ID) `
+            -Version ($env:STORE_PACKAGE_VERSION)
+      - name: Upload Microsoft Store submission package
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: Qinglan-MicrosoftStore-Package-${{ github.run_id }}
+          path: ${{ runner.temp }}/qinglan-win64/store-package/**
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: warn
+      - name: Upload Win64 test package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: Qinglan-Win64-Shipping-${{ github.run_id }}
+          path: ${{ runner.temp }}/qinglan-win64/package/**
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+      - name: Save project build diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-build-diagnostics-${{ github.run_id }}
+          path: ${{ runner.temp }}/qinglan-win64/reports/**
+          retention-days: 1
+          if-no-files-found: warn

@@ -1,0 +1,55 @@
+# Mac (Apple Silicon) Shipping package evidence
+
+Produced by tools/build/run-acceptance.sh on the owner Apple Silicon Mac.
+
+Host: ProductName: macOS ProductVersion: 27.0.1 BuildVersion: 26A434
+Model: Mac16,12
+CPU: Apple M4
+RAM: 32.0 GiB
+Display: unlocked for the interactive and performance passes; no gamepad attached.
+
+Acceptance run: .local/.local/acceptance/20261021T114346.991305Z
+Status: passed
+Project revision: 8fe547a033fa9266494e82fd1e81a8ede139f8b4 (fix/audit-repairs)
+Project dirty at start: True
+Engine revision: 396c9f059903aed5fec78ecd3d437a40c6415368
+Engine version: {"MajorVersion": 5, "MinorVersion": 8, "PatchVersion": 3, "Changelist": 0, "CompatibleChangelist": 55116800, "IsLicenseeVersion": 0, "IsPromotedBuild": 0, "BranchName": "UE5"}
+
+Steps:
+  01-build-editor        passed  3.509s
+  02-regenerate-content  passed  58.047s
+  03-suite               passed  24.246s
+  04-main-campaign       passed  15.567s
+  05-side-campaign       passed  15.087s
+  06-package             passed  52.601s
+
+Named suite results: 90/90; main campaign 30/30 scenes; side campaign 24/24 stages.
+
+Packaged artifacts (SHA-256, from package-artifacts.json):
+  24d31c23ebebb997716a143dc7f232aabb94f2c80ac7f5c0273315d5a6603a62     321988672  Mac/QinglanAscension-Mac-Shipping.app/Contents/MacOS/QinglanAscension-Mac-Shipping
+  51dd0db1d9402be23c9fc2c2e0aabaebf6c52226798db97be264e37668c83bf6      15644880  Mac/QinglanAscension-Mac-Shipping.app/Contents/UE/QinglanAscension/Content/Paks/QinglanAscension-Mac.pak
+  43aad57fde8d108d71fab9fe26dc61337b6a9bbb518180cf5caf0747683a61c5     447205616  Mac/QinglanAscension-Mac-Shipping.app/Contents/UE/QinglanAscension/Content/Paks/QinglanAscension-Mac.ucas
+  91d854d205bec1e7e7a1254e88c602dd9938a9a7b0e5465893b127aa1cec62f4        289422  Mac/QinglanAscension-Mac-Shipping.app/Contents/UE/QinglanAscension/Content/Paks/QinglanAscension-Mac.utoc
+  12e7f0f9f723f7e3c5bf987dbc35f7fd1d123536e984b66f83d65b8bcbf17ed5       3250000  Mac/QinglanAscension-Mac-Shipping.app/Contents/UE/QinglanAscension/Content/Paks/global.ucas
+  4e449b35aec1915cb44596e21121b67a02b9bd393d93799ff87f8f0fa3d06af1           794  Mac/QinglanAscension-Mac-Shipping.app/Contents/UE/QinglanAscension/Content/Paks/global.utoc
+
+Configuration: Shipping, platform Mac, arm64.
+Cook: UAT BuildCookRun -build ... -cook -stage -pak -compressed, rc=0.
+The wrapper replaces UAT's pre-stage Binaries/Mac app with the complete
+Saved/StagedBuilds app (Contents/UE payload and Paks) before verifying it.
+
+Rendered with this package (Metal RHI, 1280x720, windowed):
+  docs/dev/evidence/rendered/metal-shipping-hub-2026-10-21.png
+  docs/dev/evidence/rendered/metal-shipping-profile-2026-10-21.png
+  docs/dev/evidence/rendered/metal-shipping-trial-telegraphs-2026-10-21.png
+  docs/dev/evidence/rendered/metal-shipping-hand-near-2026-10-21.png
+  docs/dev/evidence/rendered/metal-shipping-hand-normal-2026-10-21.png
+Interactive keyboard hub pass: docs/dev/evidence/mac-interactive-hub-2026-10-21.md.
+Shipping Metal HUD hub performance: docs/dev/evidence/perf-mac-shipping-hub-2026-10-21.md.
+
+The hero renders with the palette skin; the material compile fallback was
+fixed in QinglanContentBootstrap (linear grayscale defaults + SkeletalMesh
+usage). Binary identity: Mach-O 64-bit arm64, adhoc-signed, minos 14.0.
+
+IoStore listing (project entries: 409 of 2526) is preserved at
+mac-shipping-2026-10-21-iostore-inventory.txt.

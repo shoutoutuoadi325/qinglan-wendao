@@ -1,0 +1,18 @@
+Linux Shipping package evidence (2026-10-20 wave 44: keyboard attack key)
+Engine: 5.8.3 (tools/build/versions.lock)
+Command: bash tools/build/package-game.sh (BuildCookRun -build -cook -stage -pak
+-compressed -archive, platform=Linux, clientconfig=Shipping), rc=0.
+
+SHA-256
+  08c47409af6fd55c42db2c44d6a96a0d7041d21dcfc55c1f52f295fe7150f145  Binaries/Linux/QinglanAscension-Linux-Shipping
+  fd7f276e1a2c08eb49fd0841b8d1fc2e4c4a6dfbc277dc31776de5ee7e456f0b  Content/Paks/QinglanAscension-Linux.pak
+  1b7fb3b0d6d163b46bcb758c2186bf76e418fe5299347559311d5041beb31505  Content/Paks/QinglanAscension-Linux.ucas
+  bb228772a977643c32ee9da3b0ac941a466a899e93db727dbe52e189602b98b2  Content/Paks/QinglanAscension-Linux.utoc
+
+Changes since wave 40 (binary unchanged; IMC/maps regenerated):
+  - IA_Attack now also maps to keyboard J, so a keyboard-only playthrough does
+    not require the mouse for the primary swing. Every other combat action
+    already had a keyboard key.
+  - ContentBootstrap regenerated IMC_Default and the four maps (rc=0, ok=1).
+  - BothDeviceMappingContract asserts J alongside the existing keyboard and
+    gamepad keys. Suite 70/70.

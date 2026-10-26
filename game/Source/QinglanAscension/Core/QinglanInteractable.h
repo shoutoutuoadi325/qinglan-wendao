@@ -28,12 +28,13 @@ class UShapeComponent;
  * ExecuteInteraction routes to the subsystem that owns the behavior.
  */
 UCLASS()
-class AQinglanInteractable : public AActor
+class QINGLANASCENSION_API AQinglanInteractable : public AActor
 {
 	GENERATED_BODY()
 
 public:
 	AQinglanInteractable();
+	virtual void Tick(float DeltaSeconds) override;
 
 	/** Anchor key this actor dispatches on (e.g. "hub.bamboo_gate", "door.0_1"). */
 	UPROPERTY(EditInstanceOnly, Category = "Qinglan|Interaction") FName InteractionId = NAME_None;
@@ -57,8 +58,10 @@ namespace QinglanInteraction
 	inline constexpr const TCHAR* AshenMapPath = TEXT("/Game/Qinglan/Maps/L_AshenVerge");
 	inline constexpr const TCHAR* ArenaMapPath = TEXT("/Game/Qinglan/Maps/L_TribulationArena");
 
-	/** Opens a map via the same UGameplayStatics::OpenLevel path the game instance uses (Core/QinglanGameInstance.cpp). */
-	void TravelToMap(UObject* WorldContext, const TCHAR* MapPath);
+	/** Saves then requests OpenLevel; false means no travel was requested.
+	 * True does not confirm asynchronous map loading succeeded.
+	 */
+	bool TravelToMap(UObject* WorldContext, const TCHAR* MapPath);
 
 	/**
 	 * Deterministic expedition seed from the realm id and the fiction clock
@@ -73,12 +76,15 @@ namespace QinglanInteraction
 	 * anchor id (main scenes use the exact id "hub.courtyard" style; side-quest
 	 * stages use the "realm/place" form mapped from "sq.realm.place" anchors).
 	 * Uncompleted scenes go first; with bAllowRevisit completed ones replay
-	 * their brief revisit branch (docs/story/narrative-implementation.md 3.3).
+	 * their brief revisit branch (docs/story/narrative-implementation.md 3.3),
+	 * except completed protocol stages, which replay as agreement revisions
+	 * with live choices. Player, when given, receives the pending-agreement
+	 * status line before such a revision begins.
 	 * Returns false when the registry is absent or nothing matched;
 	 * prerequisites are validated by UQinglanStorySubsystem::BeginScene itself
 	 * (failure is an unmet chain, logged Verbose - never an error).
 	 */
-	bool BeginSceneAtAnchor(UQinglanStorySubsystem* Story, FName AnchorId, bool bAllowRevisit = true);
+	bool BeginSceneAtAnchor(UQinglanStorySubsystem* Story, FName AnchorId, bool bAllowRevisit = true, AQinglanCharacter* Player = nullptr);
 
 	// --- Gameplay-proof dispatcher (blueprint section 1.9) ------------------
 	// Choice-free scenes commit only through NotifyObjectiveCompleted ("the

@@ -56,6 +56,12 @@ namespace
 		int32 LastAcceptedSequence = 0;
 		FName ProfileId = NAME_None;
 		bool bCheckpointSuppressed = false;
+		/** AUD-01: a profile was loaded/created in this process session; hub re-arrival must not re-import the disk snapshot. */
+		bool bProfileActiveThisSession = false;
+		/** Reentrancy guard: profile/story/run state is being swapped by LoadProfile/CreateNewProfile; commit-boundary autosaves stay off. */
+		bool bApplyingProfileState = false;
+		/** Includes completion/failure delegates: callbacks must not recursively write or replace the active profile. */
+		bool bSaving = false;
 		/**
 		 * Story-owned narrative fields (revision, scenes, flags, decisions,
 		 * agreements, ending) carried from the last load/save. SaveNow prefers
@@ -73,11 +79,70 @@ namespace
 		return GSaveBookkeeping.FindOrAdd(Key);
 	}
 
+#if WITH_DEV_AUTOMATION_TESTS
+	FString GSaveDirectoryOverrideForTesting;
+
+	/** One-shot fault injection state; RemainingSkips == INDEX_NONE is disarmed. */
+	struct FFailureInjectionForTesting
+	{
+		int32 RemainingSkips = INDEX_NONE;
+	};
+
+	FFailureInjectionForTesting GMoveFailureForTesting;
+	FFailureInjectionForTesting GDeleteFailureForTesting;
+	FFailureInjectionForTesting GWriteFailureForTesting;
+
+	bool ConsumeInjectedFailure(FFailureInjectionForTesting& Injection)
+	{
+		if (Injection.RemainingSkips == INDEX_NONE)
+		{
+			return false;
+		}
+		if (Injection.RemainingSkips > 0)
+		{
+			--Injection.RemainingSkips;
+			return false;
+		}
+		// One-shot: recovery/cleanup calls after the injected failure run normally.
+		Injection.RemainingSkips = INDEX_NONE;
+		return true;
+	}
+#endif
+
 	FString GetSaveDirectory()
 	{
+#if WITH_DEV_AUTOMATION_TESTS
+		if (!GSaveDirectoryOverrideForTesting.IsEmpty())
+		{
+			return GSaveDirectoryOverrideForTesting;
+		}
+#endif
 		// Platform-mapped engine Saved location (docs/05 §6 "Use engine Saved
 		// locations resolved by platform APIs, not the installation directory").
 		return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("SaveGames"));
+	}
+
+	/** Rotation file operations go through these wrappers so tests can fail one step. */
+	bool MoveSaveFile(IFileManager& FileManager, const FString& Dest, const FString& Src)
+	{
+#if WITH_DEV_AUTOMATION_TESTS
+		if (ConsumeInjectedFailure(GMoveFailureForTesting))
+		{
+			return false;
+		}
+#endif
+		return FileManager.Move(*Dest, *Src);
+	}
+
+	bool DeleteSaveFile(IFileManager& FileManager, const FString& Path)
+	{
+#if WITH_DEV_AUTOMATION_TESTS
+		if (ConsumeInjectedFailure(GDeleteFailureForTesting))
+		{
+			return false;
+		}
+#endif
+		return FileManager.Delete(*Path);
 	}
 
 	bool IsValidSlot(int32 Slot)
@@ -264,6 +329,19 @@ namespace
 		Dump += TCHAR('|');
 		AppendNameArray(Dump, Save->EquippedTechniques);
 		Dump += TCHAR('|');
+		{
+			// AUD-37: fold permanent technique tiers by key order so the
+			// checksum is independent of TMap iteration order.
+			TArray<FName> TierKeys;
+			Save->TechniqueTiers.GetKeys(TierKeys);
+			TierKeys.Sort([](const FName& A, const FName& B) { return A.LexicalLess(B); });
+			for (const FName& Key : TierKeys)
+			{
+				const int32* Tier = Save->TechniqueTiers.Find(Key);
+				Dump += FString::Printf(TEXT("%s=%d;"), *Key.ToString(), Tier ? *Tier : 0);
+			}
+			Dump += TCHAR('|');
+		}
 		AppendNameArray(Dump, Save->OwnedRelics);
 		Dump += TCHAR('|');
 		Dump += Save->EquippedRelic.ToString();
@@ -288,6 +366,24 @@ namespace
 		AppendNameMap(Dump, N.ChoiceDecisions);
 		AppendNameMap(Dump, N.PendingAgreements);
 		AppendNameMap(Dump, N.EffectiveAgreements);
+		Dump += FString::Printf(TEXT("|t%.2f"), N.StoryClockSeconds);
+		{
+			// Courier deliveries fold in quest order so re-parse comparisons
+			// stay stable regardless of TMap iteration order.
+			TArray<FName> DeliveryQuests;
+			N.Deliveries.GetKeys(DeliveryQuests);
+			DeliveryQuests.Sort([](const FName& A, const FName& B) { return A.LexicalLess(B); });
+			for (const FName Quest : DeliveryQuests)
+			{
+				const FQinglanNarrativeDelivery* Delivery = N.Deliveries.Find(Quest);
+				Dump += FString::Printf(TEXT("d%s=%s,%.0f,%.0f,%d,"),
+					*Quest.ToString(),
+					Delivery ? *Delivery->Version.ToString() : TEXT(""),
+					Delivery ? Delivery->DispatchedAtSeconds : 0.0,
+					Delivery ? Delivery->ReadyAtStorySeconds : 0.0,
+					Delivery && Delivery->bDelivered ? 1 : 0);
+			}
+		}
 		Dump += FString::Printf(TEXT("|e%d|ck%d"), static_cast<int32>(N.ConfirmedEnding), Save->bHasCheckpoint ? 1 : 0);
 		if (Save->bHasCheckpoint)
 		{
@@ -295,6 +391,9 @@ namespace
 			Dump += FString::Printf(TEXT("|s%d,%d,%d,%d,%d,%s|"), C.RealmSeed, C.EncounterStreamState, C.LootStreamState,
 				C.BlessingStreamState, C.RoomIndex, *C.RealmId.ToString());
 			AppendNameArray(Dump, C.AcquiredBlessings);
+			Dump += TCHAR('|');
+			AppendNameArray(Dump, C.PendingBlessingOffer);
+			Dump += FString::Printf(TEXT("|p%d"), C.PendingBlessingRoom);
 			Dump += FString::Printf(TEXT("|a%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f|l%lld,%lld,%lld|r"),
 				C.PlayerAttributes.Health, C.PlayerAttributes.MaxHealth, C.PlayerAttributes.SpiritualEnergy,
 				C.PlayerAttributes.MaxSpiritualEnergy, C.PlayerAttributes.Stamina, C.PlayerAttributes.MaxStamina,
@@ -401,10 +500,43 @@ namespace
 			}
 			return 2;
 		}
+#if WITH_DEV_AUTOMATION_TESTS
+		if (ConsumeInjectedFailure(GWriteFailureForTesting))
+		{
+			// Torn-write injection: persist only a prefix and report success so
+			// SaveNow's re-open/verify step is what rejects the temp file.
+			const int32 TruncatedBytes = Bytes.Num() / 2;
+			const bool bWrotePrefix = TruncatedBytes > 0 && Handle->Write(Bytes.GetData(), TruncatedBytes);
+			Handle->Flush(true);
+			delete Handle;
+			return bWrotePrefix ? 0 : 1;
+		}
+#endif
 		const bool bWrote = Handle->Write(Bytes.GetData(), Bytes.Num());
 		Handle->Flush(true); // durable-write step 3: flush before verification
 		delete Handle;
 		return bWrote ? 0 : 1; // failed write of an opened handle: quota
+	}
+
+	/**
+	 * Post-commit backup repair (AUD-03): seeds a missing/invalid backup slot
+	 * with already-validated bytes so a successful write always retains a
+	 * validated backup. Called only after the new primary committed, so a
+	 * failed repair can never reduce the loadable-file count below one; the
+	 * result is verified and a torn write is dropped.
+	 */
+	void SeedBackupFromValidatedBytes(const FString& BackupPath, const TArray<uint8>& Bytes)
+	{
+		if (WriteAllBytesDurably(BackupPath, Bytes) != 0)
+		{
+			return; // the new primary stays committed; the repair is best effort
+		}
+		UQinglanSaveGame* Check = nullptr;
+		FText CheckError;
+		if (TryLoadValidSave(BackupPath, Check, CheckError) != EFileLoadOutcome::Ok)
+		{
+			DeleteSaveFile(IFileManager::Get(), BackupPath);
+		}
 	}
 
 	FText LocalizedStageName(EQinglanStage Stage)
@@ -420,8 +552,10 @@ namespace
 	/** Timestamp + progress preview for backup fallback notices (docs/05 §6). */
 	FText MakeProgressPreview(const UQinglanSaveGame* Save)
 	{
-		return FText::Format(QinglanSave::Loc(TEXT("save.progress_preview")),
-			LocalizedStageName(Save->CultivationStage), Save->CultivationRank);
+		FFormatNamedArguments Args;
+		Args.Add(TEXT("stage"), LocalizedStageName(Save->CultivationStage));
+		Args.Add(TEXT("rank"), Save->CultivationRank);
+		return FText::Format(QinglanSave::Loc(TEXT("save.progress_preview")), Args);
 	}
 
 	FQinglanProfileSnapshot SnapshotFromSave(const UQinglanSaveGame* Save)
@@ -434,6 +568,7 @@ namespace
 		Snapshot.Inventory = Save->Inventory;
 		Snapshot.UnlockedTechniques = Save->UnlockedTechniques;
 		Snapshot.EquippedTechniques = Save->EquippedTechniques;
+		Snapshot.TechniqueTiers = Save->TechniqueTiers;
 		Snapshot.OwnedRelics = Save->OwnedRelics;
 		Snapshot.EquippedRelic = Save->EquippedRelic;
 		Snapshot.OwnedPassives = Save->OwnedPassives;
@@ -454,6 +589,7 @@ namespace
 		Save->Inventory = Snapshot.Inventory;
 		Save->UnlockedTechniques = Snapshot.UnlockedTechniques;
 		Save->EquippedTechniques = Snapshot.EquippedTechniques;
+		Save->TechniqueTiers = Snapshot.TechniqueTiers;
 		Save->OwnedRelics = Snapshot.OwnedRelics;
 		Save->EquippedRelic = Snapshot.EquippedRelic;
 		Save->OwnedPassives = Snapshot.OwnedPassives;
@@ -469,6 +605,30 @@ namespace
 		return FName(*FString::Printf(TEXT("profile_%d"), Slot));
 	}
 }
+
+#if WITH_DEV_AUTOMATION_TESTS
+void UQinglanSaveSubsystem::SetSaveDirectoryOverrideForTesting(const FString& Directory)
+{
+	GSaveDirectoryOverrideForTesting = Directory;
+}
+
+void UQinglanSaveSubsystem::SetFileOperationFailureForTesting(EQinglanSaveFileOperationForTesting Operation, int32 SkipCount)
+{
+	const int32 RemainingSkips = SkipCount < 0 ? INDEX_NONE : SkipCount;
+	switch (Operation)
+	{
+	case EQinglanSaveFileOperationForTesting::Move:
+		GMoveFailureForTesting.RemainingSkips = RemainingSkips;
+		break;
+	case EQinglanSaveFileOperationForTesting::Delete:
+		GDeleteFailureForTesting.RemainingSkips = RemainingSkips;
+		break;
+	case EQinglanSaveFileOperationForTesting::Write:
+		GWriteFailureForTesting.RemainingSkips = RemainingSkips;
+		break;
+	}
+}
+#endif
 
 bool UQinglanSaveSubsystem::SerializeVerified(const UQinglanSaveGame* Save, TArray<uint8>& OutBytes) const
 {
@@ -538,6 +698,18 @@ bool UQinglanSaveSubsystem::DeserializeVerified(const TArray<uint8>& Bytes, UQin
 bool UQinglanSaveSubsystem::LoadProfile(int32 Slot, FText& OutNotice)
 {
 	OutNotice = FText::GetEmpty();
+	if (!IsInGameThread())
+	{
+		OutNotice = QinglanSave::Loc(TEXT("error.save_failed"));
+		return false;
+	}
+	FQinglanSaveBookkeeping& Bookkeeping = Book(this);
+	if (Bookkeeping.bSaving || Bookkeeping.bApplyingProfileState)
+	{
+		OutNotice = QinglanSave::Loc(TEXT("error.save_failed"));
+		UE_LOG(LogQinglanSave, Warning, TEXT("LoadProfile rejected during a save/profile replacement"));
+		return false;
+	}
 	if (!IsValidSlot(Slot))
 	{
 		UE_LOG(LogQinglanSave, Error, TEXT("LoadProfile: slot %d out of range"), Slot);
@@ -602,17 +774,12 @@ bool UQinglanSaveSubsystem::LoadProfile(int32 Slot, FText& OutNotice)
 			return false;
 		}
 		// Timestamp + progress preview notice (docs/05 §6).
-		OutNotice = FText::Format(QinglanSave::Loc(TEXT("save.backup_restored")),
-			FText::AsDate(ChosenStamp, EDateTimeStyle::Short), MakeProgressPreview(ChosenSave));
+		FFormatNamedArguments Args;
+		Args.Add(TEXT("date"), FText::AsDate(ChosenStamp, EDateTimeStyle::Short));
+		Args.Add(TEXT("progress"), MakeProgressPreview(ChosenSave));
+		OutNotice = FText::Format(QinglanSave::Loc(TEXT("save.backup_restored")), Args);
 		UE_LOG(LogQinglanSave, Warning, TEXT("LoadProfile: slot %d fell back to a valid backup"), Slot);
 	}
-
-	FQinglanSaveBookkeeping& Bookkeeping = Book(this);
-	Bookkeeping.ActiveSlot = Slot;
-	Bookkeeping.LastAcceptedSequence = ChosenSave->SaveSequence;
-	Bookkeeping.ProfileId = ChosenSave->ProfileId;
-	Bookkeeping.bCheckpointSuppressed = false;
-	Bookkeeping.CarriedNarrative = ChosenSave->Narrative;
 
 	UGameInstance* GameInstancePtr = GetGameInstance();
 	UQinglanProfileSubsystem* ProfileSubsystem = GameInstancePtr ? GameInstancePtr->GetSubsystem<UQinglanProfileSubsystem>() : nullptr;
@@ -624,6 +791,17 @@ bool UQinglanSaveSubsystem::LoadProfile(int32 Slot, FText& OutNotice)
 		OutNotice = QinglanSave::Loc(TEXT("error.save_failed"));
 		return false;
 	}
+	// Publish the selected slot only after the required state owner is available;
+	// a failed load must not redirect later saves away from the active profile.
+	Bookkeeping.ActiveSlot = Slot;
+	Bookkeeping.LastAcceptedSequence = ChosenSave->SaveSequence;
+	Bookkeeping.ProfileId = ChosenSave->ProfileId;
+	Bookkeeping.bCheckpointSuppressed = false;
+	Bookkeeping.CarriedNarrative = ChosenSave->Narrative;
+	// AUD-04: a profile switch replaces ALL session state atomically. The
+	// applying guard keeps the commit-boundary autosave off while the
+	// subsystems are mid-swap; OnProfileChanged fires once everything landed.
+	Bookkeeping.bApplyingProfileState = true;
 	ProfileSubsystem->ImportStateFromSave(SnapshotFromSave(ChosenSave));
 	// Narrative save bridge: story-owned fields (revision, scenes, flags,
 	// choice decisions, agreements, ending) import live into the story
@@ -635,12 +813,25 @@ bool UQinglanSaveSubsystem::LoadProfile(int32 Slot, FText& OutNotice)
 		QinglanStoryRuntime::ImportNarrativeState(StorySubsystem, ChosenSave->Narrative);
 	}
 	UQinglanRunSubsystem* RunSubsystem = GameInstancePtr ? GameInstancePtr->GetSubsystem<UQinglanRunSubsystem>() : nullptr;
-	if (RunSubsystem != nullptr && ChosenSave->bHasCheckpoint)
+	if (RunSubsystem != nullptr)
 	{
-		// Resume from the pre-room snapshot; committed rewards are never
-		// re-granted (idempotent transaction journal, docs/05 §6).
-		RunSubsystem->ImportCheckpoint(ChosenSave->Checkpoint);
+		if (ChosenSave->bHasCheckpoint)
+		{
+			// Resume from the pre-room snapshot; committed rewards are never
+			// re-granted (idempotent transaction journal, docs/05 §6).
+			RunSubsystem->ImportCheckpoint(ChosenSave->Checkpoint);
+		}
+		else
+		{
+			// The chosen profile is "at the sanctuary": any expedition left
+			// over from the previously active profile must not survive the
+			// switch (its loot/blessings would bank into the new profile).
+			RunSubsystem->ResetRun();
+		}
 	}
+	Bookkeeping.bApplyingProfileState = false;
+	Bookkeeping.bProfileActiveThisSession = true;
+	OnProfileChanged.Broadcast(ChosenSave->ProfileId);
 	return true;
 }
 
@@ -655,6 +846,15 @@ bool UQinglanSaveSubsystem::SaveNow(FText& OutError)
 		return false;
 	}
 	FQinglanSaveBookkeeping& Bookkeeping = Book(this);
+	if (Bookkeeping.bSaving || Bookkeeping.bApplyingProfileState)
+	{
+		// Do not broadcast here: an OnSaveFailed handler retrying synchronously
+		// would otherwise recurse without ever reaching the writer.
+		OutError = QinglanSave::Loc(TEXT("error.save_failed"));
+		UE_LOG(LogQinglanSave, Warning, TEXT("SaveNow rejected during a save/profile replacement"));
+		return false;
+	}
+	TGuardValue<bool> SavingGuard(Bookkeeping.bSaving, true);
 	if (!IsValidSlot(Bookkeeping.ActiveSlot))
 	{
 		OutError = QinglanSave::Loc(TEXT("save.no_profile_loaded"));
@@ -752,7 +952,7 @@ bool UQinglanSaveSubsystem::SaveNow(FText& OutError)
 	if (WriteResult != 0)
 	{
 		Phase = EQinglanSavePhase::Failed;
-		IFileManager::Get().Delete(*TempPath);
+		DeleteSaveFile(IFileManager::Get(), TempPath);
 		OutError = IoErrorText(WriteResult); // localized disk-full / permission, retry by re-invoking
 		OnSaveFailed.Broadcast(Bookkeeping.ProfileId, OutError);
 		return false; // last valid primary untouched
@@ -771,63 +971,116 @@ bool UQinglanSaveSubsystem::SaveNow(FText& OutError)
 		ComputeSaveFingerprint(ReopenedSave) != ComputeSaveFingerprint(Save))
 	{
 		Phase = EQinglanSavePhase::Failed;
-		IFileManager::Get().Delete(*TempPath);
+		DeleteSaveFile(IFileManager::Get(), TempPath);
 		OutError = QinglanSave::Loc(TEXT("save.corrupt"));
 		UE_LOG(LogQinglanSave, Error, TEXT("SaveNow: temp file failed re-open verification"));
 		OnSaveFailed.Broadcast(Bookkeeping.ProfileId, OutError);
 		return false; // last valid primary untouched
 	}
 
-	// ---- Step 4: preserve the last known valid save as a backup (rotation) ----
+	// ---- Step 4: preserve validated backups (rotation, AUD-03) ----
+	// Invariants: a backup slot only ever receives a file that validated (or
+	// was the previously-valid primary); the last valid recovery copy (bak2)
+	// is never overwritten unless bak1 itself validated, and never deleted
+	// before a new validated primary is committed; a failed move or a crash
+	// at any step leaves at least one loadable file. The temp file carrying
+	// this save was fully re-opened and verified in step 3.
 	Phase = EQinglanSavePhase::Replacing;
 	IFileManager& FileManager = IFileManager::Get();
-	const bool bPrimaryExists = FileManager.FileExists(*PrimaryPath);
-	UQinglanSaveGame* PrimarySave = nullptr;
-	FText PrimaryError;
-	const bool bPrimaryValid = bPrimaryExists &&
-		TryLoadValidSave(PrimaryPath, PrimarySave, PrimaryError) == EFileLoadOutcome::Ok;
-	// Backups must stay validated: only promote a primary that parses cleanly.
 	const FString Bak1Path = GetBackupPath(Slot, 1);
 	const FString Bak2Path = GetBackupPath(Slot, 2);
-	FileManager.Delete(*Bak2Path);
-	if (FileManager.FileExists(*Bak1Path) && !FileManager.Move(*Bak2Path, *Bak1Path))
+	UQinglanSaveGame* Bak1Save = nullptr;
+	FText Bak1Error;
+	const bool bBak1Exists = FileManager.FileExists(*Bak1Path);
+	const bool bBak1Valid = bBak1Exists &&
+		TryLoadValidSave(Bak1Path, Bak1Save, Bak1Error) == EFileLoadOutcome::Ok;
+	if (bBak1Valid)
 	{
-		Phase = EQinglanSavePhase::Failed;
-		FileManager.Delete(*TempPath);
-		OutError = IoErrorText(3);
-		UE_LOG(LogQinglanSave, Error, TEXT("SaveNow: backup rotation failed"));
-		OnSaveFailed.Broadcast(Bookkeeping.ProfileId, OutError);
-		return false; // primary untouched
+		// bak2 only ever receives a validated file; its previous bytes are
+		// superseded while bak1 and (below) the primary keep valid copies.
+		if (!MoveSaveFile(FileManager, Bak2Path, Bak1Path))
+		{
+			Phase = EQinglanSavePhase::Failed;
+			DeleteSaveFile(FileManager, TempPath);
+			OutError = IoErrorText(3);
+			UE_LOG(LogQinglanSave, Error, TEXT("SaveNow: bak1 -> bak2 rotation failed"));
+			OnSaveFailed.Broadcast(Bookkeeping.ProfileId, OutError);
+			return false; // primary, bak1, and bak2 all keep their bytes
+		}
 	}
-	if (bPrimaryValid && !FileManager.Move(*Bak1Path, *PrimaryPath))
+	else if (bBak1Exists)
+	{
+		// An unloadable bak1 is dead weight; removing it cannot reduce the
+		// loadable-file count, and bak2 (the recovery copy) is never touched.
+		// A failure here still aborts the write: the storage is unhealthy, so
+		// fail safe with the primary and bak2 still holding the last commits.
+		if (!DeleteSaveFile(FileManager, Bak1Path))
+		{
+			Phase = EQinglanSavePhase::Failed;
+			DeleteSaveFile(FileManager, TempPath);
+			OutError = IoErrorText(3);
+			UE_LOG(LogQinglanSave, Error, TEXT("SaveNow: could not remove the invalid bak1 before rotation"));
+			OnSaveFailed.Broadcast(Bookkeeping.ProfileId, OutError);
+			return false; // primary/bak2 keep the last valid saves
+		}
+	}
+	UQinglanSaveGame* PrimarySave = nullptr;
+	FText PrimaryError;
+	const bool bPrimaryValid = FileManager.FileExists(*PrimaryPath) &&
+		TryLoadValidSave(PrimaryPath, PrimarySave, PrimaryError) == EFileLoadOutcome::Ok;
+	if (bPrimaryValid && !MoveSaveFile(FileManager, Bak1Path, PrimaryPath))
 	{
 		Phase = EQinglanSavePhase::Failed;
 		// Best-effort restore of the rotation, then abort with primary intact.
-		if (FileManager.FileExists(*Bak2Path))
+		if (bBak1Valid && FileManager.FileExists(*Bak2Path))
 		{
-			FileManager.Move(*Bak1Path, *Bak2Path);
+			MoveSaveFile(FileManager, Bak1Path, Bak2Path);
 		}
-		FileManager.Delete(*TempPath);
+		DeleteSaveFile(FileManager, TempPath);
 		OutError = IoErrorText(3);
 		UE_LOG(LogQinglanSave, Error, TEXT("SaveNow: could not stage primary into backup"));
 		OnSaveFailed.Broadcast(Bookkeeping.ProfileId, OutError);
-		return false;
+		return false; // the primary never moved; it is still the last valid save
 	}
 
 	// ---- Step 5: atomic replace; recovery metadata retained until success ----
-	if (!FileManager.Move(*PrimaryPath, *TempPath))
+	if (!MoveSaveFile(FileManager, PrimaryPath, TempPath))
 	{
 		Phase = EQinglanSavePhase::Failed;
 		if (bPrimaryValid && !FileManager.FileExists(*PrimaryPath))
 		{
 			// Replace failed after the primary was moved aside: restore it.
-			FileManager.Move(*PrimaryPath, *Bak1Path);
+			MoveSaveFile(FileManager, PrimaryPath, Bak1Path);
 		}
-		FileManager.Delete(*TempPath);
+		DeleteSaveFile(FileManager, TempPath);
 		OutError = IoErrorText(3);
 		UE_LOG(LogQinglanSave, Error, TEXT("SaveNow: atomic replace failed"));
 		OnSaveFailed.Broadcast(Bookkeeping.ProfileId, OutError);
 		return false; // the last valid primary is never deleted by a failed write
+	}
+
+	// Post-commit repair: with the new validated primary in place, seed a
+	// missing/invalid bak1 from bak2's validated bytes (or, when bak2 is also
+	// unusable, from this write's verified bytes) so a successful save always
+	// retains a validated backup (AUD-03).
+	{
+		UQinglanSaveGame* Bak1After = nullptr;
+		FText Bak1AfterError;
+		if (TryLoadValidSave(Bak1Path, Bak1After, Bak1AfterError) != EFileLoadOutcome::Ok)
+		{
+			TArray<uint8> SeedBytes;
+			UQinglanSaveGame* Bak2After = nullptr;
+			FText Bak2AfterError;
+			if (TryLoadValidSave(Bak2Path, Bak2After, Bak2AfterError) == EFileLoadOutcome::Ok &&
+				FFileHelper::LoadFileToArray(SeedBytes, *Bak2Path))
+			{
+				SeedBackupFromValidatedBytes(Bak1Path, SeedBytes);
+			}
+			else
+			{
+				SeedBackupFromValidatedBytes(Bak1Path, Bytes);
+			}
+		}
 	}
 
 	// ---- Step 6: report completion on the game thread ----
@@ -864,6 +1117,17 @@ bool UQinglanSaveSubsystem::HasProfile(int32 Slot) const
 
 void UQinglanSaveSubsystem::CreateNewProfile(int32 Slot)
 {
+	if (!IsInGameThread())
+	{
+		UE_LOG(LogQinglanSave, Error, TEXT("CreateNewProfile called off the game thread"));
+		return;
+	}
+	FQinglanSaveBookkeeping& Bookkeeping = Book(this);
+	if (Bookkeeping.bSaving || Bookkeeping.bApplyingProfileState)
+	{
+		UE_LOG(LogQinglanSave, Warning, TEXT("CreateNewProfile rejected during a save/profile replacement"));
+		return;
+	}
 	if (!IsValidSlot(Slot))
 	{
 		UE_LOG(LogQinglanSave, Error, TEXT("CreateNewProfile: slot %d out of range"), Slot);
@@ -877,11 +1141,18 @@ void UQinglanSaveSubsystem::CreateNewProfile(int32 Slot)
 		return;
 	}
 
-	FQinglanSaveBookkeeping& Bookkeeping = Book(this);
 	Bookkeeping.ActiveSlot = Slot;
 	Bookkeeping.LastAcceptedSequence = 0;
 	Bookkeeping.ProfileId = MakeProfileIdForSlot(Slot);
 	Bookkeeping.bCheckpointSuppressed = false;
+
+	// AUD-04: creating a profile replaces the whole session; a run left open
+	// by the previously active profile must not survive into the new one.
+	Bookkeeping.bApplyingProfileState = true;
+	if (UQinglanRunSubsystem* RunSubsystem = GameInstancePtr->GetSubsystem<UQinglanRunSubsystem>())
+	{
+		RunSubsystem->ResetRun();
+	}
 
 	// New-profile template mirrors data/examples/save.json.
 	FQinglanProfileSnapshot Fresh;
@@ -907,6 +1178,9 @@ void UQinglanSaveSubsystem::CreateNewProfile(int32 Slot)
 		}
 	}
 	Bookkeeping.CarriedNarrative = Fresh.Narrative;
+	Bookkeeping.bApplyingProfileState = false;
+	Bookkeeping.bProfileActiveThisSession = true;
+	OnProfileChanged.Broadcast(Bookkeeping.ProfileId);
 
 	// Persist the fresh profile through the full durable protocol so the slot
 	// exists on disk immediately (first accepted save has sequence 1).
@@ -921,8 +1195,17 @@ void UQinglanSaveSubsystem::ClearCheckpoint()
 {
 	// Suppresses the checkpoint section of subsequent writes (expedition end /
 	// return to hub). The next SaveNow persists checkpoint == null; committed
-	// rewards stay journaled through CommittedTransactionIds.
+	// rewards stay journaled through CommittedTransactionIds. Suppression stays
+	// on through retries and is released only when a new expedition starts.
 	Book(this).bCheckpointSuppressed = true;
+}
+
+void UQinglanSaveSubsystem::BeginExpeditionCheckpoint()
+{
+	// AUD-02: ClearCheckpoint belongs to the previous expedition. Without this
+	// lifecycle reset, every later expedition in the same profile session would
+	// save successfully but silently omit its checkpoint.
+	Book(this).bCheckpointSuppressed = false;
 }
 
 bool UQinglanSaveSubsystem::ShowSaveFolder()
@@ -936,4 +1219,57 @@ bool UQinglanSaveSubsystem::ShowSaveFolder()
 	}
 	FPlatformProcess::ExploreFolder(*Directory);
 	return true;
+}
+
+void UQinglanSaveSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+{
+	Super::Initialize(Collection);
+	// Commit-boundary autosave (AUD-02): hub purchases and rank unlocks all
+	// funnel through the profile subsystem's journaled mutations, so binding
+	// its commit notification wires every hub-side purchase to a durable save
+	// without touching each caller.
+	Collection.InitializeDependency(UQinglanProfileSubsystem::StaticClass());
+	if (UGameInstance* GameInstancePtr = GetGameInstance())
+	{
+		if (UQinglanProfileSubsystem* ProfileSubsystem = GameInstancePtr->GetSubsystem<UQinglanProfileSubsystem>())
+		{
+			ProfileSubsystem->OnProfileCommitted.AddDynamic(this, &UQinglanSaveSubsystem::HandleProfileCommitted);
+		}
+	}
+}
+
+void UQinglanSaveSubsystem::HandleProfileCommitted()
+{
+	const FQinglanSaveBookkeeping& Bookkeeping = Book(this);
+	if (!Bookkeeping.bProfileActiveThisSession || Bookkeeping.bApplyingProfileState)
+	{
+		return; // no session yet, or LoadProfile/CreateNewProfile is mid-swap
+	}
+	UGameInstance* GameInstancePtr = GetGameInstance();
+	UQinglanRunSubsystem* RunSubsystem = GameInstancePtr ? GameInstancePtr->GetSubsystem<UQinglanRunSubsystem>() : nullptr;
+	if (RunSubsystem && RunSubsystem->IsInExpedition())
+	{
+		return; // in-run rewards persist at the room/banking boundaries instead
+	}
+	FText SaveError;
+	if (!SaveNow(SaveError))
+	{
+		// SaveNow already broadcast OnSaveFailed; keep a breadcrumb here too.
+		UE_LOG(LogQinglanSave, Warning, TEXT("Commit-boundary autosave did not commit: %s"), *SaveError.ToString());
+	}
+}
+
+bool UQinglanSaveSubsystem::SaveActiveSession(FText& OutError)
+{
+	OutError = FText::GetEmpty();
+	if (!Book(this).bProfileActiveThisSession)
+	{
+		return true; // nothing earned this session; map travel may proceed
+	}
+	return SaveNow(OutError);
+}
+
+bool UQinglanSaveSubsystem::IsProfileSessionActive() const
+{
+	return Book(const_cast<UQinglanSaveSubsystem*>(this)).bProfileActiveThisSession;
 }

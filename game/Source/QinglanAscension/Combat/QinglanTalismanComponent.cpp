@@ -5,54 +5,21 @@
 // the single authoritative combat pipeline.
 #include "Combat/QinglanTalismanComponent.h"
 
+#include "AI/QinglanEncounterDirector.h"
 #include "AI/QinglanEnemyCharacter.h"
+#include "Combat/QinglanCharacter.h"
 #include "Combat/QinglanCombatComponent.h"
 #include "Combat/QinglanDamageMath.h" // QinglanCombatTunables boss tag
+#include "Core/QinglanInteractable.h" // QinglanInteraction::TravelToMap/HubMapPath
 #include "Engine/DamageEvents.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
-#include "GameFramework/PlayerStart.h"
 #include "Progression/QinglanEconomyLibrary.h"
 #include "Progression/QinglanProfileSubsystem.h"
 #include "Progression/QinglanProgressionTables.h"
 #include "Progression/QinglanRunSubsystem.h"
 #include "QinglanAscension.h"
-
-namespace
-{
-	// PlayerStart tag convention for room entrances; mirrors the game mode's
-	// FindTalismanRoomEntranceStart (Core/QinglanGameModeBase.cpp): exact per-room form
-	// "Qinglan.RoomEntrance.<Index>", else any "Qinglan.RoomEntrance*" start.
-	const TCHAR* GTalismanRoomEntranceTagPrefix = TEXT("Qinglan.RoomEntrance");
-
-	APlayerStart* FindTalismanRoomEntranceStart(UWorld* World, int32 RoomIndex)
-	{
-		if (!World)
-		{
-			return nullptr;
-		}
-		const FString Prefix(GTalismanRoomEntranceTagPrefix);
-		APlayerStart* AnyEntrance = nullptr;
-		for (TActorIterator<APlayerStart> It(World); It; ++It)
-		{
-			APlayerStart* Start = *It;
-			if (!Start)
-			{
-				continue;
-			}
-			if (Start->PlayerStartTag == FName(*FString::Printf(TEXT("%s.%d"), *Prefix, RoomIndex)))
-			{
-				return Start;
-			}
-			if (!AnyEntrance && Start->PlayerStartTag.ToString().StartsWith(Prefix))
-			{
-				AnyEntrance = Start;
-			}
-		}
-		return AnyEntrance;
-	}
-}
 
 UQinglanTalismanComponent::UQinglanTalismanComponent()
 {
@@ -178,15 +145,11 @@ bool UQinglanTalismanComponent::ExecuteEffect(const FQinglanTalismanCatalogEntry
 {
 	if (Entry.EffectKind == FName(TEXT("heal_25")))
 	{
-		// Healing Talisman: heal the catalog magnitude, bounded by maximum
-		// health (docs/03 section 5; docs/02 section 6 healing bound) and
-		// scaled by the permanent healing percent (Herbal Knowledge, Verdant
-		// Seed) through the authoritative Heal entry point.
-		float UnusedEnergyRegen = 0.f;
-		float UnusedStaminaRegen = 0.f;
-		float HealingPercent = 0.f;
-		UQinglanEconomyLibrary::AppendPermanentRegen(this, UnusedEnergyRegen, UnusedStaminaRegen, HealingPercent);
-		Combat.Heal(Entry.Magnitude * (1.f + HealingPercent / 100.f));
+		// Healing Talisman: heal the catalog magnitude through the
+		// authoritative Heal entry point, which folds the permanent healing
+		// percent (Herbal Knowledge +10%, Verdant Seed) exactly once for the
+		// player. Scaling here as well would double-apply the bonus (AUD-37).
+		Combat.Heal(Entry.Magnitude);
 		return true;
 	}
 	if (Entry.EffectKind == FName(TEXT("cleanse")))
@@ -238,9 +201,9 @@ bool UQinglanTalismanComponent::ExecuteEffect(const FQinglanTalismanCatalogEntry
 			{
 				continue;
 			}
-			if (Enemy->ActorHasTag(FName(QinglanCombatTunables::QinglanBossTag)))
+			if (Enemy->IsBoss())
 			{
-				continue; // ordinary enemies only (docs/03 section 5)
+				continue; // ordinary enemies only, through the authoritative boss identity (AUD-36)
 			}
 			if (FVector::Dist(Origin, Enemy->GetActorLocation()) > ShockRange)
 			{
@@ -256,28 +219,57 @@ bool UQinglanTalismanComponent::ExecuteEffect(const FQinglanTalismanCatalogEntry
 	if (Entry.EffectKind == FName(TEXT("recall")))
 	{
 		// Recall Talisman: docs/03 section 5 "request retreat from a cleared
-		// room". FIXME-CONTRACT(scope): no retreat/exit-shrine flow exists in
-		// the scaffold yet, so recall teleports the player to the current
-		// room's entrance PlayerStart, replicating the game mode's
-		// FindTalismanRoomEntranceStart tag convention (Core/QinglanGameModeBase.cpp;
-		// crash-resume positions actors the same way). No tagged start: the
-		// use is rejected and the charge survives.
+		// room". Refused requests (no expedition, a live encounter, or a
+		// banking rejection) never consume the charge; an accepted retreat
+		// banks at the voluntary-retreat rate through the run subsystem's
+		// authoritative EndExpedition and returns to the hub through the same
+		// travel path the realm exits use (Core/QinglanInteractable.cpp).
+		// EndExpedition closes the run, so a duplicate press lands in the
+		// refusal branch and spends nothing.
 		UWorld* World = GetWorld();
 		if (!World)
 		{
 			return false;
 		}
-		const UGameInstance* GameInstance = World->GetGameInstance();
-		const UQinglanRunSubsystem* Run = GameInstance ? GameInstance->GetSubsystem<UQinglanRunSubsystem>() : nullptr;
-		APlayerStart* Entrance = FindTalismanRoomEntranceStart(World, Run ? Run->GetCurrentRoomIndex() : 0);
-		if (!Entrance)
+		AQinglanCharacter* Player = Cast<AQinglanCharacter>(Owner);
+		UGameInstance* GameInstance = World->GetGameInstance();
+		UQinglanRunSubsystem* Run = GameInstance ? GameInstance->GetSubsystem<UQinglanRunSubsystem>() : nullptr;
+		if (!Run || !Run->IsInExpedition())
 		{
-			UE_LOG(LogQinglanCombat, Verbose, TEXT("Recall rejected: no room-entrance PlayerStart in this world"));
+			UE_LOG(LogQinglanCombat, Verbose, TEXT("Recall rejected: no active expedition"));
+			if (Player)
+			{
+				// FIXME-CONTRACT: no string-table key for the recall refusal.
+				Player->ShowGameMessage(NSLOCTEXT("Qinglan", "Recall.NoExpedition", "Recall works only inside an expedition."));
+			}
 			return false;
 		}
-		Owner->SetActorLocationAndRotation(Entrance->GetActorLocation(), Entrance->GetActorRotation(),
-			false, nullptr, ETeleportType::TeleportPhysics);
-		return true;
+		// Cleared-room gate: the encounter director is the room-clear authority
+		// the doors and exits already use ("doors open on clear").
+		for (TActorIterator<AQinglanEncounterDirector> It(World); It; ++It)
+		{
+			if (It->IsEncounterActive())
+			{
+				UE_LOG(LogQinglanCombat, Verbose, TEXT("Recall rejected: current room is not cleared"));
+				if (Player)
+				{
+					// FIXME-CONTRACT: no string-table key for the recall refusal.
+					Player->ShowGameMessage(NSLOCTEXT("Qinglan", "Recall.RoomNotCleared", "Clear the room before recalling."));
+				}
+				return false;
+			}
+		}
+		// Voluntary retreat: banks 70% floored per stack (docs/03 section 6).
+		Run->EndExpedition(/*bVictory=*/false, /*bVoluntaryRetreat=*/true);
+		if (Run->IsInExpedition())
+		{
+			// EndExpedition kept the run open (banking overflow rejection):
+			// the retreat was not granted, so the charge survives.
+			UE_LOG(LogQinglanCombat, Warning, TEXT("Recall rejected: retreat banking failed; expedition kept open"));
+			return false;
+		}
+		// Do not consume the charge when save-before-travel rejected departure.
+		return QinglanInteraction::TravelToMap(this, QinglanInteraction::HubMapPath);
 	}
 
 	UE_LOG(LogQinglanCombat, Warning, TEXT("UseSlot: talisman '%s' carries unknown effect kind '%s'"),

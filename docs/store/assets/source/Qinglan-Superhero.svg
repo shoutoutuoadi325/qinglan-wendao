@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-label="Qinglan: Path of Ascension"><defs>
+  <linearGradient id="sky" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#173b3c"/><stop offset=".54" stop-color="#0b292f"/><stop offset="1" stop-color="#071b24"/>
+  </linearGradient>
+  <radialGradient id="halo"><stop offset="0" stop-color="#5f9d86" stop-opacity=".24"/><stop offset="1" stop-color="#264846" stop-opacity="0"/></radialGradient>
+  <linearGradient id="jade" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#b7d5ba"/><stop offset=".47" stop-color="#6da58e"/><stop offset="1" stop-color="#2b665d"/>
+  </linearGradient>
+  <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#f0e5bc"/><stop offset="1" stop-color="#bfa66e"/>
+  </linearGradient>
+  <linearGradient id="fade" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#153b3b" stop-opacity="0"/><stop offset="1" stop-color="#071b24"/>
+  </linearGradient>
+  <g id="emblem">
+    <circle cx="0" cy="-30" r="234" fill="none" stroke="#c9b987" stroke-opacity=".7" stroke-width="3"/>
+    <path d="M-284 132 -163-33 -97 40 0-143 119 60 183-13 284 132Z" fill="url(#jade)"/>
+    <path d="m0-143 25 138-40-37-82 82Z" fill="#d9e4ca" fill-opacity=".67"/>
+    <path d="m-163-33 15 102-49-20-87 83Z M183-13 14 145 284 132Z" fill="#95c1a8" fill-opacity=".48"/>
+    <path d="M0-284 19-219 14-17 0 12-14-17-19-219Z" fill="url(#gold)"/>
+    <path d="M0-258 0-22" stroke="#fff9dc" stroke-opacity=".7" stroke-width="3"/>
+    <path d="M-53 22Q-28 5 0 9 28 5 53 22L49 34Q27 25 12 29L12 83Q0 100-12 83L-12 29Q-27 25-49 34Z" fill="url(#gold)"/>
+    <path d="M-15 96Q0 108 15 96L12 111Q0 124-12 111Z" fill="#d0bc83"/>
+    <g fill="none" stroke="#c8dfcc" stroke-width="6" stroke-linecap="round">
+      <path d="M-290 149H-174Q-205 121-176 104-143 85-117 116H-67"/>
+      <path d="M290 173H140Q180 141 151 124 125 108 103 133H49"/>
+      <path d="M-196 198H-66Q-94 175-71 162-46 146-24 171H95"/>
+      <path d="M-102 228H116" stroke-opacity=".45" stroke-width="3"/>
+    </g>
+  </g>
+</defs><rect width="1920" height="1080" fill="url(#sky)"/>
+    <ellipse cx="960" cy="420" rx="720" ry="650" fill="url(#halo)"/>
+    <g transform="translate(960 472) scale(1.35)"><use href="#emblem"/></g><g transform="scale(1.0 1.0)">
+      <path d="M0 780 178 635 312 724 459 502 661 742 822 625 1011 777 1201 605 1379 742 1596 560 1760 718 1920 631V1080H0Z" fill="#56887c" opacity=".17"/>
+      <path d="M0 900 266 714 396 821 570 692 788 914 953 804 1121 925 1370 751 1530 860 1715 714 1920 893V1080H0Z" fill="#689a87" opacity=".13"/>
+      <path d="M0 970Q321 828 630 937T1194 923 1920 906V1080H0Z" fill="#071b24" opacity=".73"/>
+      <g fill="none" stroke="#97bba5" stroke-opacity=".15" stroke-width="2">
+       <path d="M0 837Q188 817 376 839T757 835 1150 840 1550 833 1920 839"/>
+       <path d="M0 855Q188 835 376 857T757 853 1150 858 1550 851 1920 857"/>
+       <path d="M0 1024Q330 961 651 1008T1275 1018 1920 984"/>
+      </g>
+    </g></svg>

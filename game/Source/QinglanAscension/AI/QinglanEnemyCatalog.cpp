@@ -1,10 +1,12 @@
-// Constant enemy specs: six archetypes (docs/02 section 8) + three bosses
-// (docs/02 section 9; blueprint section 2.4). Numbers with a doc citation are
-// contract; numbers marked "authored" have no doc value and are the current
-// design pass. The editor importer may later mirror these into data assets;
-// the C++ constants stay the reference.
+// Constant enemy specs: six archetypes (docs/02 section 8) + four bosses
+// (docs/02 section 9; blueprint section 2.4; plus the Foundation trial's
+// elite construct, AUD-20). Numbers with a doc citation are contract; numbers
+// marked "authored" have no doc value and are the current design pass. The
+// editor importer may later mirror these into data assets; the C++ constants
+// stay the reference.
 #include "AI/QinglanEnemyCatalog.h"
 
+#include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "UObject/SoftObjectPath.h"
 
@@ -22,6 +24,41 @@ namespace QinglanPatternIds
 
 namespace
 {
+	// Bounded cache for transient catalog assets (AUD-46): the spec id space is
+	// fixed (six archetypes + four bosses), so keying by EnemyId caps the
+	// instance count at that size; repeated rooms, expeditions, and trials
+	// reuse the same assets instead of rooting a new one per encounter.
+	// Entries stay rooted while cached because several holders (wave queues,
+	// weak data mirrors, the director's TU-local registry) are not
+	// GC-visible; the size cap evicts oldest-first with RemoveFromRoot so the
+	// rooted set stays bounded even if the spec list ever grows.
+	constexpr int32 MaxCachedCatalogAssets = 16;
+	TMap<FName, TObjectPtr<UQinglanEnemyDataAsset>> GCatalogAssetCache;
+	TArray<FName> GCatalogAssetCacheOrder;
+
+	void TouchCatalogAsset(FName EnemyId)
+	{
+		GCatalogAssetCacheOrder.Remove(EnemyId);
+		GCatalogAssetCacheOrder.Add(EnemyId);
+	}
+
+	void EvictOverflowCatalogAssets()
+	{
+		while (GCatalogAssetCache.Num() > MaxCachedCatalogAssets)
+		{
+			const FName Oldest = GCatalogAssetCacheOrder[0];
+			GCatalogAssetCacheOrder.RemoveAt(0);
+			if (TObjectPtr<UQinglanEnemyDataAsset>* Found = GCatalogAssetCache.Find(Oldest))
+			{
+				if (*Found)
+				{
+					(*Found)->RemoveFromRoot();
+				}
+				GCatalogAssetCache.Remove(Oldest);
+			}
+		}
+	}
+
 	FQinglanBossPattern MakePattern(FName PatternId, float Weight, float TelegraphSeconds,
 		float Damage, float RangeCm, bool bGroundMarker, FName ChargeCue, FName ReleaseCue)
 	{
@@ -285,6 +322,42 @@ namespace
 			FName(TEXT("cue.boss.broken.roots.mark")), FName(TEXT("cue.boss.broken.roots.erupt"))));
 		return S;
 	}
+
+	FQinglanArchetypeSpec MakeEliteConstruct()
+	{
+		FQinglanArchetypeSpec S;
+		// AUD-20: the Foundation trial's final elite construct (CH03_S02).
+		// docs/story/CH03.md S02 authorizes the required kill but gives no stat
+		// block; every number is authored between stone_sentinel and
+		// bamboo_guardian so a tier-1 player can finish the kill on the 60 m
+		// storm platform (both pattern telegraphs stay >= 0.9 s like every
+		// other trial hazard).
+		S.EnemyId = FName(TEXT("elite_construct"));
+		S.Health = 620.f;
+		S.Defense = 12.f;
+		S.MoveSpeed = 260.f;
+		S.AttackRange = 420.f;     // sweeping-blade reach (pattern range below)
+		S.AttackDamage = 24.f;
+		S.AttackCoefficient = 0.5f;
+		S.AttackWindup = 1.0f;     // authored default; per-pattern telegraphs override
+		S.AttackActive = 0.3f;
+		S.AttackRecover = 1.2f;    // authored punish window
+		S.TelegraphDuration = 1.0f;
+		S.TelegraphCueId = FName(TEXT("cue.boss.elite_construct.default")); // authored cue id
+		S.AggroRadius = 6000.f;    // authored: whole-platform boss aggro
+		S.AttackShape = EQinglanAttackShape::MeleeCone;
+		S.bBoss = true;
+		S.PhaseTwoAtHealthFraction = 0.5f; // authored: same enrage-lite rule as the other bosses
+		S.ArenaDiameter = 6000.f;          // the 60 m storm platform, docs/dev/level-layout.md
+		S.GroundRingRadius = 550.f;        // strike outline radius = delayed-strike pattern range
+		S.Patterns.Add(MakePattern(QinglanPatternIds::SweepingBlade(), /*Weight*/ 2.f, /*Telegraph*/ 1.1f,
+			/*Damage*/ 24.f, /*Range*/ 420.f, /*bGroundMarker*/ false,
+			FName(TEXT("cue.boss.elite_construct.sweep.charge")), FName(TEXT("cue.boss.elite_construct.sweep.release"))));
+		S.Patterns.Add(MakePattern(QinglanPatternIds::DelayedRoots(), 3.f, 1.0f,
+			20.f, 550.f, true,
+			FName(TEXT("cue.boss.elite_construct.strike.mark")), FName(TEXT("cue.boss.elite_construct.strike.erupt"))));
+		return S;
+	}
 } // namespace
 
 namespace QinglanEnemyCatalog
@@ -305,11 +378,15 @@ namespace QinglanEnemyCatalog
 
 	const TArray<FQinglanArchetypeSpec>& GetAllBosses()
 	{
+		// Order matters: BuildRoomWave falls back to Bosses[0] and
+		// GetBossIdForRealm scans by id, so the expedition bosses keep their
+		// authored slots and the trial-only construct appends last (AUD-20).
 		static const TArray<FQinglanArchetypeSpec> Bosses =
 		{
 			MakeBambooGuardian(),
 			MakeAshenGuardian(),
-			MakeBrokenGuardian()
+			MakeBrokenGuardian(),
+			MakeEliteConstruct()
 		};
 		return Bosses;
 	}
@@ -342,6 +419,18 @@ namespace QinglanEnemyCatalog
 		if (!Outer || Spec.EnemyId.IsNone())
 		{
 			return nullptr;
+		}
+
+		// Cached reuse first (AUD-46): spec assets are read-only configuration,
+		// so every consumer may share one instance per archetype.
+		if (const TObjectPtr<UQinglanEnemyDataAsset>* Cached = GCatalogAssetCache.Find(Spec.EnemyId))
+		{
+			if (*Cached)
+			{
+				TouchCatalogAsset(Spec.EnemyId);
+				return *Cached;
+			}
+			GCatalogAssetCache.Remove(Spec.EnemyId);
 		}
 
 		UClass* AssetClass = Spec.bBoss
@@ -383,30 +472,44 @@ namespace QinglanEnemyCatalog
 		static const TMap<FName, FPresent> MeshGroups = {
 			{ FName(TEXT("spirit_wolf")),         { TEXT("Monsters/SK_Skeleton"), TEXT("Monsters/SK_SkeletonSkeletonArmature_Skeleton_Idle") } },
 			{ FName(TEXT("corrupted_disciple")),  { TEXT("Human/SK_Human"),       TEXT("Human/SK_HumanHuman_Armature_Idle") } },
-			{ FName(TEXT("hollow_archer")),       { TEXT("Monsters/SK_Bat"),      TEXT("Monsters/SK_BatBatArmature_Bat_Flying") } },
+			// The Bat/Dragon FBX imports keep the pack's internal object names
+			// (Bat/Dragon); the SK_-prefixed assets are only the anim takes.
+			{ FName(TEXT("hollow_archer")),       { TEXT("Monsters/Bat"),         TEXT("Monsters/SK_BatBatArmature_Bat_Flying") } },
 			{ FName(TEXT("stone_sentinel")),      { TEXT("Knight/SK_Knight"),     TEXT("Knight/SK_KnightHumanArmature_Idle") } },
 			{ FName(TEXT("ember_wisp")),          { TEXT("Monsters/SK_Slime"),    TEXT("Monsters/SK_SlimeArmature_Slime_Idle") } },
 			{ FName(TEXT("rootbound_keeper")),    { TEXT("Monsters/SK_Slime"),    TEXT("Monsters/SK_SlimeArmature_Slime_Idle") } },
 			{ FName(TEXT("bamboo_guardian")),     { TEXT("Knight/SK_Knight"),     TEXT("Knight/SK_KnightHumanArmature_Idle") } },
 			{ FName(TEXT("ashen_guardian")),      { TEXT("Knight/SK_Knight"),     TEXT("Knight/SK_KnightHumanArmature_Idle") } },
-			{ FName(TEXT("broken_guardian")),     { TEXT("Monsters/SK_Dragon"),   TEXT("Monsters/SK_DragonDragonArmature_Dragon_Flying") } },
+			{ FName(TEXT("broken_guardian")),     { TEXT("Monsters/Dragon"),      TEXT("Monsters/SK_DragonDragonArmature_Dragon_Flying") } },
+			{ FName(TEXT("elite_construct")),     { TEXT("Knight/SK_Knight"),     TEXT("Knight/SK_KnightHumanArmature_Idle") } },
 		};
 		if (const FPresent* Group = MeshGroups.Find(Spec.EnemyId))
 		{
 			const FString GroupPath = FString::Printf(TEXT("/Game/Qinglan/Characters/%s"), Group->Mesh);
-			const FString GroupDir = GroupPath.Left(GroupPath.Find(TEXT("/SK_")));
-			const FString GroupName = FPaths::GetBaseFilename(GroupDir);
-			Asset->Mesh = TSoftObjectPtr<USkeletalMesh>(FSoftObjectPath(GroupPath));
-			Asset->IdleAnimation = TSoftObjectPtr<UAnimSequence>(FSoftObjectPath(
-				FString::Printf(TEXT("/Game/Qinglan/Characters/%s"), Group->Idle)));
+			// Group folder is the first path segment after Characters (works for
+			// both SK_-prefixed and pack-named meshes like Monsters/Bat).
+			const FString RelativeMeshPath(Group->Mesh);
+			const FString GroupName = RelativeMeshPath.Left(
+				RelativeMeshPath.Contains(TEXT("/")) ? RelativeMeshPath.Find(TEXT("/")) : RelativeMeshPath.Len());
+			const FString GroupDir = FString::Printf(TEXT("/Game/Qinglan/Characters/%s"), *GroupName);
+			// FSoftObjectPath needs "Package.Object": a package-only path loads
+			// the package but resolves no asset, so the mesh/montage stayed null
+			// and every enemy spawned without presentation.
+			auto MakeObjectPath = [](const FString& PackagePath)
+			{
+				return FString::Printf(TEXT("%s.%s"), *PackagePath, *FPackageName::GetShortName(PackagePath));
+			};
+			Asset->Mesh = TSoftObjectPtr<USkeletalMesh>(FSoftObjectPath(MakeObjectPath(GroupPath)));
+			Asset->IdleAnimation = TSoftObjectPtr<UAnimSequence>(FSoftObjectPath(MakeObjectPath(
+				FString::Printf(TEXT("/Game/Qinglan/Characters/%s"), Group->Idle))));
 			// The anim bootstrap names montages AM_<GroupFolder>_<Suffix>; the
 			// Human folder holds the player combo cuts, so humanoid enemies
 			// reuse the first cut as their attack swing.
 			const TCHAR* AttackSuffix = GroupName == TEXT("Human") ? TEXT("SwordCut_1") : TEXT("Attack");
-			Asset->AttackMontage = TSoftObjectPtr<UAnimMontage>(FSoftObjectPath(
-				FString::Printf(TEXT("%s/Montages/AM_%s_%s"), *GroupDir, *GroupName, AttackSuffix)));
-			Asset->HitReactMontage = TSoftObjectPtr<UAnimMontage>(FSoftObjectPath(
-				FString::Printf(TEXT("%s/Montages/AM_%s_HitReact"), *GroupDir, *GroupName)));
+			Asset->AttackMontage = TSoftObjectPtr<UAnimMontage>(FSoftObjectPath(MakeObjectPath(
+				FString::Printf(TEXT("%s/Montages/AM_%s_%s"), *GroupDir, *GroupName, AttackSuffix))));
+			Asset->HitReactMontage = TSoftObjectPtr<UAnimMontage>(FSoftObjectPath(MakeObjectPath(
+				FString::Printf(TEXT("%s/Montages/AM_%s_HitReact"), *GroupDir, *GroupName))));
 		}
 
 		if (UQinglanBossDataAsset* BossAsset = Cast<UQinglanBossDataAsset>(Asset))
@@ -416,9 +519,13 @@ namespace QinglanEnemyCatalog
 			BossAsset->ArenaDiameter = Spec.ArenaDiameter;
 		}
 
-		// Transient catalog assets live for the whole session; rooting prevents
-		// GC from collecting references held only by the encounter director.
+		// Cached catalog assets stay rooted while resident (see the cache
+		// comment above); the size cap is the release path (AUD-46), so the
+		// rooted set is bounded instead of growing per encounter.
 		Asset->AddToRoot();
+		GCatalogAssetCache.Add(Spec.EnemyId, Asset);
+		TouchCatalogAsset(Spec.EnemyId);
+		EvictOverflowCatalogAssets();
 		return Asset;
 	}
 

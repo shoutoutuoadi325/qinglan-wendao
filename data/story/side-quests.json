@@ -43,7 +43,24 @@
             {
               "id": "SQ01.O1",
               "text_key": "story.sq01.s1.objective",
-              "completion": "Inspect note, wick, oil reservoir, and intact glass; repair via workbench interaction."
+              "completion": "Inspect note, wick, oil reservoir, and intact glass; repair via workbench interaction.",
+              "proof": {
+                "all_of": [
+                  {
+                    "kind": "ordered",
+                    "steps": [
+                      "device.inspect.note",
+                      "device.inspect.wick",
+                      "device.inspect.oil",
+                      "device.inspect.glass"
+                    ]
+                  },
+                  {
+                    "kind": "event",
+                    "event": "workbench.repaired_lamp"
+                  }
+                ]
+              }
             }
           ],
           "sets_flags": [
@@ -113,7 +130,24 @@
             {
               "id": "SQ01.O2",
               "text_key": "story.sq01.s2.objective",
-              "completion": "Select one exclusive route; interact with its bracket or drain lever; traverse gate/refuge checkpoints in the safe-state room. Both branches preserve the damaged-second-rail detour. Lamp mounts before dangerous turn, not at east-wall gate."
+              "completion": "Select one exclusive route; interact with its bracket or drain lever; traverse gate/refuge checkpoints in the safe-state room. Both branches preserve the damaged-second-rail detour. Lamp mounts before dangerous turn, not at east-wall gate.",
+              "proof": {
+                "all_of": [
+                  {
+                    "kind": "event",
+                    "event": "route.selected"
+                  },
+                  {
+                    "kind": "event",
+                    "event": "device.lever_or_bracket"
+                  },
+                  {
+                    "kind": "event_count",
+                    "event": "traverse.checkpoint",
+                    "count": 2
+                  }
+                ]
+              }
             }
           ],
           "sets_flags": [
@@ -182,7 +216,23 @@
             {
               "id": "SQ01.O3",
               "text_key": "story.sq01.s3.objective",
-              "completion": "Route traversal and marker conditions persisted; verify refuge sightline; complete explicit ten-minute burn-test time advance; relight lamp; confirm record."
+              "completion": "Route traversal and marker conditions persisted; verify refuge sightline; complete explicit ten-minute burn-test time advance; relight lamp; confirm record.",
+              "proof": {
+                "all_of": [
+                  {
+                    "kind": "event",
+                    "event": "sightline.verified"
+                  },
+                  {
+                    "kind": "time_advance",
+                    "game_hours": 0.1667
+                  },
+                  {
+                    "kind": "event",
+                    "event": "lamp.relit"
+                  }
+                ]
+              }
             }
           ],
           "sets_flags": [
@@ -205,7 +255,27 @@
           ],
           "checkpoint": "Save burn-test completion; require explicit confirmation.",
           "script_trigger": "confirmation_checks_ready",
-          "confirmation_guard": "all non-confirmation objective conditions satisfied; courier delivered if applicable; selected branch persisted",
+          "confirmation_guard": {
+            "all_of": [
+              {
+                "kind": "flag",
+                "flag": "sq01_stage_2_complete"
+              },
+              {
+                "kind": "event",
+                "event": "sightline.verified"
+              },
+              {
+                "kind": "time_advance",
+                "game_hours": 0.1667
+              },
+              {
+                "kind": "event",
+                "event": "lamp.relit"
+              }
+            ]
+          },
+          "confirmation_guard_note": "all non-confirmation objective conditions satisfied; courier delivered if applicable; selected branch persisted",
           "journal_key": "story.sq01.s3.journal",
           "retry_key": "story.sq01.s3.retry"
         }
@@ -313,7 +383,16 @@
             {
               "id": "SQ02.O1",
               "text_key": "story.sq02.s1.objective",
-              "completion": "Inspect both dated requests and gauge marks."
+              "completion": "Inspect both dated requests and gauge marks.",
+              "proof": {
+                "all_of": [
+                  {
+                    "kind": "event_count",
+                    "event": "record.opened.request",
+                    "count": 2
+                  }
+                ]
+              }
             }
           ],
           "sets_flags": [
@@ -480,7 +559,15 @@
             {
               "id": "SQ02.O3",
               "text_key": "story.sq02.s3.objective",
-              "completion": "Elapsed game-time >= dispatch + 18 hours; read returned agreement with both signatures; display selected hours; confirm posting."
+              "completion": "Elapsed game-time >= dispatch + 18 hours; read returned agreement with both signatures; display selected hours; confirm posting.",
+              "proof": {
+                "all_of": [
+                  {
+                    "kind": "delivery",
+                    "quest": "SQ02"
+                  }
+                ]
+              }
             }
           ],
           "sets_flags": [
@@ -505,7 +592,19 @@
           ],
           "checkpoint": "Persist delivered/read signatures and confirmation.",
           "script_trigger": "confirmation_checks_ready",
-          "confirmation_guard": "all non-confirmation objective conditions satisfied; courier delivered if applicable; selected branch persisted",
+          "confirmation_guard": {
+            "all_of": [
+              {
+                "kind": "flag",
+                "flag": "sq02_stage_2_complete"
+              },
+              {
+                "kind": "delivery",
+                "quest": "SQ02"
+              }
+            ]
+          },
+          "confirmation_guard_note": "all non-confirmation objective conditions satisfied; courier delivered if applicable; selected branch persisted",
           "journal_key": "story.sq02.s3.journal",
           "retry_key": "story.sq02.s3.retry",
           "advance_delivery_key": "story.sq02.advance_delivery",
@@ -632,7 +731,31 @@
             {
               "id": "SQ03.O1",
               "text_key": "story.sq03.s1.objective",
-              "completion": "Read archive term and each of four present duty offers."
+              "completion": "Read archive term and each of four present duty offers.",
+              "proof": {
+                "all_of": [
+                  {
+                    "kind": "event",
+                    "event": "record.opened.archive_term"
+                  },
+                  {
+                    "kind": "event",
+                    "event": "record.opened.duty_offer_1"
+                  },
+                  {
+                    "kind": "event",
+                    "event": "record.opened.duty_offer_2"
+                  },
+                  {
+                    "kind": "event",
+                    "event": "record.opened.duty_offer_3"
+                  },
+                  {
+                    "kind": "event",
+                    "event": "record.opened.duty_offer_4"
+                  }
+                ]
+              }
             }
           ],
           "sets_flags": [
@@ -799,7 +922,23 @@
             {
               "id": "SQ03.O3",
               "text_key": "story.sq03.s3.objective",
-              "completion": "Elapsed game-time >= dispatch + 12 hours; inspect four signatures and apprentice/guardian clauses; operate existing training handle neutral, work release closed, reservoir relief open; verify settled indicator; player confirms own limited duty."
+              "completion": "Elapsed game-time >= dispatch + 12 hours; inspect four signatures and apprentice/guardian clauses; operate existing training handle neutral, work release closed, reservoir relief open; verify settled indicator; player confirms own limited duty.",
+              "proof": {
+                "all_of": [
+                  {
+                    "kind": "delivery",
+                    "quest": "SQ03"
+                  },
+                  {
+                    "kind": "ordered",
+                    "steps": [
+                      "device.handle",
+                      "device.valve",
+                      "device.relief"
+                    ]
+                  }
+                ]
+              }
             }
           ],
           "sets_flags": [
@@ -824,7 +963,27 @@
           ],
           "checkpoint": "Persist each verification; do not grant consent flag until player confirmation.",
           "script_trigger": "confirmation_checks_ready",
-          "confirmation_guard": "all non-confirmation objective conditions satisfied; courier delivered if applicable; selected branch persisted",
+          "confirmation_guard": {
+            "all_of": [
+              {
+                "kind": "flag",
+                "flag": "sq03_stage_2_complete"
+              },
+              {
+                "kind": "delivery",
+                "quest": "SQ03"
+              },
+              {
+                "kind": "ordered",
+                "steps": [
+                  "device.handle",
+                  "device.valve",
+                  "device.relief"
+                ]
+              }
+            ]
+          },
+          "confirmation_guard_note": "all non-confirmation objective conditions satisfied; courier delivered if applicable; selected branch persisted",
           "journal_key": "story.sq03.s3.journal",
           "retry_key": "story.sq03.s3.retry",
           "advance_delivery_key": "story.sq03.advance_delivery",
@@ -952,7 +1111,19 @@
             {
               "id": "SQ04.O1",
               "text_key": "story.sq04.s1.objective",
-              "completion": "Read bell ledger and Miao testimony."
+              "completion": "Read bell ledger and Miao testimony.",
+              "proof": {
+                "all_of": [
+                  {
+                    "kind": "event",
+                    "event": "record.opened.bell_ledger"
+                  },
+                  {
+                    "kind": "event",
+                    "event": "record.opened.miao_testimony"
+                  }
+                ]
+              }
             }
           ],
           "sets_flags": [
@@ -1022,7 +1193,23 @@
             {
               "id": "SQ04.O2",
               "text_key": "story.sq04.s2.objective",
-              "completion": "Place three pre-existing record tabs in their dated order using footbridge mark; choose annotation format."
+              "completion": "Place three pre-existing record tabs in their dated order using footbridge mark; choose annotation format.",
+              "proof": {
+                "all_of": [
+                  {
+                    "kind": "ordered",
+                    "steps": [
+                      "document.tab.earliest",
+                      "document.tab.middle",
+                      "document.tab.latest"
+                    ]
+                  },
+                  {
+                    "kind": "event",
+                    "event": "annotate.mode_set"
+                  }
+                ]
+              }
             }
           ],
           "sets_flags": [
@@ -1091,7 +1278,19 @@
             {
               "id": "SQ04.O3",
               "text_key": "story.sq04.s3.objective",
-              "completion": "Place signed annotation beside both originals; visit training mat to inspect dry-edge sketch; confirmation grants optional training access, never requires equipped Mist Step."
+              "completion": "Place signed annotation beside both originals; visit training mat to inspect dry-edge sketch; confirmation grants optional training access, never requires equipped Mist Step.",
+              "proof": {
+                "all_of": [
+                  {
+                    "kind": "event",
+                    "event": "annotate.filed"
+                  },
+                  {
+                    "kind": "event",
+                    "event": "sketch.inspected"
+                  }
+                ]
+              }
             }
           ],
           "sets_flags": [
@@ -1114,7 +1313,23 @@
           ],
           "checkpoint": "Persist filing and training-sketch inspection; actual optional ability purchase/training remains governed by progression system.",
           "script_trigger": "confirmation_checks_ready",
-          "confirmation_guard": "all non-confirmation objective conditions satisfied; courier delivered if applicable; selected branch persisted",
+          "confirmation_guard": {
+            "all_of": [
+              {
+                "kind": "flag",
+                "flag": "sq04_stage_2_complete"
+              },
+              {
+                "kind": "event",
+                "event": "annotate.filed"
+              },
+              {
+                "kind": "event",
+                "event": "sketch.inspected"
+              }
+            ]
+          },
+          "confirmation_guard_note": "all non-confirmation objective conditions satisfied; courier delivered if applicable; selected branch persisted",
           "journal_key": "story.sq04.s3.journal",
           "retry_key": "story.sq04.s3.retry"
         }
@@ -1221,7 +1436,19 @@
             {
               "id": "SQ05.O1",
               "text_key": "story.sq05.s1.objective",
-              "completion": "Read crate list and loan/return note."
+              "completion": "Read crate list and loan/return note.",
+              "proof": {
+                "all_of": [
+                  {
+                    "kind": "event",
+                    "event": "record.opened.crate_list"
+                  },
+                  {
+                    "kind": "event",
+                    "event": "record.opened.loan_note"
+                  }
+                ]
+              }
             }
           ],
           "sets_flags": [
@@ -1291,7 +1518,19 @@
             {
               "id": "SQ05.O2",
               "text_key": "story.sq05.s2.objective",
-              "completion": "Seat wedge with aligned arrow/plumb marker; release brace latch; choose valid fitting location."
+              "completion": "Seat wedge with aligned arrow/plumb marker; release brace latch; choose valid fitting location.",
+              "proof": {
+                "all_of": [
+                  {
+                    "kind": "ordered",
+                    "steps": [
+                      "device.wedge",
+                      "device.latch",
+                      "device.placement"
+                    ]
+                  }
+                ]
+              }
             }
           ],
           "sets_flags": [
@@ -1360,7 +1599,19 @@
             {
               "id": "SQ05.O3",
               "text_key": "story.sq05.s3.objective",
-              "completion": "Inspect selected installed fitting; file new loan location; inspect balance sketch; confirm."
+              "completion": "Inspect selected installed fitting; file new loan location; inspect balance sketch; confirm.",
+              "proof": {
+                "all_of": [
+                  {
+                    "kind": "event",
+                    "event": "fitting.inspected"
+                  },
+                  {
+                    "kind": "event",
+                    "event": "loan.filed"
+                  }
+                ]
+              }
             }
           ],
           "sets_flags": [
@@ -1383,7 +1634,23 @@
           ],
           "checkpoint": "Persist new-placement inspection and filing.",
           "script_trigger": "confirmation_checks_ready",
-          "confirmation_guard": "all non-confirmation objective conditions satisfied; courier delivered if applicable; selected branch persisted",
+          "confirmation_guard": {
+            "all_of": [
+              {
+                "kind": "flag",
+                "flag": "sq05_stage_2_complete"
+              },
+              {
+                "kind": "event",
+                "event": "fitting.inspected"
+              },
+              {
+                "kind": "event",
+                "event": "loan.filed"
+              }
+            ]
+          },
+          "confirmation_guard_note": "all non-confirmation objective conditions satisfied; courier delivered if applicable; selected branch persisted",
           "journal_key": "story.sq05.s3.journal",
           "retry_key": "story.sq05.s3.retry"
         }
@@ -1490,7 +1757,19 @@
             {
               "id": "SQ06.O1",
               "text_key": "story.sq06.s1.objective",
-              "completion": "Inspect burned/frozen branches and read the complete dated trial card."
+              "completion": "Inspect burned/frozen branches and read the complete dated trial card.",
+              "proof": {
+                "all_of": [
+                  {
+                    "kind": "event",
+                    "event": "inspect.samples"
+                  },
+                  {
+                    "kind": "event",
+                    "event": "record.opened.trial_card"
+                  }
+                ]
+              }
             }
           ],
           "sets_flags": [
@@ -1560,7 +1839,24 @@
             {
               "id": "SQ06.O2",
               "text_key": "story.sq06.s2.objective",
-              "completion": "Operate four manual sequence states with open outlet invariant; choose fitting after successful cooling."
+              "completion": "Operate four manual sequence states with open outlet invariant; choose fitting after successful cooling.",
+              "proof": {
+                "all_of": [
+                  {
+                    "kind": "ordered",
+                    "steps": [
+                      "device.cooling.stage_one",
+                      "device.cooling.stage_two",
+                      "device.cooling.stage_three",
+                      "device.cooling.stage_four"
+                    ]
+                  },
+                  {
+                    "kind": "event",
+                    "event": "fitting.chosen"
+                  }
+                ]
+              }
             }
           ],
           "sets_flags": [
@@ -1629,7 +1925,19 @@
             {
               "id": "SQ06.O3",
               "text_key": "story.sq06.s3.objective",
-              "completion": "Inspect installed fitting; post tested result with scope limitation; confirm."
+              "completion": "Inspect installed fitting; post tested result with scope limitation; confirm.",
+              "proof": {
+                "all_of": [
+                  {
+                    "kind": "event",
+                    "event": "fitting.installed"
+                  },
+                  {
+                    "kind": "event",
+                    "event": "result.posted"
+                  }
+                ]
+              }
             }
           ],
           "sets_flags": [
@@ -1652,7 +1960,23 @@
           ],
           "checkpoint": "Persist fitting installation and record posting.",
           "script_trigger": "confirmation_checks_ready",
-          "confirmation_guard": "all non-confirmation objective conditions satisfied; courier delivered if applicable; selected branch persisted",
+          "confirmation_guard": {
+            "all_of": [
+              {
+                "kind": "flag",
+                "flag": "sq06_stage_2_complete"
+              },
+              {
+                "kind": "event",
+                "event": "fitting.installed"
+              },
+              {
+                "kind": "event",
+                "event": "result.posted"
+              }
+            ]
+          },
+          "confirmation_guard_note": "all non-confirmation objective conditions satisfied; courier delivered if applicable; selected branch persisted",
           "journal_key": "story.sq06.s3.journal",
           "retry_key": "story.sq06.s3.retry"
         }
@@ -1759,7 +2083,20 @@
             {
               "id": "SQ07.O1",
               "text_key": "story.sq07.s1.objective",
-              "completion": "Read three representative renewals and inspect blank consent/handover fields."
+              "completion": "Read three representative renewals and inspect blank consent/handover fields.",
+              "proof": {
+                "all_of": [
+                  {
+                    "kind": "event_count",
+                    "event": "record.opened.renewal",
+                    "count": 3
+                  },
+                  {
+                    "kind": "event",
+                    "event": "consent.inspected"
+                  }
+                ]
+              }
             }
           ],
           "sets_flags": [
@@ -1829,7 +2166,25 @@
             {
               "id": "SQ07.O2",
               "text_key": "story.sq07.s2.objective",
-              "completion": "Order dated documents and mark blank consent boxes; choose access format without discarding originals."
+              "completion": "Order dated documents and mark blank consent boxes; choose access format without discarding originals.",
+              "proof": {
+                "all_of": [
+                  {
+                    "kind": "ordered",
+                    "steps": [
+                      "document.order.dated_set"
+                    ]
+                  },
+                  {
+                    "kind": "event",
+                    "event": "consent.marked"
+                  },
+                  {
+                    "kind": "event",
+                    "event": "access.format_chosen"
+                  }
+                ]
+              }
             }
           ],
           "sets_flags": [
@@ -1898,7 +2253,16 @@
             {
               "id": "SQ07.O3",
               "text_key": "story.sq07.s3.objective",
-              "completion": "Verify term, dates, consent distinction, four archive sources, protected addresses, and append-only correction notice; confirm."
+              "completion": "Verify term, dates, consent distinction, four archive sources, protected addresses, and append-only correction notice; confirm.",
+              "proof": {
+                "all_of": [
+                  {
+                    "kind": "event_count",
+                    "event": "checklist.verified",
+                    "count": 6
+                  }
+                ]
+              }
             }
           ],
           "sets_flags": [
@@ -1921,7 +2285,20 @@
           ],
           "checkpoint": "Persist notice checklist; confirmation makes access notice visible on existing shelf.",
           "script_trigger": "confirmation_checks_ready",
-          "confirmation_guard": "all non-confirmation objective conditions satisfied; courier delivered if applicable; selected branch persisted",
+          "confirmation_guard": {
+            "all_of": [
+              {
+                "kind": "flag",
+                "flag": "sq07_stage_2_complete"
+              },
+              {
+                "kind": "event_count",
+                "event": "checklist.verified",
+                "count": 6
+              }
+            ]
+          },
+          "confirmation_guard_note": "all non-confirmation objective conditions satisfied; courier delivered if applicable; selected branch persisted",
           "journal_key": "story.sq07.s3.journal",
           "retry_key": "story.sq07.s3.retry"
         }
@@ -2027,7 +2404,19 @@
             {
               "id": "SQ08.O1",
               "text_key": "story.sq08.s1.objective",
-              "completion": "Read recipe and inspect waiting bowl."
+              "completion": "Read recipe and inspect waiting bowl.",
+              "proof": {
+                "all_of": [
+                  {
+                    "kind": "event",
+                    "event": "record.opened.recipe"
+                  },
+                  {
+                    "kind": "event",
+                    "event": "inspect.bowl"
+                  }
+                ]
+              }
             }
           ],
           "sets_flags": [
@@ -2097,7 +2486,23 @@
             {
               "id": "SQ08.O2",
               "text_key": "story.sq08.s2.objective",
-              "completion": "Inspect safe-state shelf rail and dated margin; choose copy location."
+              "completion": "Inspect safe-state shelf rail and dated margin; choose copy location.",
+              "proof": {
+                "all_of": [
+                  {
+                    "kind": "event",
+                    "event": "inspect.rail"
+                  },
+                  {
+                    "kind": "event",
+                    "event": "inspect.margin"
+                  },
+                  {
+                    "kind": "event",
+                    "event": "copy.placed"
+                  }
+                ]
+              }
             }
           ],
           "sets_flags": [
@@ -2166,7 +2571,19 @@
             {
               "id": "SQ08.O3",
               "text_key": "story.sq08.s3.objective",
-              "completion": "Place selected copy; return original; inspect prepared table; explicit meal confirmation."
+              "completion": "Place selected copy; return original; inspect prepared table; explicit meal confirmation.",
+              "proof": {
+                "all_of": [
+                  {
+                    "kind": "ordered",
+                    "steps": [
+                      "copy.placed_check",
+                      "original.returned",
+                      "table.prepared"
+                    ]
+                  }
+                ]
+              }
             }
           ],
           "sets_flags": [
@@ -2189,7 +2606,23 @@
           ],
           "checkpoint": "Persist copy placement and original return; meal completion only on confirm.",
           "script_trigger": "confirmation_checks_ready",
-          "confirmation_guard": "all non-confirmation objective conditions satisfied; courier delivered if applicable; selected branch persisted",
+          "confirmation_guard": {
+            "all_of": [
+              {
+                "kind": "flag",
+                "flag": "sq08_stage_2_complete"
+              },
+              {
+                "kind": "ordered",
+                "steps": [
+                  "copy.placed_check",
+                  "original.returned",
+                  "table.prepared"
+                ]
+              }
+            ]
+          },
+          "confirmation_guard_note": "all non-confirmation objective conditions satisfied; courier delivered if applicable; selected branch persisted",
           "journal_key": "story.sq08.s3.journal",
           "retry_key": "story.sq08.s3.retry"
         }

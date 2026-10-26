@@ -49,17 +49,14 @@ foreach ($dir in $ubtDirs) {
 
 $build = Join-Path $engine 'Engine/Build/BatchFiles/Build.bat'
 
-# Engine binaries/tools can be restored from another run; its project DLLs
-# cannot be used as this checkout's cooker or regression-test module. Always
-# let UBT bring the current Editor target up to date before testing/cooking.
-Write-Host "=========================================================="
-Write-Host "   Compiling current QinglanAscensionEditor (Win64)       "
-Write-Host "=========================================================="
-& $build QinglanAscensionEditor Win64 Development "-Project=$project" -WaitMutex -NoUBA -MaxParallelActions=3 2>&1 |
-    Tee-Object (Join-Path $reports 'editor-build.log')
-if ($LASTEXITCODE) { throw "Win64 editor build failed ($LASTEXITCODE)." }
-
 if (-not $UseCachedEditorTools) {
+    Write-Host "=========================================================="
+    Write-Host "   Compiling QinglanAscensionEditor (Win64 Development)   "
+    Write-Host "=========================================================="
+    & $build QinglanAscensionEditor Win64 Development "-Project=$project" -WaitMutex -NoUBA -MaxParallelActions=3 2>&1 |
+        Tee-Object (Join-Path $reports 'editor-build.log')
+    if ($LASTEXITCODE) { throw "Win64 editor build failed ($LASTEXITCODE)." }
+
     Write-Host "`n=========================================================="
     Write-Host "   Compiling Tools: ShaderCompileWorker (Win64 Development)"
     Write-Host "=========================================================="
@@ -74,12 +71,12 @@ if (-not $UseCachedEditorTools) {
         Tee-Object -Append (Join-Path $reports 'editor-build.log')
     if ($LASTEXITCODE) { throw "UnrealPak build failed ($LASTEXITCODE)." }
 } else {
-    foreach ($tool in @('ShaderCompileWorker.exe', 'UnrealPak.exe')) {
+    foreach ($tool in @('ShaderCompileWorker.exe', 'UnrealPak.exe', 'UnrealEditor-Cmd.exe')) {
         if (-not (Test-Path (Join-Path $engine "Engine/Binaries/Win64/$tool"))) {
             throw "Restored editor tools are missing $tool."
         }
     }
-    Write-Host 'Reusing cached engine tools; current project Editor modules were rebuilt above.'
+    Write-Host 'Reusing cached engine tools and restored Editor binaries; skipping redundant editor rebuild.'
 }
 
 $editor = Join-Path $engine 'Engine/Binaries/Win64/UnrealEditor-Cmd.exe'

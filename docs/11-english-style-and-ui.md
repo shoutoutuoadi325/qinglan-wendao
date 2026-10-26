@@ -57,4 +57,4 @@ Validate key parity, placeholder parity, non-empty values, glossary consistency,
 
 ## 8. Complete narrative copy
 
-The story resources now contain the complete authored dialogue, branches, documents, objectives, retries, and three endings, rather than only example prose. Use [the story index](story/README.md) and generated bilingual reading editions for review. Import remains future implementation work. Keep a single source of exact text in the locale JSON files; deterministic reading exports prevent drift.
+The story resources now contain the complete authored dialogue, branches, documents, objectives, retries, and three endings, rather than only example prose. Use [the story index](story/README.md) and generated bilingual reading editions for review. The locale JSON files are imported into `ST_Game`/`DT_Localization` by `UQinglanDataImportCommandlet`; keep a single source of exact text in the JSON files so deterministic reading exports prevent drift.

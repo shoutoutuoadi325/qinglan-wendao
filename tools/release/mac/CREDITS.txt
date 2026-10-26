@@ -1,0 +1,18 @@
+Qinglan: Path of Ascension
+Copyright © 2026 Qinglan Community. All rights reserved.
+
+Qinglan: Path of Ascension uses Unreal® Engine. Unreal® is a trademark or
+registered trademark of Epic Games, Inc. in the United States of America and
+elsewhere.
+Unreal® Engine, Copyright 1998 – 2026, Epic Games, Inc. All rights reserved.
+
+Third-party notices
+-------------------
+Portions of this software are copyright © The FreeType Project
+(http://www.freetype.org). All rights reserved.
+
+Additional notices shipped with the engine payload are in
+Qinglan - Path of Ascension.app/Contents/UE/NOTICES.txt.
+
+This alpha build is distributed under the terms in EULA.txt. The project
+repository is https://github.com/shoutoutuoadi325/qinglan-wendao.

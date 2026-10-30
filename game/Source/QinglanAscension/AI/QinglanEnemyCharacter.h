@@ -22,7 +22,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FQinglanEmberVolleyTelegraph, AQi
  * death event drives the encounter director's completion check.
  */
 UCLASS()
-class AQinglanEnemyCharacter : public ACharacter
+class QINGLANASCENSION_API AQinglanEnemyCharacter : public ACharacter
 {
 	GENERATED_BODY()
 
@@ -108,8 +108,10 @@ protected:
 	float StateTimer = 0.f;
 	float TelegraphTimer = 0.f;
 	bool bAttackCommitted = false;
-	/** True while the committed shape resolves by proximity (lunge/charge); only those use the active-window range hit (AUD-29). */
+	/** True while the committed shape resolves by swept capsule contact (lunge/charge). */
 	bool bProximityActivePhase = false;
+	/** Last actual capsule position sampled by the current lunge/charge. */
+	FVector PreviousProximityLocation = FVector::ZeroVector;
 	/** Death guard: OnDied/cleanup fire exactly once per life (AUD-28). */
 	bool bDead = false;
 

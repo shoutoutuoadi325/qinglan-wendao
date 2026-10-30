@@ -66,6 +66,16 @@ namespace QinglanGraphics
 		return Settings;
 	}
 
+	FQinglanGraphicsSettings MakePresetSettings(EQinglanQualityPreset Preset, const FQinglanGraphicsSettings& Current)
+	{
+		FQinglanGraphicsSettings Settings = MakePresetSettings(Preset);
+		Settings.bLowFlashMode = Current.bLowFlashMode;
+		Settings.FrameRateLimit = Current.FrameRateLimit;
+		Settings.bVSync = Current.bVSync;
+		Settings.bDynamicResolution = Current.bDynamicResolution;
+		return Sanitize(Settings);
+	}
+
 	FQinglanGraphicsSettings Sanitize(const FQinglanGraphicsSettings& Settings)
 	{
 		FQinglanGraphicsSettings Out = Settings;
@@ -123,3 +133,33 @@ namespace QinglanGraphics
 		return TEXT("settings.feature.unavailable.reason");
 	}
 }
+
+#if WITH_DEV_AUTOMATION_TESTS
+#include "Misc/AutomationTest.h"
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanPresetPreservesPlayerPreferences,
+	"Qinglan.Graphics.PresetPreservesAccessibilityAndFramePacing",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FQinglanPresetPreservesPlayerPreferences::RunTest(const FString& Parameters)
+{
+	FQinglanGraphicsSettings Current;
+	Current.bLowFlashMode = true;
+	Current.FrameRateLimit = 30;
+	Current.bVSync = true;
+	Current.bDynamicResolution = false;
+	for (const EQinglanQualityPreset Preset : { EQinglanQualityPreset::Low, EQinglanQualityPreset::Balanced,
+		EQinglanQualityPreset::High, EQinglanQualityPreset::Ultra })
+	{
+		const FQinglanGraphicsSettings Updated = QinglanGraphics::MakePresetSettings(Preset, Current);
+		TestTrue(TEXT("Quality change keeps low-flash accessibility enabled"), Updated.bLowFlashMode);
+		TestEqual(TEXT("Quality change keeps the selected frame cap"), Updated.FrameRateLimit, 30);
+		TestTrue(TEXT("Quality change keeps VSync"), Updated.bVSync);
+		TestFalse(TEXT("Quality change keeps dynamic-resolution preference"), Updated.bDynamicResolution);
+		TestEqual(TEXT("The requested quality preset still applies"), Updated.Preset, Preset);
+		TestEqual(TEXT("The preset still updates shadow quality"), Updated.ShadowQuality,
+			QinglanGraphics::MakePresetSettings(Preset).ShadowQuality);
+	}
+	return true;
+}
+#endif

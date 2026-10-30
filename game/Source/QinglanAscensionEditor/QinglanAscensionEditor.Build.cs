@@ -38,6 +38,8 @@ public class QinglanAscensionEditor : ModuleRules
 			"Kismet",
 			"EnhancedInput", // UInputAction/UInputMappingContext bootstrap assets
 			"InputCore", // EKeys bindings authored by the content bootstrap
+			"GeometryCore", // Verify the actual safe-sector warning mesh.
+			"GeometryFramework",
 			"AudioEditor", // USoundFactory for the audio bootstrap commandlet
 			"Niagara", // UNiagaraSystem/UNiagaraEmitter assets authored by the content bootstrap
 			"NiagaraCore",

@@ -40,6 +40,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanTrainingStandingAnimatedSwordHits,
 
 bool FQinglanTrainingStandingAnimatedSwordHits::RunTest(const FString& Parameters)
 {
+	const uint64 SavedFrameCounter = GFrameCounter;
 	const FString Id = FGuid::NewGuid().ToString(EGuidFormats::Digits);
 	const FString Name = TEXT("L_Hub_StandingTraining_") + Id;
 	const FString SaveDirectory = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("SaveGames"), TEXT("_StandingTraining_") + Id);
@@ -49,6 +50,7 @@ bool FQinglanTrainingStandingAnimatedSwordHits::RunTest(const FString& Parameter
 	ON_SCOPE_EXIT
 	{
 		if (World) { World->EndPlay(EEndPlayReason::Quit); }
+		GFrameCounter = SavedFrameCounter;
 		if (Instance) { Instance->Shutdown(); }
 		if (World)
 		{
@@ -118,13 +120,11 @@ bool FQinglanTrainingStandingAnimatedSwordHits::RunTest(const FString& Parameter
 	{
 		for (int32 Frame = 0; Frame < Frames; ++Frame)
 		{
-			// This synchronous fixture supplies engine frames itself. Merely
-			// advancing UWorld time leaves GFrameCounter unchanged, causing
-			// USkeletalMeshComponent::ShouldTickPose to reject every later pose
-			// as a second update in the same frame. Keep it monotonic, as the
-			// real engine loop does, rather than manually driving animation.
-			++GFrameCounter;
 			World->Tick(LEVELTICK_All, 1.f / 60.f);
+			// Match FTestWorldWrapper so both tick scheduling and skeletal
+			// poses receive a new engine frame on the next world step. The
+			// fixture restores the outer frame counter after EndPlay.
+			++GFrameCounter;
 		}
 	};
 	TickWorld(30); // settle normal standing and the production idle pose

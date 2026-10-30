@@ -5,8 +5,8 @@
 // docs/05 section 5 (AI arbitration, pooled projectiles/portals),
 // docs/dev/implementation-blueprint.md section 1.3.
 //
-// FIXME-CONTRACT: the frozen scaffold header has no members for the pending
-// wave queue, the enemy pool, or the seeded encounter stream, and exposes no
+// FIXME-CONTRACT: the frozen scaffold header has no members for the
+// enemy pool or the seeded encounter stream, and exposes no
 // per-enemy release for ReleaseAttackSlots(). That state therefore lives in
 // a TU-local registry keyed by weak director pointers (pruned every tick);
 // merge it into the class when the headers unfreeze. The scaffold also
@@ -59,8 +59,8 @@ namespace
 	/** Per-director state that cannot live in the frozen scaffold header. */
 	struct FQinglanDirectorExtra
 	{
-		TArray<TObjectPtr<UQinglanEnemyDataAsset>> WaveQueue;
 		TArray<TWeakObjectPtr<AQinglanEnemyCharacter>> EnemyPool;
+		TArray<TWeakObjectPtr<AQinglanEnemyCharacter>> RetiredEnemies;
 		FRandomStream EncounterStream;
 		/** Portal ring band around the director; expedition default above. */
 		float RingMinCm = PortalSpawnRingMinCm;
@@ -224,6 +224,22 @@ void AQinglanEncounterDirector::BeginEncounter(const TArray<UQinglanEnemyDataAss
 		// (defensive; realm flow should complete rooms before re-entering).
 		UE_LOG(LogQinglanAI, Warning, TEXT("BeginEncounter restarted an active encounter"));
 		ReleaseAttackSlots();
+		for (const TWeakObjectPtr<AQinglanEnemyCharacter>& Ref : LivingEnemies)
+		{
+			if (AQinglanEnemyCharacter* Enemy = Ref.Get())
+			{
+				Enemy->ResetForPool();
+				Extra.EnemyPool.AddUnique(Enemy);
+			}
+		}
+		for (const TWeakObjectPtr<AQinglanEnemyCharacter>& Ref : PendingSpawns)
+		{
+			if (AQinglanEnemyCharacter* Enemy = Ref.Get())
+			{
+				Enemy->ResetForPool();
+				Extra.EnemyPool.AddUnique(Enemy);
+			}
+		}
 	}
 
 	LivingEnemies.Reset();
@@ -241,12 +257,12 @@ void AQinglanEncounterDirector::BeginEncounter(const TArray<UQinglanEnemyDataAss
 		Audio->SetMusicState(bIsBossRoom ? EQinglanMusicState::Boss : EQinglanMusicState::Combat);
 	}
 
-	Extra.WaveQueue.Reset();
+	WaveQueue.Reset();
 	for (UQinglanEnemyDataAsset* Data : Wave)
 	{
 		if (Data)
 		{
-			Extra.WaveQueue.Add(Data);
+			WaveQueue.Add(Data);
 		}
 	}
 
@@ -256,7 +272,7 @@ void AQinglanEncounterDirector::BeginEncounter(const TArray<UQinglanEnemyDataAss
 	Extra.EncounterStream.Initialize(static_cast<int32>(RoomSeed));
 
 	UE_LOG(LogQinglanAI, Log, TEXT("Encounter begin: room %d, boss room %d, wave size %d"),
-		RoomIndex, static_cast<int32>(bIsBossRoom), Extra.WaveQueue.Num());
+		RoomIndex, static_cast<int32>(bIsBossRoom), WaveQueue.Num());
 
 	SpawnWave();
 }
@@ -272,11 +288,29 @@ void AQinglanEncounterDirector::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
+	FQinglanDirectorExtra& Extra = ExtraFor(this);
+	// Death removes an enemy from encounter completion immediately, but its
+	// body still needs collection after the delay, including after the last
+	// kill made the director inactive or the player entered another room.
+	for (int32 Index = Extra.RetiredEnemies.Num() - 1; Index >= 0; --Index)
+	{
+		AQinglanEnemyCharacter* Enemy = Extra.RetiredEnemies[Index].Get();
+		AQinglanAIController* Controller = ControllerOf(Enemy);
+		if (!Enemy || !Controller)
+		{
+			Extra.RetiredEnemies.RemoveAtSwap(Index);
+		}
+		else if (Controller->GetDeathAgeSeconds() >= PoolReturnDelaySeconds)
+		{
+			Enemy->ResetForPool();
+			Extra.EnemyPool.AddUnique(Enemy);
+			Extra.RetiredEnemies.RemoveAtSwap(Index);
+		}
+	}
 	if (!bActive)
 	{
 		return;
 	}
-	FQinglanDirectorExtra& Extra = ExtraFor(this);
 
 	// Paused-game-time semantics: accumulate DeltaTime, never wall clock.
 	SpawnTimer += DeltaTime;
@@ -285,19 +319,20 @@ void AQinglanEncounterDirector::Tick(float DeltaTime)
 	if (SpawnTimer >= PortalStaggerIntervalSeconds)
 	{
 		SpawnTimer = 0.f;
-		if (!Extra.WaveQueue.IsEmpty())
+		if (!WaveQueue.IsEmpty())
 		{
-			UQinglanEnemyDataAsset* Next = Extra.WaveQueue[0].Get();
+			UQinglanEnemyDataAsset* Next = WaveQueue[0].Get();
 			if (!Next)
 			{
-				Extra.WaveQueue.RemoveAt(0);
+				WaveQueue.RemoveAt(0);
 			}
 			else if (CanSpawnWith(Next, LivingEnemies, PendingSpawns, bBossRoom))
 			{
-				Extra.WaveQueue.RemoveAt(0);
 				SpawnThroughPortal(Next, PickPortalLocation(Extra.EncounterStream,
 					GetActorLocation() + (Extra.bConfineToRealmRoom ? FVector(0.f, 0.f, QinglanRoomLayout::PortalHeightCm) : FVector::ZeroVector),
 					GetPlayer(this), Extra.RingMinCm, Extra.RingMaxCm, Extra.bConfineToRealmRoom));
+				// Keep the queue reference until the new pawn owns its archetype.
+				WaveQueue.RemoveAt(0);
 			}
 		}
 	}
@@ -344,7 +379,7 @@ void AQinglanEncounterDirector::Tick(float DeltaTime)
 	// 5) Completion: simultaneous last-kill opens door + reward exactly once,
 	// and never while portals or queue entries remain (no deadlock)
 	// (docs/dev blueprint section 1.3 room contract).
-	if (!bCompleted && GetLivingEnemyCount() == 0 && PendingSpawns.Num() == 0 && Extra.WaveQueue.IsEmpty())
+	if (!bCompleted && GetLivingEnemyCount() == 0 && PendingSpawns.Num() == 0 && WaveQueue.IsEmpty())
 	{
 		bCompleted = true;
 		bActive = false;
@@ -352,7 +387,7 @@ void AQinglanEncounterDirector::Tick(float DeltaTime)
 		OnEncounterCompleted.Broadcast();
 		UE_LOG(LogQinglanAI, Log, TEXT("Encounter completed in room %d (living=%d livingAlive=%d pending=%d queued=%d bossRoom=%d)"),
 			CurrentRoomIndex, LivingEnemies.Num(), GetLivingEnemyCount(), PendingSpawns.Num(),
-			Extra.WaveQueue.Num(), bBossRoom ? 1 : 0);
+			WaveQueue.Num(), bBossRoom ? 1 : 0);
 
 		// Back to the exploration loop after a cleared room (docs/04 audio pass).
 		if (UQinglanAudioSubsystem* Audio = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQinglanAudioSubsystem>() : nullptr)
@@ -395,6 +430,7 @@ void AQinglanEncounterDirector::NotifyEnemyDied(AQinglanEnemyCharacter* Enemy)
 	{
 		return;
 	}
+	ExtraFor(this).RetiredEnemies.AddUnique(Enemy);
 
 	// Release this enemy's slots immediately (budget release on death);
 	// completion itself is centralized in Tick so simultaneous last-kills

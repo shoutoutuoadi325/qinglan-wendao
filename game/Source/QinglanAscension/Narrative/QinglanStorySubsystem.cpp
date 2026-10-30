@@ -479,41 +479,44 @@ namespace
 			return;
 		}
 
-		if (!bRevisit)
 		{
-			// Scene transaction: flags + objectives + completion commit together.
-			ApplyFlags(Session, Scene->SetsFlags);
-			for (const FQinglanRegistryObjective& Objective : Scene->Objectives)
+			TGuardValue<int32> DeferredSaveGuard(Session.DeferredSaveDepth, Session.DeferredSaveDepth + 1);
+			if (!bRevisit)
 			{
-				CompleteObjective(Story, Session, SceneId, Objective);
-			}
-		}
-
-		CompletedSet.Add(SceneId);
-		if (bSide)
-		{
-			if (UGameInstance* GameInstance = Story->GetGameInstance())
-			{
-				if (UQinglanProfileSubsystem* Profile = GameInstance->GetSubsystem<UQinglanProfileSubsystem>())
+				// Scene transaction: flags + objectives + completion commit together.
+				ApplyFlags(Session, Scene->SetsFlags);
+				for (const FQinglanRegistryObjective& Objective : Scene->Objectives)
 				{
-					Profile->MarkSideQuestStageComplete(SceneId);
+					CompleteObjective(Story, Session, SceneId, Objective);
 				}
 			}
-			// Quest-completion rewards ride the same one-time transaction: the
-			// completion flags were just applied by this scene's SetsFlags (or by
-			// the atomic effective commit before it called in), so a now-complete
-			// quest grants its technique access exactly once and replays of any
-			// stage stay no-ops (crash-after-commit never re-awards; spec section 3).
-			if (const FQinglanRegistrySideQuest* Quest = Registry->FindQuest(QuestId))
-			{
-				GrantQuestRewardTechniques(Story, Session, *Quest);
-			}
-		}
 
-		const bool bWasPlaying = Session.bScenePlaying && Session.CurrentSceneId == SceneId;
-		if (bWasPlaying)
-		{
-			StopPlayback(Session);
+			CompletedSet.Add(SceneId);
+			if (bSide)
+			{
+				if (UGameInstance* GameInstance = Story->GetGameInstance())
+				{
+					if (UQinglanProfileSubsystem* Profile = GameInstance->GetSubsystem<UQinglanProfileSubsystem>())
+					{
+						Profile->MarkSideQuestStageComplete(SceneId);
+					}
+				}
+				// Quest-completion rewards ride the same one-time transaction: the
+				// completion flags were just applied by this scene's SetsFlags (or by
+				// the atomic effective commit before it called in), so a now-complete
+				// quest grants its technique access exactly once and replays of any
+				// stage stay no-ops (crash-after-commit never re-awards; spec section 3).
+				if (const FQinglanRegistrySideQuest* Quest = Registry->FindQuest(QuestId))
+				{
+					GrantQuestRewardTechniques(Story, Session, *Quest);
+				}
+			}
+
+			const bool bWasPlaying = Session.bScenePlaying && Session.CurrentSceneId == SceneId;
+			if (bWasPlaying)
+			{
+				StopPlayback(Session);
+			}
 		}
 		QinglanStoryRuntime::SaveStoryBoundary(Story);
 		Story->OnSceneCompleted.Broadcast(SceneId);
@@ -1102,7 +1105,18 @@ bool UQinglanStorySubsystem::SelectChoice(FName ChoiceId)
 	{
 		if (Sibling.ChoiceId != Choice->ChoiceId && Sibling.PresentationGroup == Choice->PresentationGroup)
 		{
-			Session.ChoiceDecisions.Remove(QinglanStoryIdentity::ChoiceKey(Scene->SceneId, Sibling.ChoiceId));
+			const bool bReplaced = Session.ChoiceDecisions.Remove(
+				QinglanStoryIdentity::ChoiceKey(Scene->SceneId, Sibling.ChoiceId)) > 0;
+			if (bReplaced && !ChoiceFlagsDeferredToAtomicOp(Sibling.Action))
+			{
+				// An interrupted scene restarts after loading. Replacing its
+				// saved answer must replace the branch flags as well as the
+				// journal entry, or both contradictory responses stay active.
+				for (const FName Flag : Sibling.SetsFlags)
+				{
+					if (!Choice->SetsFlags.Contains(Flag)) { Session.Flags.Remove(Flag); }
+				}
+			}
 		}
 	}
 
@@ -1682,6 +1696,7 @@ namespace QinglanStoryRuntime
 	bool SaveStoryBoundary(UQinglanStorySubsystem* Story)
 	{
 		if (Story == nullptr) { return false; }
+		if (IsStorySaveDeferred(Story)) { return true; }
 		UGameInstance* GameInstance = Story->GetGameInstance();
 		UQinglanSaveSubsystem* Save = GameInstance ? GameInstance->GetSubsystem<UQinglanSaveSubsystem>() : nullptr;
 		if (Save == nullptr || !Save->IsProfileSessionActive()) { return true; }
@@ -1695,6 +1710,11 @@ namespace QinglanStoryRuntime
 			return false;
 		}
 		return true;
+	}
+	bool IsStorySaveDeferred(const UQinglanStorySubsystem* Story)
+	{
+		const FQinglanStorySession* Session = FindStorySession(Story);
+		return Session && Session->DeferredSaveDepth > 0;
 	}
 	FName MakeActionIdempotencyKey(FName SceneId, FName ActionName)
 	{
@@ -2131,6 +2151,13 @@ namespace QinglanStoryRuntime
 		// coherent exchange (spec section 3.8); committed flags and scenes are
 		// never rolled back by replaying text.
 		StopPlayback(Session);
+		Session.DeferredSceneId = NAME_None;
+		Session.PendingConfirmSceneId = NAME_None;
+		Session.PendingConfirmFlags.Reset();
+		Session.CurrentLocation = NAME_None;
+		Session.BarkLastWorldSeconds.Reset();
+		Session.BarkPlaysThisVisit.Reset();
+		Session.BarkRotationCursor = 0;
 		Session.CompletedMainScenes.Reset();
 		Session.CompletedSideStages.Reset();
 		for (const FName SceneId : In.CompletedScenes)
@@ -2223,6 +2250,29 @@ namespace QinglanStoryRuntime
 			}
 		}
 		Session.PreviewedEndings.Reset();
+		// Older writes could commit a quest's final stage before its technique
+		// unlock. Completion is durable proof: restore any missing authored reward
+		// so the scene's idempotent early return cannot strand that technique.
+		UGameInstance* Instance = Story ? Story->GetGameInstance() : nullptr;
+		UQinglanProfileSubsystem* Profile = Instance ? Instance->GetSubsystem<UQinglanProfileSubsystem>() : nullptr;
+		const UQinglanStoryRegistry* Registry = LoadStoryRegistryOnce();
+		if (Profile && Registry)
+		{
+			for (const FQinglanRegistrySideQuest& Quest : Registry->SideQuests)
+			{
+				bool bAllStagesComplete = !Quest.Stages.IsEmpty();
+				for (const FQinglanRegistryScene& Stage : Quest.Stages)
+				{
+					bAllStagesComplete &= Session.CompletedSideStages.Contains(Stage.SceneId);
+				}
+				const bool bMissingReward = Quest.RewardTechniqueIds.ContainsByPredicate(
+					[Profile](FName TechniqueId) { return !TechniqueId.IsNone() && !Profile->IsTechniqueUnlocked(TechniqueId); });
+				if (bAllStagesComplete && bMissingReward && IsQuestComplete(Session, Quest))
+				{
+					GrantQuestRewardTechniques(Story, Session, Quest);
+				}
+			}
+		}
 	}
 
 	/** Occurrences of one event in the ordered proof history (event_count). */

@@ -186,12 +186,42 @@ done
         self.assertEqual(manifest["steps"][-1]["exit_code"], 7)
         self.assertEqual(len(manifest["steps"]), 2)
 
+    def test_fresh_mac_build_resolves_editor_after_app_creation(self):
+        built_editor = (Path(self.args.engine) /
+                        "Engine/Binaries/Mac/UnrealEditor.app/Contents/MacOS/UnrealEditor")
+        self.assertFalse(built_editor.exists())
+        self.args.editor = None
+        with (self.repo / "tools/build/build-game.sh").open("a") as wrapper:
+            wrapper.write('''
+mkdir -p "$QINGLAN_ENGINE_ROOT/Engine/Binaries/Mac/UnrealEditor.app/Contents/MacOS"
+cp "$QINGLAN_ENGINE_ROOT/fake-editor" "$QINGLAN_ENGINE_ROOT/Engine/Binaries/Mac/UnrealEditor.app/Contents/MacOS/UnrealEditor"
+''')
+        rc, manifest = self.run_stub()
+        self.assertEqual(rc, 0)
+        self.assertTrue(built_editor.exists())
+        self.assertEqual([step["editor"] for step in manifest["steps"] if "editor" in step],
+                         [str(built_editor.resolve())] * 3)
+
     def test_editor_exit_zero_without_report_cannot_pass(self):
         rc, manifest = self.run_stub(QINGLAN_STUB_MODE="no-report")
         self.assertEqual(rc, 1)
         self.assertEqual(manifest["steps"][-1]["name"], "03-suite")
         self.assertEqual(manifest["steps"][-1]["exit_code"], 0)
         self.assertEqual(manifest["steps"][-1]["status"], "failed")
+
+    def test_missing_editor_or_invalid_override_cannot_pass(self):
+        for override in (None, str(self.repo / "missing-editor")):
+            with self.subTest(override=override):
+                if override:
+                    built_editor = (Path(self.args.engine) /
+                                    "Engine/Binaries/Mac/UnrealEditor.app/Contents/MacOS/UnrealEditor")
+                    built_editor.parent.mkdir(parents=True)
+                    shutil.copy(Path(self.args.engine) / "fake-editor", built_editor)
+                self.args.editor = override
+                rc, manifest = self.run_stub()
+                self.assertEqual(rc, 1)
+                self.assertIn("Built editor executable is unavailable", manifest["error"])
+                self.assertEqual(len(manifest["steps"]), 2)
 
     def test_campaign_success_state_with_skip_cannot_reach_package(self):
         rc, manifest = self.run_stub(QINGLAN_STUB_MODE="campaign-skip")

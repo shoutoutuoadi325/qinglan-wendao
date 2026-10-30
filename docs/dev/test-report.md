@@ -1,5 +1,55 @@
 # Test Report — Qinglan: Path of Ascension
 
+## Current gameplay repair verification (2026-10-30)
+
+The repository-wide [gameplay bug audit](gameplay-bug-audit-2026-10-29.md)
+implements 65 related defect groups and adds 63 native regressions. The latest
+run is `.local/acceptance/20261030T023816.180170Z/`, using the pinned UE 5.8.3
+engine on the MacBook Pro M4 Pro / 48 GB host. The October 21 package and
+rendered evidence below describe the older working tree.
+
+| Step | Current result |
+| --- | --- |
+| Editor build | passed |
+| Content regeneration | all 6 commandlets passed |
+| Regular suite | 163/163 named registrations; 0 failed, 0 not run, 0 in process |
+| Main campaign, separately opted in | 30/30 scenes; 0 blocked |
+| Side campaign, separately opted in | 24/24 stages; 0 blocked |
+| Mac arm64 Shipping package | build/cook/stage/archive passed; client and cooked-container hashes recorded |
+| Rebuilt Metal UI | English/Chinese, 1280×720 and 853×554; HUD overlap and Chinese button wrapping repaired |
+| Exact archived Shipping client | renders repaired 1280×720 trial warnings at Low/High with low-flash and High with low-flash disabled; exits normally |
+| Rebuilt Metal safe sector | before/after confirms visible green angular sector over danger fill; camera-facing winding and geometric membership pass native regression |
+| Repository validation | passed; 299 main locale keys and 768 story keys per locale |
+| Host tooling tests | 58 passed, 3 skipped of 61 discovered |
+
+The regular suite reports 128 Success and 35 Success with Warnings; its two
+heavy campaign registrations record their expected opt-outs and then execute
+in separate processes. Native warnings include headless presentation/viewport
+limits, fixture shutdown limitations and invalid-input/save rejection cases.
+No test registrations or original behavior assertions were removed to obtain
+the passing result. Initial native fixture failures concerned LocalPlayer Outer
+ownership and a mandatory-choice fixture's missing safe encounter boundary.
+
+This latest native run includes groups 01–65. The rebuilt safe-sector preview
+confirms the clockwise face repair restores the green escape cue. It invokes
+production VFX methods directly and does not execute a boss attack; real
+geometric membership and lifetime assertions pass the registered fixtures.
+Earlier rebuilt Metal frames
+confirm separated HUD sections and full-width menu text at both viewport sizes,
+with actual keyboard pause/settings navigation and live language changes.
+The latest Shipping trial comparisons confirm a visible danger outline,
+readable terrain inside the translucent fill, an unobscured hero and readable
+skill labels. Current captures are `docs/dev/evidence/rendered/gameplay-audit-2026-10-30-*`.
+Trial captures use the existing QA admission bypass and do not prove normally
+admitted trial completion. The Shipping hub capture remains evidence for the
+preceding `20261030T013435.815037Z` archive; the new trial captures use the
+client recorded in the latest run's `package-artifacts.json`.
+These results do not establish physical-controller, Windows/DX12, audio
+listening, sustained combat/trial performance, or complete interactive-playthrough
+acceptance. The overnight audio timeouts aligned with clamshell sleep; the
+separate [audio recovery review](evidence/audio-sleep-recovery-2026-10-30.md)
+records the backend evidence and the remaining audible-device checks.
+
 ## Native Mac baseline passed (2026-10-21)
 
 `bash tools/build/run-acceptance.sh` completed green on the owner Apple Silicon

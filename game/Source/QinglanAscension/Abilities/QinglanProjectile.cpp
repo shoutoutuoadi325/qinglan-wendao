@@ -38,6 +38,17 @@ namespace
 			: ECC_MAX;
 		return ObjectType == ECC_WorldStatic || ObjectType == ECC_WorldDynamic;
 	}
+
+	bool HasEffectLineOfSight(UWorld* World, AActor* Caster, AActor* Victim, const FVector& Origin)
+	{
+		FCollisionQueryParams Query(SCENE_QUERY_STAT(QinglanEffectLineOfSight), false, Caster);
+		Query.AddIgnoredActor(Victim);
+		FCollisionObjectQueryParams Objects;
+		Objects.AddObjectTypesToQuery(ECC_WorldStatic);
+		Objects.AddObjectTypesToQuery(ECC_WorldDynamic);
+		FHitResult Hit;
+		return !World->LineTraceSingleByObjectType(Hit, Origin, Victim->GetActorLocation(), Objects, Query);
+	}
 }
 
 // --- Pool (per-world free list; never destroys actors mid-flight) ---
@@ -58,6 +69,7 @@ AQinglanProjectile* FQinglanProjectilePool::Acquire(UWorld* World)
 		AQinglanProjectile* Candidate = FreeList.Pop().Get();
 		if (IsValid(Candidate) && !Candidate->IsActive())
 		{
+			Candidate->ResetForPool();
 			return Candidate;
 		}
 	}
@@ -77,7 +89,7 @@ void FQinglanProjectilePool::Release(AQinglanProjectile* Effect)
 	UWorld* World = Effect->GetWorld();
 	if (World)
 	{
-		GPool.FindOrAdd(World).Add(Effect);
+		GPool.FindOrAdd(World).AddUnique(Effect);
 	}
 }
 
@@ -87,11 +99,7 @@ void FQinglanProjectilePool::ResetPoolForWorld(UWorld* World)
 	{
 		return;
 	}
-	if (TArray<TWeakObjectPtr<AQinglanProjectile>>* Entries = GPool.Find(World))
-	{
-		// Pooled actors are RF_Transient; the world destroys them on cleanup.
-		Entries->Empty();
-	}
+	GPool.Remove(World); // the world owns and destroys its transient actors
 }
 
 AQinglanProjectile::AQinglanProjectile()
@@ -192,13 +200,17 @@ void AQinglanProjectile::Tick(float DeltaSeconds)
 	// Paused-game-time semantics: Tick does not run while the game is paused,
 	// so lifetime/countdowns freeze (code-contracts "Timers use paused game
 	// time"; never wall clock).
-	LifetimeRemaining -= DeltaSeconds;
 	if (LifetimeRemaining <= 0.f)
 	{
 		UE_LOG(LogQinglanCombat, Verbose, TEXT("Effect %s expired by safety lifetime"), *TechniqueId.ToString());
 		ReturnToPool();
 		return;
 	}
+	// A hitch can cross the safety deadline while an authored final heal,
+	// pulse, or swept segment is still due. Resolve the remaining active
+	// interval before retiring, without simulating beyond that deadline.
+	const float ActiveDeltaSeconds = FMath::Min(FMath::Max(0.f, DeltaSeconds), LifetimeRemaining);
+	LifetimeRemaining -= ActiveDeltaSeconds;
 	if (EffectOwner.IsValid() == false)
 	{
 		ReturnToPool(); // stale owner: stop cleanly, no gameplay mutation
@@ -208,20 +220,24 @@ void AQinglanProjectile::Tick(float DeltaSeconds)
 	switch (Mode)
 	{
 	case EQinglanEffectMode::LinearProjectile:
-		TickLinear(DeltaSeconds);
+		TickLinear(ActiveDeltaSeconds);
 		break;
 	case EQinglanEffectMode::OrbitPulses:
-		TickOrbitPulses(DeltaSeconds);
+		TickOrbitPulses(ActiveDeltaSeconds);
 		break;
 	case EQinglanEffectMode::HealOverTime:
-		TickHealOverTime(DeltaSeconds);
+		TickHealOverTime(ActiveDeltaSeconds);
 		break;
 	case EQinglanEffectMode::WetTrail:
-		TickWetTrail(DeltaSeconds);
+		TickWetTrail(ActiveDeltaSeconds);
 		break;
 	default:
 		ReturnToPool();
 		break;
+	}
+	if (bActive && LifetimeRemaining <= 0.f)
+	{
+		ReturnToPool();
 	}
 }
 
@@ -334,6 +350,11 @@ void AQinglanProjectile::SetupHealOverTime(const FQinglanCastId& InCastId, FName
 void AQinglanProjectile::SetupWetTrail(const FQinglanCastId& InCastId, FName InTechniqueId,
 	AActor* InOwner, float InTrailRadiusCm, float InWetDurationBonus)
 {
+	if (UActorComponent* Prerequisite = TrailTickPrerequisite.Get())
+	{
+		RemoveTickPrerequisiteComponent(Prerequisite);
+	}
+	TrailTickPrerequisite.Reset();
 	CastId = InCastId;
 	TechniqueId = InTechniqueId;
 	Element = EQinglanElement::Water; // mist_step, docs/02 §7
@@ -347,6 +368,13 @@ void AQinglanProjectile::SetupWetTrail(const FQinglanCastId& InCastId, FName InT
 	SetActorTickEnabled(true);
 	if (InOwner)
 	{
+		// Sample the resolved capsule movement and terminal dodge state in
+		// this frame, before later normal movement can extend the wet trail.
+		if (UQinglanDodgeComponent* Dodge = InOwner->FindComponentByClass<UQinglanDodgeComponent>())
+		{
+			AddTickPrerequisiteComponent(Dodge);
+			TrailTickPrerequisite = Dodge;
+		}
 		SetActorLocation(InOwner->GetActorLocation(), false);
 	}
 }
@@ -389,6 +417,11 @@ void AQinglanProjectile::ResetForPool()
 	VictimHitOrdinals.Empty();
 	ProcessedVictims.Empty();
 
+	if (UActorComponent* Prerequisite = TrailTickPrerequisite.Get())
+	{
+		RemoveTickPrerequisiteComponent(Prerequisite);
+	}
+	TrailTickPrerequisite.Reset();
 	EffectOwner = nullptr;
 
 	Tags.Empty();
@@ -435,7 +468,9 @@ void AQinglanProjectile::ReturnToPool()
 void AQinglanProjectile::TickLinear(float DeltaSeconds)
 {
 	const FVector PreviousLocation = GetActorLocation();
-	const FVector ProposedLocation = PreviousLocation + VelocityCmPerSec * DeltaSeconds;
+	const float TravelDistance = FMath::Min(FMath::Max(0.f, RemainingRangeCm),
+		VelocityCmPerSec.Size() * FMath::Max(0.f, DeltaSeconds));
+	const FVector ProposedLocation = PreviousLocation + VelocityCmPerSec.GetSafeNormal() * TravelDistance;
 	const float StepDistance = FVector::Dist(PreviousLocation, ProposedLocation);
 	if (StepDistance <= 0.f)
 	{
@@ -518,13 +553,13 @@ bool AQinglanProjectile::SweepProjectilePath(const FVector& ProposedLocation)
 				continue;
 			}
 
-			const int32 HitOrdinal = ++VictimHitOrdinals.FindOrAdd(Victim);
-			if (!ApplyHitToVictim(Victim, RawMagnitude * DamageMultiplier, HitOrdinal))
-			{
-				continue;
-			}
+			// A contact consumes this cast's hit even when dodged. Retrying it
+			// with a new ordinal on the next substep defeats dodge immunity.
 			ProcessedVictims.Add(Victim);
-			PublishImpactCue(Hit.ImpactPoint, Victim);
+			if (ApplyHitToVictim(Victim, RawMagnitude * DamageMultiplier, 1))
+			{
+				PublishImpactCue(Hit.ImpactPoint, Victim);
+			}
 
 			if (!bPiercing)
 			{
@@ -592,6 +627,7 @@ void AQinglanProjectile::ExecuteOrbitPulse()
 	});
 
 	int32 TargetsThisPulse = 0;
+	TSet<AActor*> PulseVictims;
 	for (const FOverlapResult& Overlap : Overlaps)
 	{
 		if (TargetsThisPulse >= MaxTargetsPerPulse)
@@ -599,16 +635,18 @@ void AQinglanProjectile::ExecuteOrbitPulse()
 			break; // docs/02 §6: "at most 2 targets/pulse"
 		}
 		AActor* Victim = Overlap.GetActor();
-		if (!Victim || Victim == Owner)
+		if (!Victim || Victim == OwningActor || PulseVictims.Contains(Victim))
 		{
 			continue;
 		}
 		UQinglanCombatComponent* VictimCombat = ResolveVictimCombat(Victim);
-		if (!VictimCombat || !VictimCombat->IsAlive())
+		if (!VictimCombat || !VictimCombat->IsAlive()
+			|| !HasEffectLineOfSight(GetWorld(), OwningActor, Victim, OwningActor->GetActorLocation()))
 		{
 			continue;
 		}
 
+		PulseVictims.Add(Victim); // capsule and mesh overlaps represent one target
 		const int32 HitOrdinal = ++VictimHitOrdinals.FindOrAdd(Victim);
 		if (ApplyHitToVictim(Victim, RawMagnitude * DamageMultiplier, HitOrdinal))
 		{
@@ -654,7 +692,7 @@ void AQinglanProjectile::TickWetTrail(float DeltaSeconds)
 	// stops at blockers, so sampling the real position each tick can never
 	// soak wall-separated or unreachable targets (docs/02 §2 dodge rule).
 	const UQinglanDodgeComponent* Dodge = OwningActor->FindComponentByClass<UQinglanDodgeComponent>();
-	if (!Dodge || !Dodge->IsDodging())
+	if (!Dodge)
 	{
 		ReturnToPool(); // dash finished (or wall-stopped early)
 		return;
@@ -663,14 +701,20 @@ void AQinglanProjectile::TickWetTrail(float DeltaSeconds)
 	FCollisionObjectQueryParams ObjectParams(ECC_Pawn);
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(QinglanWetTrail), false, OwningActor);
 
-	TArray<FOverlapResult> Overlaps;
-	GetWorld()->OverlapMultiByObjectType(Overlaps, Owner->GetActorLocation(), FQuat::Identity,
+	// Cover the swept segment, including the final movement frame after the
+	// dodge ends. The effect actor's AActor::Owner is unset by the pool; the
+	// gameplay owner is EffectOwner throughout every delivery mode.
+	const FVector PreviousLocation = GetActorLocation();
+	const FVector CurrentLocation = OwningActor->GetActorLocation();
+	TArray<FHitResult> Hits;
+	GetWorld()->SweepMultiByObjectType(Hits, PreviousLocation, CurrentLocation, FQuat::Identity,
 		ObjectParams, FCollisionShape::MakeSphere(WetTrailRadiusCm), QueryParams);
+	SetActorLocation(CurrentLocation, false);
 
-	for (const FOverlapResult& Overlap : Overlaps)
+	for (const FHitResult& Hit : Hits)
 	{
-		AActor* Victim = Overlap.GetActor();
-		if (!Victim || Victim == Owner || WetTrailVictims.Contains(Victim))
+		AActor* Victim = Hit.GetActor();
+		if (!Victim || Victim == OwningActor || WetTrailVictims.Contains(Victim))
 		{
 			continue;
 		}
@@ -679,10 +723,20 @@ void AQinglanProjectile::TickWetTrail(float DeltaSeconds)
 		{
 			continue;
 		}
+		const FVector TrailPoint = FMath::ClosestPointOnSegment(
+			Victim->GetActorLocation(), PreviousLocation, CurrentLocation);
+		if (!HasEffectLineOfSight(GetWorld(), OwningActor, Victim, TrailPoint))
+		{
+			continue;
+		}
 		// One deduplicated accumulated set across every sample: start, middle,
 		// and end targets soak exactly once, none beyond actual movement.
 		VictimCombat->ApplyStatus(EQinglanStatus::Wet, WetTrailDurationBonus);
 		WetTrailVictims.Add(Victim);
+	}
+	if (!Dodge->IsDodging())
+	{
+		ReturnToPool();
 	}
 }
 

@@ -110,6 +110,16 @@ FResult EvaluateForTrial(ETrial Trial, const UQinglanProfileSubsystem* Profile, 
 
 FResult EvaluateEntry(ETrial Trial, const UQinglanProfileSubsystem* Profile, const UQinglanStorySubsystem* Story)
 {
+	// CH06_S04 permits returning to the hub for unfinished agreements. The
+	// successful breakthrough is rankless, but the decision platforms must
+	// remain reachable on return and after loading that profile. Combat still
+	// goes through EvaluateForTrial and cannot award the trial twice.
+	if (Trial == ETrial::GoldenCore && Profile && Story && Story->GetRegistry()
+		&& Profile->GetCultivationStage() == EQinglanStage::GoldenCore
+		&& Story->IsSceneCompleted(SceneForTrial(Trial)))
+	{
+		return { ERejection::None, NAME_None };
+	}
 	const FResult Progression = Evaluate(Trial, Profile, Story);
 	if (!Progression.IsAllowed())
 	{

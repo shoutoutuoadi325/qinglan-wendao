@@ -287,6 +287,10 @@ void UQinglanSwordComponent::ConsumeBufferedInput()
 		return;
 	}
 	bHasBufferedAttack = false;
+	if ((Now - BufferedAttackAt) > InputBufferSeconds)
+	{
+		return;
+	}
 	// A buffered press executes as soon as the state machine would accept a new one:
 	// while the combo window is open it chains, otherwise it starts from Cut 1.
 	if (CanStartSwing())
@@ -332,66 +336,72 @@ void UQinglanSwordComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-	// Paused-game-time semantics: the clock only advances with real (unpaused) ticks.
-	Now += DeltaTime;
+	// Advance to each phase boundary before checking the buffer. Expiring it at
+	// the frame endpoint discards presses that were still fresh when recovery
+	// actually began during a slow frame.
+	float RemainingTime = FMath::Max(0.f, DeltaTime);
+	const float FrameEndTime = Now + RemainingTime;
 
 	UQinglanCombatComponent* const OwnerCombat = GetOwnerCombat();
 	if (OwnerCombat && !OwnerCombat->IsAlive())
 	{
 		// Dead outranks the committed action (docs/02 §3 priority).
 		InterruptSwing();
+		Now = FrameEndTime;
 		return;
 	}
 
-	// Single-slot buffer expiry (docs/02 §3: 0.15 s).
-	if (bHasBufferedAttack && (Now - BufferedAttackAt) > InputBufferSeconds)
+	// Carry overshoot through windup, active and recovery. The active phase is
+	// sampled even when one frame spans its entire duration.
+	while (RemainingTime > 0.f && Phase != EQinglanSwordPhase::Idle)
 	{
-		bHasBufferedAttack = false;
-	}
+		const float Duration = FMath::Max(0.f, GetPhaseDuration());
+		const float Step = FMath::Min(RemainingTime, FMath::Max(0.f, Duration - PhaseElapsed));
+		Now += Step;
+		PhaseElapsed += Step;
+		RemainingTime -= Step;
 
-	switch (Phase)
-	{
-	case EQinglanSwordPhase::Idle:
-		break;
-
-	case EQinglanSwordPhase::Windup:
-		PhaseElapsed += DeltaTime;
-		if (PhaseElapsed >= GetPhaseDuration())
+		if (Phase == EQinglanSwordPhase::Active && bWindowOpen)
 		{
+			TickSweep();
+		}
+		if (PhaseElapsed < Duration)
+		{
+			break;
+		}
+
+		switch (Phase)
+		{
+		case EQinglanSwordPhase::Windup:
 			EnterPhase(EQinglanSwordPhase::Active);
 			// Timer fallback when the montage/notify is absent (headless automation,
 			// -nullrhi specs): open at the authored active start. A notify that already
 			// opened the window is honored; NotifyWindowClosed can still close it early.
 			OpenWindow();
-		}
-		break;
-
-	case EQinglanSwordPhase::Active:
-		PhaseElapsed += DeltaTime;
-		if (bWindowOpen)
-		{
-			TickSweep();
-		}
-		if (PhaseElapsed >= GetPhaseDuration())
-		{
+			break;
+		case EQinglanSwordPhase::Active:
 			CloseWindow();
 			EnterPhase(EQinglanSwordPhase::Recovery);
 			RecoveryBeganAt = Now; // 0.35 s combo continuation window starts here (docs/02 §4)
 			ConsumeBufferedInput(); // buffered press chains into the next cut immediately
-		}
-		break;
-
-	case EQinglanSwordPhase::Recovery:
-		PhaseElapsed += DeltaTime;
-		if (PhaseElapsed >= GetPhaseDuration())
+			break;
+		case EQinglanSwordPhase::Recovery:
 		{
 			const int32 FinishedIndex = ComboIndex;
 			const FName FinishedSwingId = GetSwingId();
 			EnterPhase(EQinglanSwordPhase::Idle);
 			OnSwingEnded.Broadcast(FinishedIndex, FinishedSwingId);
 			ConsumeBufferedInput(); // still-fresh buffered press fires at the Idle boundary
+			break;
 		}
-		break;
+		default:
+			break;
+		}
+	}
+	Now = FrameEndTime;
+	if (bHasBufferedAttack && (Now - BufferedAttackAt) > InputBufferSeconds)
+	{
+		bHasBufferedAttack = false;
 	}
 }
 

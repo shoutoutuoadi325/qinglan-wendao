@@ -224,6 +224,9 @@ namespace
 		}
 		GTextSource = MakeShared<FQinglanRuntimeTextSource>();
 		FTextLocalizationManager::Get().RegisterTextSource(GTextSource.ToSharedRef(), /*bInRefreshResources*/ true);
+		// The first HUD may cache text immediately after initialization. Wait
+		// until the resource identities exist so those labels remain live.
+		FTextLocalizationManager::Get().WaitForAsyncTasks();
 		bGTextSourceRegistered = true;
 	}
 }
@@ -358,11 +361,22 @@ bool FQinglanLocalizationService::TryResolve(FName Key, FText& OutText)
 	{
 		return false;
 	}
-	FString Value;
-	if (!TryResolveFromTables(Key.ToString(), GetRuntimeCultureName(), Value))
+	const FString KeyString = Key.ToString();
+	FString SourceText;
+	if (!TryResolveFromTables(KeyString, EnglishCultureName, SourceText))
 	{
 		return false;
 	}
+	// Retain the registered text identity: widgets cache labels and record
+	// bodies, so returning a plain translated string freezes those views in
+	// the old language until their next explicit rebuild.
+	if (FText::FindTextInLiveTable_Advanced(FTextKey(GameStringTableNamespace), FTextKey(KeyString), OutText, &SourceText))
+	{
+		return true;
+	}
+	// Early boot or injected tables may not have registered resources yet.
+	FString Value;
+	TryResolveFromTables(KeyString, GetRuntimeCultureName(), Value);
 	OutText = FText::FromString(Value);
 	return true;
 }
@@ -399,6 +413,9 @@ bool FQinglanLocalizationService::ApplyCulture(const FString& CultureName)
 	const bool bApplied = I18N.SetCurrentCulture(Normalized);
 	if (bApplied)
 	{
+		// UE refreshes text resources asynchronously. Menu reconstruction runs
+		// immediately after this call and must see the selected language.
+		FTextLocalizationManager::Get().WaitForAsyncTasks();
 		UE_LOG(LogQinglan, Log, TEXT("Localization: culture applied: %s"), *Normalized);
 	}
 	else

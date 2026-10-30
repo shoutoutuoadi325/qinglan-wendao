@@ -191,12 +191,12 @@ namespace
 			{
 				return Start;
 			}
-			if (!AnyEntrance && Start->PlayerStartTag.ToString().StartsWith(Prefix))
+			if (!AnyEntrance && Start->PlayerStartTag == FName(*Prefix))
 			{
 				AnyEntrance = Start;
 			}
 		}
-		return AnyEntrance;
+		return RoomIndex == 0 ? AnyEntrance : nullptr;
 	}
 
 	/** Teleports the player to a room entrance: authored PlayerStart first, layout-contract position otherwise. */
@@ -1120,6 +1120,10 @@ void AQinglanInteractable::ExecuteInteraction(AQinglanCharacter* Player)
 			// is UQinglanRunSubsystem::RequestRetreat (70%, never boss proof).
 			if (!Run->RequestExit())
 			{
+				if (Run->CanClaimVictory())
+				{
+					return; // banking failed; retain the listener's retry message and the run loot
+				}
 				UE_LOG(LogQinglan, Warning, TEXT("Exit %s refused: boss room not cleared"), *Id);
 				if (Player)
 				{

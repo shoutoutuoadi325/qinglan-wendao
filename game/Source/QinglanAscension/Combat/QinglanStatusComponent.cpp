@@ -84,12 +84,12 @@ void UQinglanStatusComponent::HandleCombatStatusApplied(EQinglanStatus Status)
 	// matter which entry point applied the status.
 	if (Status == EQinglanStatus::Wet)
 	{
-		WetRemainingMirror = WetDuration;
+		WetRemainingMirror = GetOwningCombat()->GetStatusRemaining(Status);
 		BroadcastApplied(Status, WetRemainingMirror);
 	}
 	else if (Status == EQinglanStatus::Burn)
 	{
-		BurnRemainingMirror = BurnDuration;
+		BurnRemainingMirror = GetOwningCombat()->GetStatusRemaining(Status);
 		BroadcastApplied(Status, BurnRemainingMirror);
 	}
 }
@@ -324,6 +324,13 @@ bool UQinglanStatusComponent::HasStatus(EQinglanStatus Status) const
 
 float UQinglanStatusComponent::GetStatusRemaining(EQinglanStatus Status) const
 {
+	if (Status == EQinglanStatus::Wet || Status == EQinglanStatus::Burn)
+	{
+		if (const UQinglanCombatComponent* Combat = GetOwningCombat())
+		{
+			return Combat->GetStatusRemaining(Status);
+		}
+	}
 	switch (Status)
 	{
 	case EQinglanStatus::Wet:

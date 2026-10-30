@@ -24,6 +24,9 @@ using FQinglanSaveMigrationStep = bool (*)(UQinglanSaveGame* Save, FText& OutErr
 
 namespace QinglanSave
 {
+	/** Shared journal limit: mutations must remain serializable (docs/05 section 6). */
+	inline constexpr int32 MaxTransactionEntries = 8192;
+
 	/** All player-facing save text resolves from ST_Game only (code-contracts.md). */
 	inline FText Loc(const TCHAR* Key)
 	{
@@ -57,5 +60,5 @@ namespace QinglanSave
 	QINGLANASCENSION_API bool ValidateSaveInvariants(const UQinglanSaveGame* Save, FText& OutError);
 
 	/** FNV-1a-64 over bytes (UQinglanSaveGame::BodyChecksum contract). */
-	uint64 Fnv1a64(const uint8* Data, int64 Num);
+	QINGLANASCENSION_API uint64 Fnv1a64(const uint8* Data, int64 Num);
 }

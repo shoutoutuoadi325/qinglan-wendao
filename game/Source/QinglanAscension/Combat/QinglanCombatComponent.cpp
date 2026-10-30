@@ -16,6 +16,7 @@
 #include "Engine/World.h"
 #include "Progression/QinglanEconomyLibrary.h"
 #include "Progression/QinglanProfileSubsystem.h"
+#include "Progression/QinglanRunSubsystem.h"
 #include "QinglanAscension.h"
 #include "HAL/ThreadSafeCounter.h"
 
@@ -27,6 +28,19 @@ namespace
 	constexpr int32 MaxTrackedHitKeys = 1024;
 
 	FName BurnTickTechniqueId() { return FName("status.burn"); }
+
+	FQinglanBlessingModifiers ResolvePlayerModifiers(UQinglanCombatComponent* Combat)
+	{
+		FQinglanBlessingModifiers Modifiers;
+		if (Cast<AQinglanCharacter>(Combat->GetOwner()))
+		{
+			TArray<FName> Owned;
+			UQinglanBlessingLibrary::GetOwnedBlessings(Combat, Owned);
+			UQinglanBlessingLibrary::ComputeModifiers(Owned, Modifiers);
+			UQinglanEconomyLibrary::AppendPermanentModifiers(Combat, Modifiers);
+		}
+		return Modifiers;
+	}
 }
 
 UQinglanCombatComponent::UQinglanCombatComponent()
@@ -62,8 +76,23 @@ void UQinglanCombatComponent::BeginPlay()
 			{
 				Profile->OnProfileCommitted.AddUniqueDynamic(this, &UQinglanCombatComponent::HandleProfileCommitted);
 			}
+			if (UQinglanRunSubsystem* Run = GameInstance->GetSubsystem<UQinglanRunSubsystem>())
+			{
+				Run->OnBlessingsChanged.AddUniqueDynamic(this, &UQinglanCombatComponent::HandleProfileCommitted);
+			}
 		}
+		const bool bSpawnedAtFullHealth = Attributes.Health >= Attributes.MaxHealth;
+		const bool bSpawnedAtFullEnergy = Attributes.SpiritualEnergy >= Attributes.MaxSpiritualEnergy;
+		const bool bSpawnedAtFullStamina = Attributes.Stamina >= Attributes.MaxStamina;
 		RefreshEquipmentAttributeBonuses();
+		// Fresh pawns start full at their derived maxima. Mid-session equipment
+		// changes use the delta path and cannot turn equipping into free healing.
+		if (bSpawnedAtFullHealth) { Attributes.Health = Attributes.MaxHealth; }
+		if (bSpawnedAtFullEnergy) { Attributes.SpiritualEnergy = Attributes.MaxSpiritualEnergy; }
+		if (bSpawnedAtFullStamina) { Attributes.Stamina = Attributes.MaxStamina; }
+		OnHealthChanged.Broadcast(Attributes.Health, Attributes.MaxHealth);
+		OnEnergyChanged.Broadcast(Attributes.SpiritualEnergy, Attributes.MaxSpiritualEnergy);
+		OnStaminaChanged.Broadcast(Attributes.Stamina, Attributes.MaxStamina);
 	}
 }
 
@@ -74,6 +103,10 @@ void UQinglanCombatComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		if (UQinglanProfileSubsystem* Profile = GameInstance->GetSubsystem<UQinglanProfileSubsystem>())
 		{
 			Profile->OnProfileCommitted.RemoveDynamic(this, &UQinglanCombatComponent::HandleProfileCommitted);
+		}
+		if (UQinglanRunSubsystem* Run = GameInstance->GetSubsystem<UQinglanRunSubsystem>())
+		{
+			Run->OnBlessingsChanged.RemoveDynamic(this, &UQinglanCombatComponent::HandleProfileCommitted);
 		}
 	}
 	Super::EndPlay(EndPlayReason);
@@ -99,7 +132,7 @@ void UQinglanCombatComponent::HandleProfileCommitted()
 	RefreshEquipmentAttributeBonuses();
 }
 
-void UQinglanCombatComponent::RefreshEquipmentAttributeBonuses()
+void UQinglanCombatComponent::RefreshEquipmentAttributeBonuses(bool bSnapshotIncludesBonuses)
 {
 	// Only the player pawn folds permanent equipment maxima; enemies have no
 	// profile and keep their archetype-derived values.
@@ -112,14 +145,39 @@ void UQinglanCombatComponent::RefreshEquipmentAttributeBonuses()
 
 	float NewHealthBonus = 0.f;
 	float NewStaminaBonus = 0.f;
+	float NewEnergyBonus = 0.f;
+	float NewPowerBonus = 0.f;
 	UQinglanEconomyLibrary::GetPermanentAttributeBonuses(this, NewHealthBonus, NewStaminaBonus);
+	if (UGameInstance* Instance = GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
+	{
+		if (const UQinglanProfileSubsystem* Profile = Instance->GetSubsystem<UQinglanProfileSubsystem>())
+		{
+			float CultivationHealth = 0.f;
+			UQinglanEconomyLibrary::GetCultivationBonuses(Profile->GetCultivationStage(),
+				Profile->GetCultivationRank(), CultivationHealth, NewEnergyBonus, NewPowerBonus);
+			NewHealthBonus += CultivationHealth;
+		}
+	}
+	TArray<FName> OwnedBlessings;
+	UQinglanBlessingLibrary::GetOwnedBlessings(this, OwnedBlessings);
+	FQinglanBlessingModifiers Blessings;
+	UQinglanBlessingLibrary::ComputeModifiers(OwnedBlessings, Blessings);
+	NewHealthBonus += Blessings.MaxHealthBonus;
 
 	const float HealthDelta = NewHealthBonus - AppliedEquipmentMaxHealthBonus;
 	const float StaminaDelta = NewStaminaBonus - AppliedEquipmentMaxStaminaBonus;
+	const float EnergyDelta = NewEnergyBonus - AppliedCultivationMaxEnergyBonus;
+	const float PowerDelta = NewPowerBonus - AppliedCultivationPowerBonus;
 	AppliedEquipmentMaxHealthBonus = NewHealthBonus;
 	AppliedEquipmentMaxStaminaBonus = NewStaminaBonus;
+	AppliedCultivationMaxEnergyBonus = NewEnergyBonus;
+	AppliedCultivationPowerBonus = NewPowerBonus;
 
-	if (FMath::IsNearlyZero(HealthDelta) && FMath::IsNearlyZero(StaminaDelta))
+	// Checkpoint maxima already contain these bonuses. Rebase the ledger
+	// without adding again so the next equip/rank change applies one delta.
+	if (bSnapshotIncludesBonuses || (FMath::IsNearlyZero(HealthDelta)
+		&& FMath::IsNearlyZero(StaminaDelta) && FMath::IsNearlyZero(EnergyDelta)
+		&& FMath::IsNearlyZero(PowerDelta)))
 	{
 		return;
 	}
@@ -128,11 +186,15 @@ void UQinglanCombatComponent::RefreshEquipmentAttributeBonuses()
 	// removes its own contribution once, never stacks on repeated commits.
 	Attributes.MaxHealth = FMath::Max(1.f, Attributes.MaxHealth + HealthDelta);
 	Attributes.MaxStamina = FMath::Max(1.f, Attributes.MaxStamina + StaminaDelta);
+	Attributes.MaxSpiritualEnergy = FMath::Max(1.f, Attributes.MaxSpiritualEnergy + EnergyDelta);
+	Attributes.TechniquePower = FMath::Max(0.f, Attributes.TechniquePower + PowerDelta);
 	Attributes.Health = FMath::Clamp(Attributes.Health, 0.f, Attributes.MaxHealth);
 	Attributes.Stamina = FMath::Clamp(Attributes.Stamina, 0.f, Attributes.MaxStamina);
+	Attributes.SpiritualEnergy = FMath::Clamp(Attributes.SpiritualEnergy, 0.f, Attributes.MaxSpiritualEnergy);
 
 	OnHealthChanged.Broadcast(Attributes.Health, Attributes.MaxHealth);
 	OnStaminaChanged.Broadcast(Attributes.Stamina, Attributes.MaxStamina);
+	OnEnergyChanged.Broadcast(Attributes.SpiritualEnergy, Attributes.MaxSpiritualEnergy);
 }
 
 void UQinglanCombatComponent::TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -235,7 +297,9 @@ void UQinglanCombatComponent::TickComponent(float DeltaTime, enum ELevelTick Tic
 	for (TPair<EQinglanStatus, float>& Pair : ActiveStatuses)
 	{
 		Pair.Value = FMath::Max(0.f, Pair.Value - DeltaTime);
-		if (Pair.Value <= 0.f)
+		// Burn's three tick deadlines own expiry. Countdown rounding must not
+		// delete the final tick a frame before its timestamp is reached.
+		if (Pair.Value <= 0.f && Pair.Key != EQinglanStatus::Burn)
 		{
 			Expired.Add(Pair.Key);
 		}
@@ -298,8 +362,11 @@ void UQinglanCombatComponent::RegenResources(float DeltaTime)
 	// Energy 4/s after 1 s without releasing a technique; stamina 20/s after
 	// 0.8 s without spending stamina (docs/02 §5). Failed spends do not reset
 	// the idle timers; only successful ones do (in TrySpend*).
-	TimeSinceEnergySpend += DeltaTime;
-	TimeSinceStaminaSpend += DeltaTime;
+	const float Elapsed = FMath::Max(0.f, DeltaTime);
+	TimeSinceEnergySpend += Elapsed;
+	TimeSinceStaminaSpend += Elapsed;
+	const float EnergyRegenTime = FMath::Clamp(TimeSinceEnergySpend - EnergyRegenDelay, 0.f, Elapsed);
+	const float StaminaRegenTime = FMath::Clamp(TimeSinceStaminaSpend - StaminaRegenDelay, 0.f, Elapsed);
 
 	// Permanent equipment folds onto the base rates for the player pawn only
 	// (Energy Recovery +1/s, Measured Breath +10% recovery, docs/03 section 4);
@@ -316,7 +383,7 @@ void UQinglanCombatComponent::RegenResources(float DeltaTime)
 		&& Attributes.SpiritualEnergy < Attributes.MaxSpiritualEnergy)
 	{
 		Attributes.SpiritualEnergy = FMath::Min(Attributes.MaxSpiritualEnergy,
-			Attributes.SpiritualEnergy + EnergyRegen * DeltaTime);
+			Attributes.SpiritualEnergy + EnergyRegen * EnergyRegenTime);
 		OnEnergyChanged.Broadcast(Attributes.SpiritualEnergy, Attributes.MaxSpiritualEnergy);
 	}
 
@@ -324,7 +391,7 @@ void UQinglanCombatComponent::RegenResources(float DeltaTime)
 		&& Attributes.Stamina < Attributes.MaxStamina)
 	{
 		Attributes.Stamina = FMath::Min(Attributes.MaxStamina,
-			Attributes.Stamina + StaminaRegen * DeltaTime);
+			Attributes.Stamina + StaminaRegen * StaminaRegenTime);
 		OnStaminaChanged.Broadcast(Attributes.Stamina, Attributes.MaxStamina);
 	}
 }
@@ -454,8 +521,10 @@ bool UQinglanCombatComponent::ApplyDamage(const FQinglanDamageEvent& Request)
 
 	// --- Stage 3: barrier/health damage (docs/02 §5, §6) --------------------
 	const float Mitigated = QinglanDamageMath::ComputeMitigatedDamage(Event.RawMagnitude, Attributes.Defense);
+	const float DamageTakenMultiplier = FMath::Max(0.f,
+		1.f + ResolvePlayerModifiers(this).DamageTakenPercent / 100.f);
 	const float Final = QinglanDamageMath::ComputeFinalDamage(
-		Mitigated, ReactionMultiplier, QinglanCombatTunables::DefaultDifficultyMultiplier);
+		Mitigated * DamageTakenMultiplier, ReactionMultiplier, QinglanCombatTunables::DefaultDifficultyMultiplier);
 
 	float Remaining = Final;
 	if (BarrierAmount > 0.f && Remaining > 0.f)
@@ -538,9 +607,8 @@ FQinglanCastId UQinglanCombatComponent::NextCastId()
 
 void UQinglanCombatComponent::SetDerivedAttributes(const FQinglanAttributes& NewAttributes)
 {
-	// Re-applies derived values after rank/breakthrough/equipment changes
-	// (+5 MaxHealth/+2 Power per rank, breakthrough bonuses; docs/03).
-	// Derived pass = sanitization + clamping to the new ceilings/floors.
+	// This API receives complete derived values, such as GetAttributes().
+	// Raw player checkpoint maxima are rebuilt by RestoreCheckpointAttributes.
 	FQinglanAttributes Next = NewAttributes;
 	Next.MaxHealth = FMath::Max(1.f, Next.MaxHealth);
 	Next.MaxSpiritualEnergy = FMath::Max(1.f, Next.MaxSpiritualEnergy);
@@ -553,16 +621,36 @@ void UQinglanCombatComponent::SetDerivedAttributes(const FQinglanAttributes& New
 
 	Attributes = Next;
 
-	// AUD-37: permanent equipment maxima (Grounded Steps +10 stamina, Steady
-	// Foundation/Mountain Token health) participate in every derived
-	// recomputation, including checkpoint restores and rank/breakthrough
-	// updates. Delta tracking prevents repeated calls from stacking.
-	RefreshEquipmentAttributeBonuses();
+	// Rebase the ledger to the already included bonuses rather than adding
+	// them a second time after restoring a complete snapshot.
+	RefreshEquipmentAttributeBonuses(/*bSnapshotIncludesBonuses=*/true);
 
 	OnHealthChanged.Broadcast(Attributes.Health, Attributes.MaxHealth);
 	OnEnergyChanged.Broadcast(Attributes.SpiritualEnergy, Attributes.MaxSpiritualEnergy);
 	OnStaminaChanged.Broadcast(Attributes.Stamina, Attributes.MaxStamina);
 	OnBarrierChanged.Broadcast(BarrierAmount, BarrierAmount);
+}
+
+void UQinglanCombatComponent::RestoreCheckpointAttributes(const FQinglanAttributes& Snapshot)
+{
+	if (!Cast<AQinglanCharacter>(GetOwner()))
+	{
+		SetDerivedAttributes(Snapshot);
+		return;
+	}
+	// Entrance vitals can predate a blessing chosen in the cleared room.
+	// Maxima and power are derived from the loaded profile/run, never from
+	// that older entrance snapshot (which also supports pre-fix saves).
+	Attributes = FQinglanAttributes();
+	Attributes.Health = Snapshot.Health;
+	Attributes.SpiritualEnergy = Snapshot.SpiritualEnergy;
+	Attributes.Stamina = Snapshot.Stamina;
+	AppliedEquipmentMaxHealthBonus = 0.f;
+	AppliedEquipmentMaxStaminaBonus = 0.f;
+	AppliedCultivationMaxEnergyBonus = 0.f;
+	AppliedCultivationPowerBonus = 0.f;
+	RefreshEquipmentAttributeBonuses();
+	SetDerivedAttributes(Attributes);
 }
 
 void UQinglanCombatComponent::ApplyBarrier(EQinglanElement Element, float Amount, float Duration)
@@ -645,12 +733,14 @@ void UQinglanCombatComponent::NotifySwordHitTarget(AActor* Victim)
 		return; // recorded for dedupe, but never grants energy
 	}
 
-	const float Cap = QinglanCombatTunables::SwordEnergyCapPerSwing;   // 8
+	const FQinglanBlessingModifiers Modifiers = ResolvePlayerModifiers(this);
+	const float Cap = QinglanCombatTunables::SwordEnergyCapPerSwing + Modifiers.SwordEnergyCapBonus;
 	if (SwordSwingEnergyGranted >= Cap)
 	{
 		return;
 	}
-	const float Grant = FMath::Min(QinglanCombatTunables::SwordEnergyPerTarget, Cap - SwordSwingEnergyGranted);
+	const float Grant = FMath::Min(QinglanCombatTunables::SwordEnergyPerTarget
+		+ Modifiers.SwordEnergyPerHitBonus, Cap - SwordSwingEnergyGranted);
 	SwordSwingEnergyGranted += Grant;
 
 	Attributes.SpiritualEnergy = FMath::Clamp(Attributes.SpiritualEnergy + Grant,
@@ -701,6 +791,10 @@ void UQinglanCombatComponent::Heal(float Amount)
 
 void UQinglanCombatComponent::ApplyStatus(EQinglanStatus Status, float Magnitude)
 {
+	if (!IsAlive())
+	{
+		return;
+	}
 	UWorld* World = GetWorld();
 	const float Now = World ? World->GetTimeSeconds() : 0.f;
 
@@ -782,6 +876,12 @@ bool UQinglanCombatComponent::HasStatus(EQinglanStatus Status) const
 	}
 	const float* Remaining = ActiveStatuses.Find(Status);
 	return Remaining != nullptr && *Remaining > 0.f;
+}
+
+float UQinglanCombatComponent::GetStatusRemaining(EQinglanStatus Status) const
+{
+	const float* Remaining = ActiveStatuses.Find(Status);
+	return Remaining ? FMath::Max(0.f, *Remaining) : 0.f;
 }
 
 void UQinglanCombatComponent::RemoveStatus(EQinglanStatus Status)

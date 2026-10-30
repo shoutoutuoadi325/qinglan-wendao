@@ -113,6 +113,25 @@ namespace
 		return IdleBreakSeconds * ((AI && AI->IsPhaseTwo()) ? PhaseTwoIdleBreakFactor : 1.f);
 	}
 
+	bool HasTargetContactAlongPath(AQinglanEnemyCharacter* Enemy, AQinglanAIController* AI, const FVector& From)
+	{
+		ACharacter* Target = AI ? AI->GetTargetCharacter() : nullptr;
+		UCapsuleComponent* Capsule = Enemy ? Enemy->GetCapsuleComponent() : nullptr;
+		UWorld* World = Enemy ? Enemy->GetWorld() : nullptr;
+		if (!World || !Capsule || !Target) { return false; }
+		// AttackRange selects when a lunge may begin; it is not its contact
+		// volume. Sweep the actual capsule path so sidestepping works and a
+		// fast charge cannot tunnel past its victim between actor ticks.
+		constexpr float ContactToleranceCm = 2.f;
+		FCollisionQueryParams Query(SCENE_QUERY_STAT(QinglanChargeContact), false, Enemy);
+		TArray<FHitResult> Hits;
+		World->SweepMultiByObjectType(Hits, From, Enemy->GetActorLocation(), Capsule->GetComponentQuat(),
+			FCollisionObjectQueryParams(ECC_Pawn), FCollisionShape::MakeCapsule(
+				Capsule->GetScaledCapsuleRadius() + ContactToleranceCm,
+				Capsule->GetScaledCapsuleHalfHeight() + ContactToleranceCm), Query);
+		return Hits.ContainsByPredicate([Target](const FHitResult& Hit) { return Hit.GetActor() == Target; });
+	}
+
 	bool IsTargetInCone(AQinglanAIController* AI, const FVector& Origin, const FVector& Forward,
 		float RangeCm, float HalfAngleDeg)
 	{
@@ -262,7 +281,8 @@ void AQinglanEnemyCharacter::HandleTelegraphPresented(AQinglanEnemyCharacter* En
 
 	EQinglanElement Element = EQinglanElement::None;
 	float Radius = 180.f;
-	if (const FQinglanArchetypeSpec* Spec = QinglanEnemyCatalog::FindSpec(GetEnemyId()))
+	const FQinglanArchetypeSpec* Spec = QinglanEnemyCatalog::FindSpec(GetEnemyId());
+	if (Spec)
 	{
 		Element = Spec->Element;
 		Radius = Spec->GroundRingRadius > 0.f
@@ -272,10 +292,43 @@ void AQinglanEnemyCharacter::HandleTelegraphPresented(AQinglanEnemyCharacter* En
 	// Component minimum warning is 0.9 s (docs/06); a shorter authored windup
 	// keeps its marker slightly longer than the mechanic, which is harmless.
 	const float MarkerSeconds = FMath::Max(Duration, 0.9f);
-	VFXCues->PlayTelegraph(GetActorLocation(), Radius, MarkerSeconds, Element);
-	FTransform Source;
-	Source.SetLocation(GetActorLocation());
-	VFXCues->PlayCue(QinglanVFXCues::TelegraphRing, Source, GetActorLocation(), Element, 1.f);
+	const AQinglanAIController* AI = GetQinglanAI(this);
+	const FQinglanBossPattern* Pattern = AI ? AI->GetCurrentBossPattern() : nullptr;
+	const EQinglanAttackShape Shape = Pattern ? QinglanEnemyCatalog::ShapeOfPattern(*Pattern)
+		: (Spec ? Spec->AttackShape : EQinglanAttackShape::MeleeArc);
+	const auto PresentRing = [&](const FVector& Center, float RingRadius)
+	{
+		VFXCues->PlayTelegraph(Center, RingRadius, MarkerSeconds, Element);
+		FTransform Source;
+		Source.SetLocation(Center);
+		VFXCues->PlayCue(QinglanVFXCues::TelegraphRing, Source, Center, Element, 1.f);
+	};
+	// The release tests the positions frozen at windup start. Drawing under
+	// the caster instead made roots/volley damage land outside the warning.
+	if (AI && Shape == EQinglanAttackShape::MultiGroundStrikes)
+	{
+		const float StrikeRadius = Spec ? Spec->GroundRingRadius : 300.f;
+		for (const FVector& Center : AI->GetPendingStrikeCenters())
+		{
+			PresentRing(Center, StrikeRadius);
+		}
+	}
+	else if (AI && (Shape == EQinglanAttackShape::GroundRing || Shape == EQinglanAttackShape::GroundRingGaps))
+	{
+		const float Range = Pattern ? Pattern->Range : (Spec ? Spec->AttackRange : 150.f);
+		const float RingRadius = Shape == EQinglanAttackShape::GroundRingGaps && Pattern && Pattern->Range > 0.f
+			? Pattern->Range : (Spec ? Spec->GroundRingRadius : Range);
+		PresentRing(AI->GetGroundMarkerCenter(), RingRadius);
+		if (Shape == EQinglanAttackShape::GroundRingGaps)
+		{
+			VFXCues->PlaySafeLane(AI->GetGroundMarkerCenter(), RingRadius, AI->GetSafeArcCenterDegrees(),
+				SafeArcHalfWidthDeg, MarkerSeconds, Element);
+		}
+	}
+	else
+	{
+		PresentRing(GetActorLocation(), Radius);
+	}
 	// Placeholder note (AUD-42 open): center disc/ring is engine-shape geometry,
 	// not authored Niagara; audio for the warning is a named SFX key only.
 }
@@ -381,6 +434,13 @@ void AQinglanEnemyCharacter::EnterStagger()
 	TelegraphTimer = 0.f;
 	bAttackCommitted = false;
 	bProximityActivePhase = false;
+	StopAnimMontage();
+	if (VFXCues) { VFXCues->ResetForPool(); }
+	if (UCharacterMovementComponent* Movement = GetCharacterMovement())
+	{
+		Movement->ClearAccumulatedForces();
+		Movement->StopMovementImmediately();
+	}
 
 	AQinglanAIController* AI = GetQinglanAI(this);
 	if (AI)
@@ -414,10 +474,17 @@ void AQinglanEnemyCharacter::Die()
 	bProximityActivePhase = false;
 	bEmberTelegraphActive = false;
 	UpdateAnimationActionState(); // AUD-44: Death freezes locomotion selection
+	StopAnimMontage();
+	if (VFXCues)
+	{
+		VFXCues->ResetForPool(); // death cancels every unreleased warning
+	}
 
 	if (GetCharacterMovement())
 	{
+		GetCharacterMovement()->ClearAccumulatedForces();
 		GetCharacterMovement()->StopMovementImmediately();
+		GetCharacterMovement()->DisableMovement();
 	}
 	if (GetCapsuleComponent())
 	{
@@ -575,6 +642,7 @@ void AQinglanEnemyCharacter::InitializeFromData(UQinglanEnemyDataAsset* InData)
 	bAttackCommitted = false;
 	bProximityActivePhase = false;
 	bDead = false;
+	PreviousProximityLocation = GetActorLocation();
 	bPhaseTwoEmbersArmed = false;
 	bEmberTelegraphActive = false;
 	EmberVolleyTimer = 0.f;
@@ -591,6 +659,11 @@ void AQinglanEnemyCharacter::ResetForPool()
 {
 	// Pooling contract (docs/05 section 5): clears timers, victims, owner,
 	// tags, collision, and remaining lifetime.
+	StopAnimMontage();
+	if (VFXCues)
+	{
+		VFXCues->ResetForPool();
+	}
 	AIState = EQinglanAIState::Idle;
 	StateTimer = 0.f;
 	TelegraphTimer = 0.f;
@@ -598,6 +671,7 @@ void AQinglanEnemyCharacter::ResetForPool()
 	bAttackCommitted = false;
 	bProximityActivePhase = false;
 	bDead = false;
+	PreviousProximityLocation = GetActorLocation();
 	bPhaseTwoEmbersArmed = false;
 	bEmberTelegraphActive = false;
 	EmberVolleyTimer = 0.f;
@@ -621,8 +695,9 @@ void AQinglanEnemyCharacter::ResetForPool()
 
 	if (GetCharacterMovement())
 	{
+		GetCharacterMovement()->ClearAccumulatedForces();
 		GetCharacterMovement()->StopMovementImmediately();
-		GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+		GetCharacterMovement()->DisableMovement();
 	}
 
 	// Clear lingering statuses (best effort: the combat API exposes
@@ -809,6 +884,7 @@ void AQinglanEnemyCharacter::UpdateAttack(float DeltaSeconds)
 		// resolves exclusively at this commit instant.
 		const bool bLungeShape = Shape == EQinglanAttackShape::MeleeArc && Spec && Spec->LungeSpeed > 0.f;
 		bProximityActivePhase = bLungeShape || Shape == EQinglanAttackShape::ChargeDash;
+		PreviousProximityLocation = GetActorLocation();
 
 		switch (Shape)
 		{
@@ -940,10 +1016,12 @@ void AQinglanEnemyCharacter::UpdateAttack(float DeltaSeconds)
 		// AUD-29: only authored proximity shapes (lunge/charge) may hit through
 		// this range branch, once during the active window; release-shaped
 		// attacks resolved at commit and spent their hit flag there.
-		if (AI && bProximityActivePhase && AI->IsInAttackRange() && AI->ConsumeAttackHit())
+		if (AI && bProximityActivePhase && HasTargetContactAlongPath(this, AI, PreviousProximityLocation)
+			&& AI->ConsumeAttackHit())
 		{
 			ApplyHitToTarget(this, AI, ComputeRawDamage(this, AI, AI->GetCurrentBossPattern()));
 		}
+		PreviousProximityLocation = GetActorLocation();
 		if (StateTimer >= ActiveSeconds(AI))
 		{
 			EnterRecover();

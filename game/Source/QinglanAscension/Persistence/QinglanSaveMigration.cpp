@@ -3,6 +3,8 @@
 
 #include "Narrative/QinglanStoryRuntime.h"
 #include "Persistence/QinglanSaveSubsystem.h"
+#include "Progression/QinglanEconomyLibrary.h"
+#include "Progression/QinglanProgressionTables.h"
 #include "QinglanAscension.h"
 
 namespace
@@ -15,7 +17,6 @@ namespace
 	constexpr int32 MaxEndingValue = 3;              // EQinglanEnding::Shared
 	constexpr int32 MaxTechniqueEntries = 64;        // bounded array (§1.6)
 	constexpr int32 MaxFlagEntries = 1024;           // bounded array (§1.6)
-	constexpr int32 MaxTransactionEntries = 8192;    // bounded array (§1.6)
 	constexpr int32 MaxNarrativeEntries = 1024;      // bounded array (§1.6)
 	constexpr int32 MaxBlessingEntries = 64;         // bounded array (§1.6); 2 drafted per expedition (§1.4)
 	constexpr int32 MaxRoomEntries = 32;             // 7-room contract (§1.4), generous bound
@@ -334,6 +335,23 @@ namespace QinglanSave
 					OutError = Loc(TEXT("save.invalid"));
 					return false;
 				}
+			}
+		}
+
+		if (!IsBoundedNameArray(Save->EquippedTalismans, QinglanProgression::EquippedTalismanLimit,
+			"equipped talismans", OutError) || HasDuplicates(Save->EquippedTalismans)
+			|| (!Save->bTalismanLoadoutInitialized && !Save->EquippedTalismans.IsEmpty()))
+		{
+			OutError = Loc(TEXT("save.invalid"));
+			return false;
+		}
+		for (const FName TalismanId : Save->EquippedTalismans)
+		{
+			FQinglanTalismanCatalogEntry Entry;
+			if (!UQinglanEconomyLibrary::FindTalisman(TalismanId, Entry))
+			{
+				OutError = Loc(TEXT("save.invalid"));
+				return false;
 			}
 		}
 

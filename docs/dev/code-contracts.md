@@ -46,6 +46,9 @@ Schema **v2** fields mirror `data/examples/save.json` exactly
 deliveries and hub clock are v2 additions). Writes follow the six-step durable
 protocol; a failed write never deletes the last valid primary; 3 slots x 2
 backups; reject newer schemas.
+Talisman slot order is an optional tagged v2 extension. Missing
+`talisman_loadout_initialized` uses the first two catalog entries once; an
+initialized empty loadout remains empty after loading, travel, and refills.
 
 ## Combat semantics (summary)
 
@@ -55,6 +58,18 @@ at release notify. Dodge i-frames [0.10, 0.28] s of a 0.45 s dodge. Status
 precedence: immunity -> barrier/health -> reaction -> status -> cue.
 Conduct: Thunder vs Wet = one 1.25x, consumes Wet. Burn: 3 ticks x 4 dmg/3 s,
 refresh not stack. Root 1 s (bosses: 10% slow 1 s).
+
+## Input semantics (summary)
+
+Modal input pauses the world while retaining its own input processing. Physical
+digits select menu rows; D-pad presses navigate without activating a digit
+shortcut. Gamepad A confirms native overlays once from its press event, while
+Space retains its dodge/ending-warning meaning. Gamepad B cycles combat targets
+and performs Back only in a modal; it cannot abandon a trial behind a choice.
+`UQinglanPlayerInput` suppresses digital holds across full input flushes until
+their real release, including queued presses and release/re-press ordering.
+Synthetic flush releases do not end that suppression. Completed taps and
+fresh analog samples remain usable.
 
 ## Narrative semantics (summary)
 
@@ -73,4 +88,6 @@ Each subsystem exposes state-query functions usable by automation specs in
 subdirectory): damage math, hit-key dedupe, rank costs, banking multipliers,
 agreement versioning, ending gating, save fault injection, story guards,
 trials, animation/VFX/content/input contracts. Specs must be deterministic and
-headless (`-nullrhi` compatible); the suite currently runs **70** cases.
+headless (`-nullrhi` compatible). The acceptance runner discovers the expected
+names from current source and validates every named result; source registration
+counts alone do not establish that the current suite compiled or passed.

@@ -34,7 +34,7 @@ class UQinglanAudioSubsystem : public UGameInstanceSubsystem
 	GENERATED_BODY()
 
 public:
-	/** Switches the music track if the state changed; crossfades the old one out. */
+	/** Switches tracks or restores stopped music after travel; crossfades the old one out. */
 	UFUNCTION(BlueprintCallable, Category = "Qinglan|Audio")
 	void SetMusicState(EQinglanMusicState NewState);
 

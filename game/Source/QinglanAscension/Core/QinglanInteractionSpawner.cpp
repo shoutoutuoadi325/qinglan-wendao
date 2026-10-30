@@ -224,7 +224,7 @@ void UQinglanInteractionSpawner::SynthesizeHubRestAnchor(UWorld* World, const TM
 	SpawnInteractableAt(World, RestStationId, *CourierBoard + FVector(600.f, 0.f, 0.f));
 }
 
-void UQinglanInteractionSpawner::SynthesizeHubSceneAnchors(UWorld* World, const TMap<FName, FVector>& AnchorPositions)
+void UQinglanInteractionSpawner::SynthesizeHubSceneAnchors(UWorld* World, TMap<FName, FVector>& AnchorPositions)
 {
 	// AUD-10: CH05_S03 and the CH07 epilogue scenes route through two ledger/
 	// correspondence stations added to the bootstrap's HubAnchors. Old maps
@@ -248,7 +248,12 @@ void UQinglanInteractionSpawner::SynthesizeHubSceneAnchors(UWorld* World, const 
 				*Spec.From.ToString(), *Spec.Id.ToString());
 			continue;
 		}
-		SpawnInteractableAt(World, Spec.Id, *From + Spec.Offset);
+		if (AQinglanInteractable* Station = SpawnInteractableAt(World, Spec.Id, *From + Spec.Offset))
+		{
+			// The inspection pass runs next and needs these positions too. A
+			// dialogue station without its documents cannot complete CH05/CH07.
+			AnchorPositions.Add(Spec.Id, Station->GetActorLocation());
+		}
 	}
 }
 

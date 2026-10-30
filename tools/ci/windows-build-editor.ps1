@@ -44,6 +44,14 @@ foreach ($dir in $ubtDirs) {
     $ubtXml | Set-Content (Join-Path $dir 'BuildConfiguration.xml') -Encoding utf8
 }
 
+# Capture inputs before compilation; cache sealing rejects any edits made
+# while the build was running instead of labelling old modules as current.
+New-Item -ItemType Directory -Force $ArchiveDir | Out-Null
+$buildInputs = Join-Path $ArchiveDir 'editor-build-inputs.json'
+& python (Join-Path $PSScriptRoot 'editor_cache_manifest.py') snapshot `
+    --repo $repo --engine $engine --build-inputs $buildInputs
+if ($LASTEXITCODE) { throw 'Cannot fingerprint editor build inputs.' }
+
 Write-Host "=========================================================="
 Write-Host "   Compiling QinglanAscensionEditor (Win64 Development)   "
 Write-Host "=========================================================="

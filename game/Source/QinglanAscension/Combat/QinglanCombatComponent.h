@@ -68,8 +68,10 @@ public:
 	UFUNCTION(BlueprintPure) float GetTechniquePower() const { return Attributes.TechniquePower; }
 	UFUNCTION(BlueprintPure) float GetDefense() const { return Attributes.Defense; }
 	UFUNCTION(BlueprintPure) const FQinglanAttributes& GetAttributes() const { return Attributes; }
-	/** Re-applies derived values after rank/breakthrough/equipment changes. */
+	/** Restores a complete derived snapshot, including already applied bonuses. */
 	UFUNCTION(BlueprintCallable) void SetDerivedAttributes(const FQinglanAttributes& NewAttributes);
+	/** Restores checkpoint vitals and rebuilds player maxima/power from the current profile and blessings. */
+	void RestoreCheckpointAttributes(const FQinglanAttributes& Snapshot);
 
 	// --- Damage (single entry point) ---
 	/** Applies one audited damage event; returns true when health/barrier actually changed. */
@@ -124,6 +126,7 @@ public:
 	// --- Statuses ---
 	UFUNCTION(BlueprintCallable) void ApplyStatus(EQinglanStatus Status, float Magnitude = 0.f);
 	UFUNCTION(BlueprintPure) bool HasStatus(EQinglanStatus Status) const;
+	UFUNCTION(BlueprintPure) float GetStatusRemaining(EQinglanStatus Status) const;
 	/** Water removes Burn; Fire removes Wet pre-damage. */
 	void RemoveStatus(EQinglanStatus Status);
 
@@ -155,7 +158,7 @@ private:
 	UFUNCTION() void HandleDodgeStarted(float Duration);
 	/** AUD-37: Grounded Steps / Steady Foundation / Mountain Token fold onto
 	 *  the player-owned derived maxima exactly once (delta-tracked). */
-	void RefreshEquipmentAttributeBonuses();
+	void RefreshEquipmentAttributeBonuses(bool bSnapshotIncludesBonuses = false);
 	UFUNCTION() void HandleProfileCommitted();
 
 	FQinglanAttributes Attributes;
@@ -176,6 +179,8 @@ private:
 	// restores).
 	float AppliedEquipmentMaxHealthBonus = 0.f;
 	float AppliedEquipmentMaxStaminaBonus = 0.f;
+	float AppliedCultivationMaxEnergyBonus = 0.f;
+	float AppliedCultivationPowerBonus = 0.f;
 
 	// Burn bookkeeping: three 4-damage ticks across the requested duration.
 	// The requested duration is recorded at application time; the tick cadence

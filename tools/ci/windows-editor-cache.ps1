@@ -27,11 +27,26 @@ if ([string]::IsNullOrWhiteSpace($ArchiveDir)) {
     $ArchiveDir = Join-Path $env:RUNNER_TEMP 'editor-cache'
 }
 New-Item -ItemType Directory -Force $ArchiveDir | Out-Null
+$ArchiveDir = (Resolve-Path $ArchiveDir).Path
 
 $engineArchive = Join-Path $ArchiveDir 'editor-engine.7z'
 $gameArchive = Join-Path $ArchiveDir 'editor-game.7z'
+$manifest = Join-Path $ArchiveDir 'editor-cache-manifest.json'
+$verifier = Join-Path $PSScriptRoot 'editor_cache_manifest.py'
+$receipt = Join-Path $repo 'game/Saved/CI/editor-cache-verified.json'
+# A failed new restore must never leave a previous successful attestation.
+if (Test-Path -LiteralPath $receipt) { Remove-Item -LiteralPath $receipt -Force }
 
 if ($Action -eq 'save') {
+    $buildInputs = Join-Path $ArchiveDir 'editor-build-inputs.json'
+    if (-not (Test-Path -LiteralPath $buildInputs)) {
+        throw 'Editor cache requires the input snapshot produced by windows-build-editor.ps1.'
+    }
+    # 7z a updates an existing archive and retains removed files. Start fresh
+    # so a rebuilt cache cannot silently carry obsolete project DLLs.
+    foreach ($old in @($engineArchive, $gameArchive, $manifest)) {
+        if (Test-Path -LiteralPath $old) { Remove-Item -LiteralPath $old -Force }
+    }
     Write-Host "=========================================================="
     Write-Host "   Saving compiled Editor binaries and receipts           "
     Write-Host "=========================================================="
@@ -50,7 +65,7 @@ if ($Action -eq 'save') {
         # Collect plugin binaries
         if (Test-Path 'Engine/Plugins') {
             Get-ChildItem 'Engine/Plugins' -Recurse -Directory -Filter 'Win64' |
-                Where-Object { $_.FullName -match '[\\/]Binaries[\\/]Win64$' } |
+                Where-Object { $_.FullName -match '[\\/]Binaries[\\/]Win64$' -and $_.FullName -notmatch '[\\/](Intermediate|Content)[\\/]' } |
                 ForEach-Object {
                     $engItems += [IO.Path]::GetRelativePath($engine, $_.FullName).Replace('\', '/')
                 }
@@ -77,7 +92,7 @@ if ($Action -eq 'save') {
         if (Test-Path 'game/Build/Receipts') { $gameItems += 'game/Build/Receipts' }
         if (Test-Path 'game/Plugins') {
             Get-ChildItem 'game/Plugins' -Recurse -Directory -Filter 'Win64' |
-                Where-Object { $_.FullName -match '[\\/]Binaries[\\/]Win64$' } |
+                Where-Object { $_.FullName -match '[\\/]Binaries[\\/]Win64$' -and $_.FullName -notmatch '[\\/](Intermediate|Content)[\\/]' } |
                 ForEach-Object {
                     $gameItems += [IO.Path]::GetRelativePath($repo, $_.FullName).Replace('\', '/')
                 }
@@ -91,15 +106,14 @@ if ($Action -eq 'save') {
             & 7z a -t7z -mx=1 -mmt=2 $gameArchive "@$listFile"
             if ($LASTEXITCODE) { throw "7z Game archive creation failed ($LASTEXITCODE)." }
             Remove-Item -LiteralPath $listFile -Force -ErrorAction SilentlyContinue
-        } else {
-            # Create a small marker archive if no game items
-            & 7z a -t7z -mx=1 -mmt=2 $gameArchive (Join-Path $repo 'game/QinglanAscension.uproject')
-        }
+        } else { throw 'No compiled project editor modules exist to cache.' }
     }
     finally {
         Pop-Location
     }
 
+    & python $verifier seal --repo $repo --engine $engine --archive $ArchiveDir --build-inputs $buildInputs
+    if ($LASTEXITCODE) { throw 'Editor cache could not be sealed against its build inputs and artifacts.' }
     $engSizeMB = [math]::Round(((Get-Item $engineArchive).Length / 1MB), 2)
     $gameSizeMB = [math]::Round(((Get-Item $gameArchive).Length / 1MB), 2)
     Write-Host "Save complete: engine archive = $engSizeMB MB, game archive = $gameSizeMB MB"
@@ -108,37 +122,22 @@ elseif ($Action -eq 'restore') {
     Write-Host "=========================================================="
     Write-Host "   Restoring compiled Editor binaries and receipts        "
     Write-Host "=========================================================="
-    if (-not (Test-Path $engineArchive)) { throw "Missing engine archive: $engineArchive" }
+    # Reject old/mismatched/corrupt caches before extracting anything. A run
+    # ID alone says nothing about which gameplay and test sources were built.
+    & python $verifier verify-archives --repo $repo --engine $engine --archive $ArchiveDir
+    if ($LASTEXITCODE) { throw 'Editor cache is stale or unverified; rebuild the editor cache for this checkout.' }
 
     $targetEngine = $engine.TrimEnd('\', '/')
     Write-Host "Extracting $engineArchive to $targetEngine..."
     & 7z x -y $engineArchive "-o$targetEngine"
     if ($LASTEXITCODE) { throw "Extraction of $engineArchive failed ($LASTEXITCODE)." }
 
-    if (Test-Path $gameArchive) {
-        $targetRepo = $repo.TrimEnd('\', '/')
-        Write-Host "Extracting $gameArchive to $targetRepo..."
-        & 7z x -y $gameArchive "-o$targetRepo"
-        if ($LASTEXITCODE) { throw "Extraction of $gameArchive failed ($LASTEXITCODE)." }
-    }
+    $targetRepo = $repo.TrimEnd('\', '/')
+    Write-Host "Extracting $gameArchive to $targetRepo..."
+    & 7z x -y $gameArchive "-o$targetRepo"
+    if ($LASTEXITCODE) { throw "Extraction of $gameArchive failed ($LASTEXITCODE)." }
 
-    # Verify key binaries
-    $editorExe = Join-Path $engine 'Engine/Binaries/Win64/UnrealEditor.exe'
-    $editorCmd = Join-Path $engine 'Engine/Binaries/Win64/UnrealEditor-Cmd.exe'
-    if (-not (Test-Path $editorExe) -and -not (Test-Path $editorCmd)) {
-        throw "Verification failed: Neither UnrealEditor.exe nor UnrealEditor-Cmd.exe found at $engine/Engine/Binaries/Win64 after restore."
-    }
-    $scwExe = Join-Path $engine 'Engine/Binaries/Win64/ShaderCompileWorker.exe'
-    $pakExe = Join-Path $engine 'Engine/Binaries/Win64/UnrealPak.exe'
-    if (Test-Path $scwExe) {
-        Write-Host "Verification: ShaderCompileWorker.exe is present."
-    } else {
-        Write-Warning "ShaderCompileWorker.exe not found at $engine/Engine/Binaries/Win64."
-    }
-    if (Test-Path $pakExe) {
-        Write-Host "Verification: UnrealPak.exe is present."
-    } else {
-        Write-Warning "UnrealPak.exe not found at $engine/Engine/Binaries/Win64."
-    }
-    Write-Host "Verification succeeded: Editor binaries are present."
+    & python $verifier verify-installed --repo $repo --engine $engine --manifest $manifest --receipt $receipt
+    if ($LASTEXITCODE) { throw 'Restored editor binaries or receipts differ from the sealed cache.' }
+    Write-Host "Verification succeeded: Editor inputs and all restored artifacts match."
 }

@@ -100,6 +100,10 @@ public:
 	UPROPERTY() TArray<FName> EquippedPassives;
 	/** Talisman id -> remaining expedition charges; refilled at the sanctuary. */
 	UPROPERTY() TMap<FName, int32> TalismanCharges;
+	/** Binding order for the two talisman slots; retained across travel and profile loads. */
+	UPROPERTY() TArray<FName> EquippedTalismans;
+	/** Optional v2 extension: false only for saves written before loadout persistence. */
+	UPROPERTY() bool bTalismanLoadoutInitialized = false;
 	UPROPERTY() TArray<FName> CampaignFlags;
 	UPROPERTY() TArray<FName> CommittedTransactionIds;
 	UPROPERTY() bool bHasCheckpoint = false;

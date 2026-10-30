@@ -13,5 +13,5 @@ export QINGLAN_PROJECT_DIR="${QINGLAN_PROJECT_DIR:-$REPO_ROOT/game}"
 command -v python3 >/dev/null 2>&1 || fail "Python 3 is required"
 exec python3 "$SCRIPT_DIR/run_acceptance.py" \
   --repo "$REPO_ROOT" --engine "$QINGLAN_ENGINE_ROOT" \
-  --project "$QINGLAN_PROJECT_DIR" --editor "$(qinglan_editor_tool)" \
+  --project "$QINGLAN_PROJECT_DIR" \
   --host "$QINGLAN_HOST" --platform "$QINGLAN_PLATFORM" "$@"

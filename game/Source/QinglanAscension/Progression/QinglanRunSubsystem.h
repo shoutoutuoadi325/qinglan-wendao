@@ -12,6 +12,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FQinglanRoomEntered, int32, RoomInde
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQinglanRoomCompleted, int32, RoomIndex, int64, ShardsAwarded);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FQinglanExpeditionEnded);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FQinglanBankingFailed);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FQinglanBlessingsChanged);
 
 /** One drafted temporary blessing. */
 USTRUCT(BlueprintType)
@@ -101,8 +102,10 @@ public:
 	UFUNCTION(BlueprintPure) FName GetPendingCheckpointMap() const;
 	void MarkCheckpointResumed();
 
-	/** Checkpoint capture for the save subsystem (pre-room snapshot). */
+	/** Unfinished fights save entrance vitals; cleared/safe rooms save current vitals. */
 	void ExportCheckpoint(struct FQinglanCheckpoint& Out) const;
+	/** Unfinished encounters rewind consumables together with their entrance vitals. */
+	bool ExportCheckpointTalismanCharges(TMap<FName, int32>& OutCharges) const;
 	void ImportCheckpoint(const struct FQinglanCheckpoint& In);
 
 	UPROPERTY(BlueprintAssignable) FQinglanRoomEntered OnRoomEntered;
@@ -110,4 +113,5 @@ public:
 	UPROPERTY(BlueprintAssignable) FQinglanExpeditionEnded OnExpeditionEnded;
 	/** Banking could not allocate/commit its transaction; loot stays unbanked and retryable (AUD-07). */
 	UPROPERTY(BlueprintAssignable) FQinglanBankingFailed OnBankingFailed;
+	UPROPERTY(BlueprintAssignable) FQinglanBlessingsChanged OnBlessingsChanged;
 };

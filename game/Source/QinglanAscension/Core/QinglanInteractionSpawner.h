@@ -48,7 +48,7 @@ private:
 	/** Hub-only: synthesizes the sanctuary rest station beside hub.courier_board when absent. */
 	void SynthesizeHubRestAnchor(UWorld* World, const TMap<FName, FVector>& AnchorPositions);
 	/** AUD-10: ledger/correspondence stations for maps authored before they existed. */
-	void SynthesizeHubSceneAnchors(UWorld* World, const TMap<FName, FVector>& AnchorPositions);
+	void SynthesizeHubSceneAnchors(UWorld* World, TMap<FName, FVector>& AnchorPositions);
 	/** A visible, harmless practice target beside the training-yard station. */
 	void SynthesizeHubTrainingTarget(UWorld* World, const TMap<FName, FVector>& AnchorPositions);
 	/** Realm-only: one door interactable at each corridor mouth (rooms 0..5 -> 1..6). */

@@ -100,6 +100,8 @@ namespace QinglanGraphics
 
 	/** Base scalability mix for one preset (docs/06 §1 matrix, §4 conservative defaults). */
 	FQinglanGraphicsSettings MakePresetSettings(EQinglanQualityPreset Preset);
+	/** Change visual quality without resetting accessibility or display preferences. */
+	FQinglanGraphicsSettings MakePresetSettings(EQinglanQualityPreset Preset, const FQinglanGraphicsSettings& Current);
 
 	/** Clamps user input into engine-valid ranges before it reaches UGameUserSettings/cvars. */
 	FQinglanGraphicsSettings Sanitize(const FQinglanGraphicsSettings& Settings);

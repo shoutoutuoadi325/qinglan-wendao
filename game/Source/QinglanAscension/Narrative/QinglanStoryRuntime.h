@@ -129,6 +129,8 @@ struct FQinglanStorySession
 	TSet<FName> CompletedObjectives;
 	/** Prevent save delegates from recursively autosaving the same transaction. */
 	bool bSavingStoryBoundary = false;
+	/** Nested scene completion must not persist between its completion marker and rewards. */
+	int32 DeferredSaveDepth = 0;
 
 	// --- Ambient (barks) / dispatcher events ---
 	FName CurrentLocation = NAME_None;
@@ -337,6 +339,8 @@ namespace QinglanStoryRuntime
 	QINGLANASCENSION_API void ImportNarrativeState(UQinglanStorySubsystem* Story, const FQinglanNarrativeState& In);
 	/** Persist the current narrative transaction through the active profile save path. */
 	QINGLANASCENSION_API bool SaveStoryBoundary(UQinglanStorySubsystem* Story);
+	/** True while a scene completion is applying one compound profile/story transaction. */
+	QINGLANASCENSION_API bool IsStorySaveDeferred(const UQinglanStorySubsystem* Story);
 #if WITH_DEV_AUTOMATION_TESTS
 	/** Transient registry injection; tests must clear this with nullptr before returning. */
 	QINGLANASCENSION_API void SetRegistryForTesting(UQinglanStoryRegistry* Registry);
@@ -346,5 +350,5 @@ namespace QinglanStoryRuntime
 	QINGLANASCENSION_API bool IsObjectiveCompleted(const UQinglanStorySubsystem* Story, FName ObjectiveId);
 	QINGLANASCENSION_API bool IsSceneObjectiveCompleted(const UQinglanStorySubsystem* Story, FName SceneId, FName ObjectiveId);
 	QINGLANASCENSION_API FName GetPendingAgreement(const UQinglanStorySubsystem* Story, FName QuestId);
-	bool WasEndingPreviewed(const UQinglanStorySubsystem* Story, FName EndingId);
+	QINGLANASCENSION_API bool WasEndingPreviewed(const UQinglanStorySubsystem* Story, FName EndingId);
 } // namespace QinglanStoryRuntime

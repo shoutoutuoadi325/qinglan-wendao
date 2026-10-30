@@ -401,8 +401,16 @@ void AQinglanTrialDirector::Tick(float DeltaTime)
 			EnterRequiredKillPhase();
 			return;
 		}
-		UpdateStormSchedule(DeltaTime);
 		UpdatePendingStrikes(DeltaTime);
+		if (!Combat->IsAlive())
+		{
+			EndTrial(/*bSuccess=*/false);
+			return;
+		}
+		// A volley created this frame has not yet been shown to the player.
+		// Age existing warnings first so a slow frame cannot consume a new
+		// strike's entire warning window before its first rendered outline.
+		UpdateStormSchedule(DeltaTime);
 
 		if (!bWaveOutstanding)
 		{
@@ -420,6 +428,13 @@ void AQinglanTrialDirector::Tick(float DeltaTime)
 	{
 		// Residual telegraphed strikes still land during the kill phase.
 		UpdatePendingStrikes(DeltaTime);
+		// A queued victory cannot outlive a lethal residual strike in this
+		// frame. The entry check ran before these hazards applied damage.
+		if (!Combat->IsAlive())
+		{
+			EndTrial(/*bSuccess=*/false);
+			return;
+		}
 		UpdateRequiredTarget();
 		if (Phase == EQinglanTrialPhase::Victory)
 		{

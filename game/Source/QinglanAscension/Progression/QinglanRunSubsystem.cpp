@@ -144,6 +144,8 @@ namespace
 
 		/** Player attributes captured at room entry (pre-room checkpoint snapshot). */
 		FQinglanAttributes EntryAttributes;
+		TMap<FName, int32> EntryTalismanCharges;
+		bool bHasEntryTalismanCharges = false;
 	};
 
 	TMap<TWeakObjectPtr<UQinglanRunSubsystem>, FQinglanRunState>& RunStates()
@@ -217,13 +219,23 @@ namespace
 	}
 
 	/** Player pawn's combat attributes for the pre-room snapshot (best effort). */
-	FQinglanAttributes SnapshotPlayerAttributes(const UQinglanRunSubsystem* Subsystem)
+	FQinglanAttributes SnapshotPlayerAttributes(const UQinglanRunSubsystem* Subsystem,
+		const FQinglanAttributes& Fallback = FQinglanAttributes())
 	{
 		const UGameInstance* Instance = Subsystem->GetGameInstance();
 		UWorld* World = Instance ? Instance->GetWorld() : nullptr;
 		AQinglanCharacter* Player = World ? Cast<AQinglanCharacter>(UGameplayStatics::GetPlayerCharacter(World, 0)) : nullptr;
 		const UQinglanCombatComponent* Combat = Player ? Player->GetCombat() : nullptr;
-		return Combat ? Combat->GetAttributes() : FQinglanAttributes();
+		return Combat ? Combat->GetAttributes() : Fallback;
+	}
+
+	void SnapshotTalismanCharges(const UQinglanRunSubsystem* Subsystem, FQinglanRunState& State)
+	{
+		const UGameInstance* Instance = Subsystem->GetGameInstance();
+		const UQinglanProfileSubsystem* Profile = Instance ? Instance->GetSubsystem<UQinglanProfileSubsystem>() : nullptr;
+		State.bHasEntryTalismanCharges = Profile != nullptr;
+		State.EntryTalismanCharges.Reset();
+		if (Profile) { Profile->GetTalismanCharges(State.EntryTalismanCharges); }
 	}
 
 	/**
@@ -490,6 +502,7 @@ bool UQinglanRunSubsystem::StartExpedition(FName RealmId, int32 Seed)
 	State.bDraftPending = false;
 	State.CommittedRoomIds.Reset();
 	State.EntryAttributes = SnapshotPlayerAttributes(this);
+	SnapshotTalismanCharges(this, State);
 	Save->BeginExpeditionCheckpoint();
 
 	// Force the template to exist (imported asset or synthesis) so the realm id
@@ -534,6 +547,7 @@ bool UQinglanRunSubsystem::EnterRoom(int32 RoomIndex)
 	// Pre-room snapshot: this exact attributes value rides the checkpoint
 	// (docs/05 section 6 crash-resume restores room-entrance vitals).
 	State.EntryAttributes = SnapshotPlayerAttributes(this);
+	SnapshotTalismanCharges(this, State);
 	OnRoomEntered.Broadcast(RoomIndex);
 	// AUD-11: authored CH01_S02 proof term for reaching the room-3 shrine.
 	if (RoomIndex == 3)
@@ -556,9 +570,11 @@ bool UQinglanRunSubsystem::EnterRoom(int32 RoomIndex)
 	if (State.CommittedRoomIds.Contains(RoomIndex))
 	{
 		UE_LOG(LogQinglan, Verbose, TEXT("EnterRoom: room %d already committed; no respawn"), RoomIndex);
-		return true;
 	}
-	BuildRoomWave(State, Realm, RoomIndex, Wave);
+	else
+	{
+		BuildRoomWave(State, Realm, RoomIndex, Wave);
+	}
 	if (!Wave.IsEmpty())
 	{
 		if (AQinglanEncounterDirector* Director = FindDirector(this))
@@ -646,6 +662,7 @@ void UQinglanRunSubsystem::CompleteCurrentRoom(FName TransactionId)
 
 	// AUD-02/06: persist both the reward and the exact pending offer. Waiting
 	// for a selection would leave the promised completed-room boundary unsaved.
+	State.EntryAttributes = SnapshotPlayerAttributes(this, State.EntryAttributes);
 	CommitBoundarySave(this);
 	// Reward observers can now query the actual offer and committed room state.
 	OnRoomCompleted.Broadcast(RoomIndex, Shards);
@@ -755,6 +772,7 @@ void UQinglanRunSubsystem::EndExpedition(bool bVictory, bool bVoluntaryRetreat)
 	State.CommittedRoomIds.Reset();
 	State.CurrentRoomIndex = INDEX_NONE;
 	State.EntryAttributes = FQinglanAttributes();
+	OnBlessingsChanged.Broadcast();
 	CommitBoundarySave(this);
 	// A disk failure retains the banked in-memory profile and last valid disk
 	// snapshot; guarded travel retries SaveActiveSession before leaving. The
@@ -840,7 +858,7 @@ bool UQinglanRunSubsystem::RequestExit()
 		return false;
 	}
 	EndExpedition(/*bVictory=*/true, /*bVoluntaryRetreat=*/false);
-	return true;
+	return !IsInExpedition();
 }
 
 bool UQinglanRunSubsystem::RequestRetreat()
@@ -852,7 +870,7 @@ bool UQinglanRunSubsystem::RequestRetreat()
 	}
 	// Distinct retreat path: 70% banking, no victory, no boss proof.
 	EndExpedition(/*bVictory=*/false, /*bVoluntaryRetreat=*/true);
-	return true;
+	return !IsInExpedition();
 }
 
 // ---------------------------------------------------------------------------
@@ -940,6 +958,7 @@ bool UQinglanRunSubsystem::AcceptBlessing(FName BlessingId)
 	// Replace the pending-offer checkpoint with the selected blessing: the
 	// chosen blessing is granted exactly once and must survive a quit now
 	// (AUD-06 acceptance: "a chosen blessing is granted once").
+	OnBlessingsChanged.Broadcast();
 	CommitBoundarySave(this);
 	return true;
 }
@@ -956,6 +975,7 @@ void UQinglanRunSubsystem::ResetRun()
 	// RNGs, draft, loot and room snapshot. This is not a completed expedition:
 	// do not broadcast OnExpeditionEnded (subscribers may trigger banking/travel).
 	RunStates().Remove(this);
+	OnBlessingsChanged.Broadcast();
 	// TODO(AUD-04/AUD-51): profile selection must tear down the old world/pawn
 	// before resuming another profile; this reset only owns subsystem state.
 }
@@ -1019,7 +1039,14 @@ void UQinglanRunSubsystem::ExportCheckpoint(FQinglanCheckpoint& Out) const
 	Out.AcquiredBlessings = State->AcquiredBlessings;
 	Out.PendingBlessingOffer = State->PendingBlessingOffer;
 	Out.PendingBlessingRoom = State->PendingOfferRoom;
-	Out.PlayerAttributes = State->EntryAttributes;
+	const EQinglanRoomKind Kind = GetCurrentRoomKind();
+	const bool bReplayEncounter = !State->CommittedRoomIds.Contains(State->CurrentRoomIndex)
+		&& (Kind == EQinglanRoomKind::Combat || Kind == EQinglanRoomKind::Elite || Kind == EQinglanRoomKind::Boss);
+	// Cleared rooms do not replay their enemies, so healing and post-combat
+	// vitals must survive along with their rewards. Before world resume, the
+	// current pawn still belongs to the previous map/profile: keep saved vitals.
+	Out.PlayerAttributes = !bReplayEncounter && !State->bNeedsCheckpointResume
+		? SnapshotPlayerAttributes(this, State->EntryAttributes) : State->EntryAttributes;
 	Out.Loot = State->UnbankedLoot;
 	Out.CommittedRoomIds = State->CommittedRoomIds;
 }
@@ -1043,6 +1070,9 @@ void UQinglanRunSubsystem::ImportCheckpoint(const FQinglanCheckpoint& In)
 	State.CurrentRoomIndex = In.RoomIndex;
 	State.AcquiredBlessings = In.AcquiredBlessings;
 	State.EntryAttributes = In.PlayerAttributes;
+	// LoadProfile has already restored the matching saved charge map. Repeated
+	// saves before the realm world exists must keep that same entrance state.
+	SnapshotTalismanCharges(this, State);
 	State.UnbankedLoot = In.Loot;
 	State.CommittedRoomIds = In.CommittedRoomIds;
 	// Older guided saves could still be standing in the full realm's rooms
@@ -1068,4 +1098,22 @@ void UQinglanRunSubsystem::ImportCheckpoint(const FQinglanCheckpoint& In)
 
 	ResolveRealmTemplate(this, State.RealmId); // ensure the template exists for queries
 	UE_LOG(LogQinglan, Log, TEXT("Checkpoint resumed: realm %s room %d"), *State.RealmId.ToString(), State.CurrentRoomIndex);
+}
+
+bool UQinglanRunSubsystem::ExportCheckpointTalismanCharges(TMap<FName, int32>& OutCharges) const
+{
+	const FQinglanRunState* State = FindStateFor(this);
+	if (!State || !State->bInExpedition || !State->bHasEntryTalismanCharges
+		|| State->CommittedRoomIds.Contains(State->CurrentRoomIndex))
+	{
+		return false;
+	}
+	const UQinglanRealmDataAsset* Realm = ResolveRealmTemplate(this, State->RealmId);
+	const EQinglanRoomKind Kind = Realm ? Realm->GetRoomKind(State->CurrentRoomIndex) : EQinglanRoomKind::Entrance;
+	if (Kind != EQinglanRoomKind::Combat && Kind != EQinglanRoomKind::Elite && Kind != EQinglanRoomKind::Boss)
+	{
+		return false; // safe rooms keep actual charges; no encounter will be replayed
+	}
+	OutCharges = State->EntryTalismanCharges;
+	return true;
 }

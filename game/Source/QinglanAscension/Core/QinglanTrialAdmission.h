@@ -36,13 +36,13 @@ struct FResult
 };
 
 QINGLANASCENSION_API bool ResolveScene(FName SceneId, ETrial& OutTrial);
-/** Golden Core profiles resolve to Golden Core, then fail the progression admission check. */
+/** Golden Core profiles use the arena's post-trial story entry route. */
 QINGLANASCENSION_API ETrial SelectForStage(EQinglanStage Stage);
 QINGLANASCENSION_API FName SceneForTrial(ETrial Trial);
 QINGLANASCENSION_API FResult Evaluate(ETrial Trial, const FPrerequisites& State);
 QINGLANASCENSION_API FResult Evaluate(ETrial Trial, const UQinglanProfileSubsystem* Profile,
 	const UQinglanStorySubsystem* Story);
-/** Hub entry checks the chapter preparation scene, allowing its preparation to happen in the arena. */
+/** Hub entry checks preparation or permits returning to the completed Golden Core trial's story platforms. */
 QINGLANASCENSION_API FResult EvaluateEntry(ETrial Trial, const UQinglanProfileSubsystem* Profile,
 	const UQinglanStorySubsystem* Story);
 /** Adds imported trial-scene prerequisites; suitable after the entry choice has committed. */

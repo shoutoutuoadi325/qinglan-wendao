@@ -9,8 +9,8 @@ param(
     [string]$PublisherDisplayName = '',
     [string]$StoreId = '',
     [string]$Version = '0.1.0.0',
-    # The legacy switch name is accepted for callers, but only engine tools
-    # may be reused. Project editor modules must match this checkout.
+    # Both engine tools and project modules may be reused only after their
+    # build inputs and restored artifact hashes match this checkout.
     [Alias('SkipEditorBuild')]
     [switch]$UseCachedEditorTools
 )
@@ -71,12 +71,18 @@ if (-not $UseCachedEditorTools) {
         Tee-Object -Append (Join-Path $reports 'editor-build.log')
     if ($LASTEXITCODE) { throw "UnrealPak build failed ($LASTEXITCODE)." }
 } else {
+    # Verify again at the point of use, including direct invocations of this
+    # script or source/DLL edits after restore. This must precede generated
+    # asset deletion, importer execution, automation, and cooking.
+    & python (Join-Path $PSScriptRoot 'editor_cache_manifest.py') verify-installed `
+        --repo $repo --engine $engine --manifest (Join-Path $repo 'game/Saved/CI/editor-cache-verified.json')
+    if ($LASTEXITCODE) { throw 'Cached editor verification failed; rebuild/restore a matching editor cache.' }
     foreach ($tool in @('ShaderCompileWorker.exe', 'UnrealPak.exe', 'UnrealEditor-Cmd.exe')) {
         if (-not (Test-Path (Join-Path $engine "Engine/Binaries/Win64/$tool"))) {
             throw "Restored editor tools are missing $tool."
         }
     }
-    Write-Host 'Reusing cached engine tools and restored Editor binaries; skipping redundant editor rebuild.'
+    Write-Host 'Reusing verified engine tools and project Editor modules from matching build inputs.'
 }
 
 $editor = Join-Path $engine 'Engine/Binaries/Win64/UnrealEditor-Cmd.exe'

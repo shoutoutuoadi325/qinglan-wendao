@@ -66,7 +66,7 @@ namespace QinglanAITunables
  * together with it (both survive for the room's lifetime).
  */
 UCLASS(NotBlueprintable)
-class AQinglanAIController : public AAIController
+class QINGLANASCENSION_API AQinglanAIController : public AAIController
 {
 	GENERATED_BODY()
 
@@ -140,6 +140,7 @@ public:
 	/** Marks the ground at windup start; returns the recorded ring center. */
 	FVector RecordGroundMarker(const FVector& Center) { GroundMarkerCenter = Center; return Center; }
 	const FVector& GetGroundMarkerCenter() const { return GroundMarkerCenter; }
+	float GetSafeArcCenterDegrees() const { return SafeArcCenterDeg; }
 	/** Storm-volley strike outlines recorded at windup start (docs/02 section 9). */
 	const TArray<FVector>& GetPendingStrikeCenters() const { return PendingStrikeCenters; }
 	bool IsTargetInsideGroundRing(float RingRadius) const;

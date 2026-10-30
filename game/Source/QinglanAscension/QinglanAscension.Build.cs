@@ -12,6 +12,7 @@ public class QinglanAscension : ModuleRules
 			"Core",
 			"CoreUObject",
 			"Engine",
+			"AIModule", // Public controller headers inherit AAIController.
 			"InputCore",
 			"EnhancedInput",
 			"UMG",
@@ -29,7 +30,9 @@ public class QinglanAscension : ModuleRules
 			"Slate",
 			"SlateCore",
 			"NavigationSystem",
-			"AIModule",
+			// Exact safe-sector geometry; engine runtime modules available on every target.
+			"GeometryCore",
+			"GeometryFramework",
 			// Platform/QinglanGraphicsSettingsService reads the active RHI name,
 			// adapter string, and ray-tracing capability globals (docs/06 §2-§3).
 			"RHI",

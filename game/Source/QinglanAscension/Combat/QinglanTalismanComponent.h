@@ -32,14 +32,16 @@ public:
 
 	/**
 	 * Replaces both slots. Every id must be catalog-valid, duplicate-free, and
-	 * (when a profile is present) carry charges; at most
+	 * (when newly equipped with a profile present) carry charges. Existing
+	 * exhausted slots may be retained while another slot is removed. The profile
+	 * owns and persists the slots; changes are rejected during expeditions. At most
 	 * QinglanProgression::EquippedTalismanLimit entries (docs/03 section 5).
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Qinglan|Talisman")
 	bool SetEquippedTalismans(const TArray<FName>& TalismanIds);
 
 	UFUNCTION(BlueprintPure, Category = "Qinglan|Talisman")
-	TArray<FName> GetEquippedTalismans() const { return EquippedTalismans; }
+	TArray<FName> GetEquippedTalismans() const;
 
 	/**
 	 * Uses the talisman bound to one slot (0/1). Consumes one profile charge
@@ -60,14 +62,11 @@ public:
 	 */
 	UPROPERTY(EditDefaultsOnly, Category = "Qinglan|Talisman") float ShockDamage = 10.f;
 
-protected:
-	virtual void BeginPlay() override;
-
 private:
 	/** Executes one catalog effect against the owner; false rejects the use (no charge consumed). */
 	bool ExecuteEffect(const struct FQinglanTalismanCatalogEntry& Entry, AActor* Owner, UQinglanCombatComponent& Combat);
 	UQinglanProfileSubsystem* GetProfile() const;
 
-	/** Slot contents in binding order (docs/02 section 1: slots Q/R). */
-	TArray<FName> EquippedTalismans;
+	/** Explicit slots only for component test worlds without a profile subsystem. */
+	TArray<FName> FallbackEquippedTalismans;
 };

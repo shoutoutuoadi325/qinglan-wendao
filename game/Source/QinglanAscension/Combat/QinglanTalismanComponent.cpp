@@ -27,36 +27,6 @@ UQinglanTalismanComponent::UQinglanTalismanComponent()
 	SetIsReplicatedByDefault(false); // offline single-process game
 }
 
-void UQinglanTalismanComponent::BeginPlay()
-{
-	Super::BeginPlay();
-
-	// Authored default: no sanctuary UI exists yet, so the slots seed themselves
-	// from the charged talismans in catalog order once per pawn. The bindings of
-	// docs/02 section 1 (slots Q/R) therefore work right after the sanctuary
-	// refill; SetEquippedTalismans remains the explicit loadout path.
-	if (EquippedTalismans.Num() > 0)
-	{
-		return;
-	}
-	UQinglanProfileSubsystem* Profile = GetProfile();
-	if (!Profile)
-	{
-		return; // headless/test worlds: slots stay empty until set explicitly
-	}
-	for (const FQinglanTalismanCatalogEntry& Entry : UQinglanEconomyLibrary::GetTalismanCatalog())
-	{
-		if (EquippedTalismans.Num() >= QinglanProgression::EquippedTalismanLimit)
-		{
-			break;
-		}
-		if (Profile->GetTalismanChargeCount(Entry.TalismanId) > 0)
-		{
-			EquippedTalismans.Add(Entry.TalismanId);
-		}
-	}
-}
-
 UQinglanProfileSubsystem* UQinglanTalismanComponent::GetProfile() const
 {
 	UWorld* World = GetWorld();
@@ -64,43 +34,41 @@ UQinglanProfileSubsystem* UQinglanTalismanComponent::GetProfile() const
 	return GameInstance ? GameInstance->GetSubsystem<UQinglanProfileSubsystem>() : nullptr;
 }
 
+TArray<FName> UQinglanTalismanComponent::GetEquippedTalismans() const
+{
+	const UQinglanProfileSubsystem* Profile = GetProfile();
+	return Profile ? Profile->GetEquippedTalismans() : FallbackEquippedTalismans;
+}
+
 bool UQinglanTalismanComponent::SetEquippedTalismans(const TArray<FName>& TalismanIds)
 {
+	if (UQinglanProfileSubsystem* Profile = GetProfile())
+	{
+		return Profile->TrySetEquippedTalismans(TalismanIds);
+	}
+	// Isolated component test worlds have no profile. Keep their explicit
+	// catalog-valid slots usable without owning a second gameplay loadout.
 	if (TalismanIds.Num() > QinglanProgression::EquippedTalismanLimit)
 	{
-		return false; // at most two equipped talismans (docs/03 section 5)
+		return false;
 	}
-	UQinglanProfileSubsystem* Profile = GetProfile();
 	TSet<FName> Seen;
-	Seen.Reserve(TalismanIds.Num());
 	for (const FName TalismanId : TalismanIds)
 	{
 		FQinglanTalismanCatalogEntry Entry;
-		if (!UQinglanEconomyLibrary::FindTalisman(TalismanId, Entry))
-		{
-			return false; // unknown ids cannot be equipped
-		}
-		if (Seen.Contains(TalismanId))
-		{
-			return false; // no duplicate slots
-		}
-		Seen.Add(TalismanId);
-		// Charges are the availability record (docs/03 section 5: expedition
-		// charges, not inventory): a talisman with no charged entry is not
-		// equipable. Without a profile (headless tests) catalog validity alone
-		// decides, so slots stay drivable.
-		if (Profile && Profile->GetTalismanChargeCount(TalismanId) <= 0)
+		if (!UQinglanEconomyLibrary::FindTalisman(TalismanId, Entry) || Seen.Contains(TalismanId))
 		{
 			return false;
 		}
+		Seen.Add(TalismanId);
 	}
-
-	EquippedTalismans = TalismanIds;
+	FallbackEquippedTalismans = TalismanIds;
 	return true;
 }
 
 bool UQinglanTalismanComponent::UseSlot(int32 Slot)
 {
+	const TArray<FName> EquippedTalismans = GetEquippedTalismans();
 	if (!EquippedTalismans.IsValidIndex(Slot))
 	{
 		UE_LOG(LogQinglanCombat, Verbose, TEXT("Talisman slot %d has no talisman equipped"), Slot);

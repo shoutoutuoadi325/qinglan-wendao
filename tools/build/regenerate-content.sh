@@ -156,6 +156,8 @@ if [ "${TEXTURE_COUNT:-0}" -lt 8 ]; then
 fi
 [ -f "$CONTENT/Materials/M_QinglanSolid.uasset" ] \
   || { echo "regenerate-content.sh: ERROR: solid fallback master $CONTENT/Materials/M_QinglanSolid.uasset missing" >&2; rc_all=1; }
+[ -f "$CONTENT/Materials/M_QinglanGroundMarker.uasset" ] \
+  || { echo "regenerate-content.sh: ERROR: ground-warning material $CONTENT/Materials/M_QinglanGroundMarker.uasset missing" >&2; rc_all=1; }
 for MIC in M_BambooWall M_Cobblestone M_CobblestoneAlt M_StonePath M_GrassRock M_Cliff M_DirtFloor M_VolcanicRock M_RoofTiles; do
   [ -f "$CONTENT/Materials/$MIC.uasset" ] \
     || { echo "regenerate-content.sh: ERROR: surface material instance $CONTENT/Materials/$MIC.uasset missing" >&2; rc_all=1; }

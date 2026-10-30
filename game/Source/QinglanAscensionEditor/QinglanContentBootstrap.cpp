@@ -40,6 +40,7 @@
 #include "Materials/MaterialExpressionMultiply.h"
 #include "Materials/MaterialExpressionScalarParameter.h"
 #include "Materials/MaterialExpressionSphereMask.h"
+#include "Materials/MaterialExpressionSubtract.h"
 #include "Materials/MaterialExpressionTextureCoordinate.h"
 #include "Materials/MaterialExpressionTextureSampleParameter2D.h"
 #include "Materials/MaterialExpressionVectorParameter.h"
@@ -476,9 +477,9 @@ UMaterial* UQinglanContentBootstrapCommandlet::CreateOrLoadMasterMaterial()
 
 bool UQinglanContentBootstrapCommandlet::BootstrapVFXMaterials()
 {
-	// The three cue materials UQinglanVFXCueComponent resolves by convention
+	// The code-owned cue materials UQinglanVFXCueComponent resolves by convention
 	// (VFX/QinglanVFXCueComponent.cpp MaterialKeyForCue): additive sprite
-	// glow, deferred-decal telegraph disc, translucent fresnel barrier. Each
+	// glow, deferred-decal outline, translucent ground fill and fresnel barrier. Each
 	// exposes the same "Color" vector + "Intensity" scalar parameter pair the
 	// cue component drives through material instance dynamics.
 	bool bOk = true;
@@ -517,22 +518,52 @@ bool UQinglanContentBootstrapCommandlet::BootstrapVFXMaterials()
 
 	auto BeginMaterial = [](const FString& Path, EBlendMode Blend, EMaterialDomain Domain) -> TPair<UPackage*, UMaterial*>
 	{
-		if (UMaterial* Existing = LoadObject<UMaterial>(nullptr, *Path))
+		UMaterial* Mat = LoadObject<UMaterial>(nullptr, *Path);
+		UPackage* Pkg = Mat ? Mat->GetOutermost() : CreateOrFetchPackage(Path);
+		if (Mat)
 		{
-			return { nullptr, Existing };
+			// These four assets are authored entirely here. Preserve their object
+			// identities while replacing old graphs, including on normal reruns.
+			Pkg->FullyLoad();
+			Mat->PreEditChange(nullptr);
+			TArray<UMaterialExpression*> OldExpressions;
+			for (UMaterialExpression* Expression : Mat->GetExpressions())
+			{
+				OldExpressions.Add(Expression);
+				Mat->RemoveExpressionParameter(Expression);
+			}
+			for (int32 Property = 0; Property < MP_MAX; ++Property)
+			{
+				if (FExpressionInput* Input = Mat->GetExpressionInputForProperty(static_cast<EMaterialProperty>(Property)))
+				{
+					Input->Expression = nullptr;
+				}
+			}
+			FMaterialExpressionCollection& Collection = Mat->GetExpressionCollection();
+			Collection.Empty();
+			Collection.ExpressionExecBegin = nullptr;
+			Collection.ExpressionExecEnd = nullptr;
+			for (UMaterialExpression* Expression : OldExpressions) { Expression->MarkAsGarbage(); }
 		}
-		UPackage* Pkg = CreateOrFetchPackage(Path);
-		UMaterial* Mat = NewObject<UMaterial>(Pkg, *FPackageName::GetShortName(Path), RF_Public | RF_Standalone);
+		else
+		{
+			Mat = NewObject<UMaterial>(Pkg, *FPackageName::GetShortName(Path), RF_Public | RF_Standalone);
+		}
 		Mat->BlendMode = Blend;
 		Mat->SetShadingModel(MSM_Unlit); // UE 5.8: shading model is private; setter is the engine idiom
 		Mat->MaterialDomain = Domain;
+		Mat->bDisableDepthTest = false;
+		Mat->TwoSided = false;
+		// Old material-input constants must not bypass the replacement graph.
+		Mat->GetEditorOnlyData()->EmissiveColor.UseConstant = false;
+		Mat->GetEditorOnlyData()->Opacity.UseConstant = false;
 		return { Pkg, Mat };
 	};
 	auto FinishMaterial = [this](UPackage* Pkg, UMaterial* Mat)
 	{
 		if (Pkg == nullptr || Mat == nullptr)
 		{
-			return true; // already existed on disk; nothing to author
+			return false;
 		}
 		Mat->PreEditChange(nullptr);
 		Mat->PostEditChange();
@@ -560,7 +591,23 @@ bool UQinglanContentBootstrapCommandlet::BootstrapVFXMaterials()
 		}
 	}
 
-	// --- M_QinglanDecalRing: telegraph disc on the ground -----------------
+	// Broad ground fills need alpha blending, independent of particle glow.
+	// Geometry supplies the mask; the safe-sector mesh has no authored UVs.
+	{
+		const FString Path = ContentRoot + TEXT("/Materials/M_QinglanGroundMarker");
+		auto [Pkg, Mat] = BeginMaterial(Path, BLEND_Translucent, MD_Surface);
+		if (Pkg)
+		{
+			UMaterialExpressionVectorParameter* Color = AddVectorParam(Mat, TEXT("Color"), FLinearColor(0.8f, 0.7f, 1.f, 1.f), -300);
+			UMaterialExpressionScalarParameter* Intensity = AddScalarParam(Mat, TEXT("Intensity"), 0.55f, -100);
+			UMaterialExpressionScalarParameter* Opacity = AddScalarParam(Mat, TEXT("Opacity"), 0.22f, 100);
+			Mat->GetEditorOnlyData()->EmissiveColor.Connect(0, AddMultiply(Mat, Color, 0, Intensity, 0, -200));
+			Mat->GetEditorOnlyData()->Opacity.Connect(0, Opacity);
+			bOk &= FinishMaterial(Pkg, Mat);
+		}
+	}
+
+	// --- M_QinglanDecalRing: telegraph outline on the ground --------------
 	{
 		const FString Path = ContentRoot + TEXT("/Materials/M_QinglanDecalRing");
 		auto [Pkg, Mat] = BeginMaterial(Path, BLEND_Translucent, MD_DeferredDecal);
@@ -582,18 +629,30 @@ bool UQinglanContentBootstrapCommandlet::BootstrapVFXMaterials()
 			Disc->A.Connect(0, TexCoord);
 			Disc->B.Connect(0, Center);
 			Disc->AttenuationRadius = 0.5f;  // UV space; covers the decal face
-			Disc->HardnessPercent = 12.f;    // soft edge keeps reads readable, not harsh
+			Disc->HardnessPercent = 95.f;
 			Disc->MaterialExpressionEditorX = -600;
 			Disc->MaterialExpressionEditorY = -200;
 			Mat->GetExpressionCollection().AddExpression(Disc);
 
+			UMaterialExpressionSphereMask* Interior = NewObject<UMaterialExpressionSphereMask>(Mat);
+			Interior->A.Connect(0, TexCoord);
+			Interior->B.Connect(0, Center);
+			Interior->AttenuationRadius = 0.44f;
+			Interior->HardnessPercent = 95.f;
+			Mat->GetExpressionCollection().AddExpression(Interior);
+			UMaterialExpressionSubtract* Ring = NewObject<UMaterialExpressionSubtract>(Mat);
+			Ring->A.Connect(0, Disc);
+			Ring->B.Connect(0, Interior);
+			Mat->GetExpressionCollection().AddExpression(Ring);
+
 			UMaterialExpressionVectorParameter* Color = AddVectorParam(Mat, TEXT("Color"), FLinearColor(1.f, 0.42f, 0.12f, 1.f), -420);
 			UMaterialExpressionScalarParameter* Intensity = AddScalarParam(Mat, TEXT("Intensity"), 2.f, -40);
+			UMaterialExpressionScalarParameter* Opacity = AddScalarParam(Mat, TEXT("Opacity"), 0.7f, 120);
 
-			UMaterialExpressionMultiply* DiscTimesIntensity = AddMultiply(Mat, Disc, 0, Intensity, 0, -200);
+			UMaterialExpressionMultiply* DiscTimesIntensity = AddMultiply(Mat, Ring, 0, Intensity, 0, -200);
 			UMaterialExpressionMultiply* Emissive = AddMultiply(Mat, Color, 0, DiscTimesIntensity, 0, -260);
 			Mat->GetEditorOnlyData()->EmissiveColor.Connect(0, Emissive);
-			Mat->GetEditorOnlyData()->Opacity.Connect(0, DiscTimesIntensity);
+			Mat->GetEditorOnlyData()->Opacity.Connect(0, AddMultiply(Mat, Ring, 0, Opacity, 0, 0));
 			bOk &= FinishMaterial(Pkg, Mat);
 		}
 	}

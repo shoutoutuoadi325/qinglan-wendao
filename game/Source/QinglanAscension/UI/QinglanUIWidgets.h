@@ -19,6 +19,7 @@ class UCanvasPanel;
 class UQinglanDialogueWidget;
 class UQinglanJournalWidget;
 class UQinglanMenuWidget;
+class UQinglanUIEventRelay;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FQinglanEndingClosed);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FQinglanEndingCommitted, FName, EndingId);
@@ -395,6 +396,7 @@ class QINGLANASCENSION_API UQinglanDialogueWidget : public UUserWidget
 	GENERATED_BODY()
 public:
 	virtual void NativeConstruct() override;
+	virtual void NativeDestruct() override;
 	UFUNCTION(BlueprintImplementableEvent) void BP_OnLineShown(const FQinglanScriptLine& Line);
 	UFUNCTION(BlueprintImplementableEvent) void BP_OnChoicesShown(const TArray<FQinglanSceneChoice>& Choices);
 
@@ -463,6 +465,7 @@ private:
 	void BindNamedElements();
 
 	/** Named presenter blocks (null when the authored tree lacks them). */
+	UPROPERTY(Transient) TObjectPtr<UQinglanUIEventRelay> EventRelay;
 	UPROPERTY(Transient) TObjectPtr<UTextBlock> SpeakerText;
 	FText CurrentSourceLabel;
 	UPROPERTY(Transient) TObjectPtr<UTextBlock> LineText;
@@ -514,6 +517,7 @@ private:
 	UTextBlock* EnsureNamedText(FName Name, const FVector2D& Position, const FVector2D& Size, int32 FontSize);
 
 	/** Named vitals bars (null when the authored tree lacks them). */
+	UPROPERTY(Transient) TObjectPtr<UQinglanUIEventRelay> EventRelay;
 	UPROPERTY(Transient) TObjectPtr<UProgressBar> HealthBar;
 	UPROPERTY(Transient) TObjectPtr<UProgressBar> EnergyBar;
 	UPROPERTY(Transient) TObjectPtr<UProgressBar> StaminaBar;
@@ -633,7 +637,7 @@ private:
  * mouse share the same pure FQinglanMenuState selection/capture rules.
  */
 UCLASS()
-class UQinglanMenuWidget : public UUserWidget
+class QINGLANASCENSION_API UQinglanMenuWidget : public UUserWidget
 {
 	GENERATED_BODY()
 public:

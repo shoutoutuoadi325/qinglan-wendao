@@ -2,9 +2,8 @@
 // dodge (~450 cm / 0.45 s) with a bounded i-frame window (docs/02 §2).
 // The character owns the authored tunables (distance/duration/stamina); this
 // component owns the dodge runtime state because the scaffold AQinglanCharacter
-// header exposes no dodge members. Velocity is driven through the character
-// movement component every tick, so capsule sweeps make wall pass-through
-// impossible (docs/02 §2) and the integrated distance is frame-rate independent.
+// header exposes no dodge members. A duration-bounded root-motion source runs
+// through CharacterMovement's floor, gravity, and swept collision handling.
 #pragma once
 
 #include "CoreMinimal.h"
@@ -15,21 +14,26 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FQinglanDodgeStarted, float, Duratio
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FQinglanDodgeFinished);
 
 UCLASS(ClassGroup = (Qinglan), meta = (BlueprintSpawnableComponent))
-class UQinglanDodgeComponent : public UActorComponent
+class QINGLANASCENSION_API UQinglanDodgeComponent : public UActorComponent
 {
 	GENERATED_BODY()
 
 public:
 	UQinglanDodgeComponent();
 
+	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 	/**
 	 * Starts one dodge along Direction (Z ignored, normalized internally).
 	 * Distance/Duration/i-frame bounds come from the character's authored tunables.
-	 * Returns false when a dodge is already active or the arguments are invalid.
+	 * Returns false for invalid arguments, an active dodge, or an owner that
+	 * cannot move as a living character.
 	 */
 	bool StartDodge(const FVector& Direction, float Distance, float Duration, float InIFrameStart, float InIFrameEnd);
+	/** Cancel forced locomotion immediately on a hit reaction, death, or teardown. */
+	void CancelDodge();
 
 	bool IsDodging() const { return bDodgeActive; }
 	float GetElapsedSeconds() const { return DodgeElapsed; }
@@ -49,6 +53,7 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Qinglan|Dodge") bool bOrientToDodgeDirection = true;
 
 private:
+	UFUNCTION() void HandleMovementUpdated(float DeltaSeconds, FVector OldLocation, FVector OldVelocity);
 	void FinishDodge();
 
 	bool bDodgeActive = false;
@@ -58,4 +63,6 @@ private:
 	float IFrameStartTime = 0.10f;
 	float IFrameEndTime = 0.28f;
 	FVector DodgeDirection = FVector::ForwardVector;
+	/** Zero is the engine's invalid root-motion source ID. */
+	uint16 MovementSourceId = 0;
 };

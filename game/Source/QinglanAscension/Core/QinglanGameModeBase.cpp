@@ -650,7 +650,7 @@ bool AQinglanRealmGameMode::RestartRoomFromSnapshot()
 	// were when the room was entered; FQinglanCheckpoint.PlayerAttributes).
 	if (UQinglanCombatComponent* Combat = Player->GetCombat())
 	{
-		Combat->SetDerivedAttributes(Checkpoint.PlayerAttributes);
+		Combat->RestoreCheckpointAttributes(Checkpoint.PlayerAttributes);
 	}
 	// 3) Statuses: an interrupted active room may have died mid-Burn/Wet/Root;
 	// entrance resumes clean (status semantics: code-contracts.md combat).

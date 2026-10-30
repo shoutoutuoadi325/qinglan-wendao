@@ -156,6 +156,8 @@ public:
 	UFUNCTION(BlueprintPure) void GetTrialEventLog(TArray<FName>& OutEvents) const { OutEvents = TrialEventLog; }
 	/** The required elite/boss once sighted alive in the required-kill phase. */
 	UFUNCTION(BlueprintPure) AActor* GetRequiredTarget() const;
+	/** Read-only warning state for deterministic hazard verification. */
+	const TArray<FQinglanPendingStrike>& GetPendingStrikes() const { return PendingStrikes; }
 
 	/** A volley of strike outlines just appeared (persistent telegraphs). */
 	UPROPERTY(BlueprintAssignable) FQinglanTrialHazardTelegraph OnTrialHazardTelegraph;

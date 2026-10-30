@@ -11,6 +11,7 @@
 #include "Progression/QinglanRunSubsystem.h"
 #include "Narrative/QinglanStorySubsystem.h"
 #include "Persistence/QinglanProfileSnapshot.h"
+#include "Persistence/QinglanSaveMigration.h"
 #include "QinglanAscension.h"
 #include "Subsystems/SubsystemCollection.h"
 
@@ -89,6 +90,7 @@ void UQinglanProfileSubsystem::ResetToFreshProfile()
 	OwnedPassives.Reset();
 	EquippedPassives.Reset();
 	TalismanCharges.Reset();
+	ResetTalismanLoadout();
 	CommittedTransactionIds.Reset();
 	ReadRecords.Reset();
 	CompletedSideStages.Reset();
@@ -220,6 +222,10 @@ bool UQinglanProfileSubsystem::TryGrant(FName TransactionId, const FQinglanInven
 		// Idempotent replay: committed once, never re-awarded.
 		return true;
 	}
+	if (CommittedTransactionIds.Num() >= QinglanSave::MaxTransactionEntries)
+	{
+		return false; // never accept a mutation that would make the profile unsavable
+	}
 
 	FQinglanInventory Candidate = Inventory;
 	if (!TryAddBounded(Candidate.SpiritShards, Grant.SpiritShards)
@@ -249,11 +255,8 @@ bool UQinglanProfileSubsystem::TryBankExpedition(FName BankingId, const FQinglan
 		return true;
 	}
 	const bool bFirstClear = !FirstClearId.IsNone() && !WasTransactionCommitted(FirstClearId);
-	// Match the save validator's journal bound; refuse before awarding anything.
-	// TODO(AUD-07): share the bound across all mutation APIs and define journal
-	// compaction/versioning for very long-lived profiles instead of losing saves.
-	constexpr int32 MaxProfileTransactionEntries = 8192;
-	if (CommittedTransactionIds.Num() > MaxProfileTransactionEntries - (bFirstClear ? 2 : 1))
+	// Match every profile mutation and the save validator before awarding anything.
+	if (CommittedTransactionIds.Num() > QinglanSave::MaxTransactionEntries - (bFirstClear ? 2 : 1))
 	{
 		return false;
 	}
@@ -292,6 +295,10 @@ bool UQinglanProfileSubsystem::TrySpend(FName TransactionId, const FQinglanInven
 		// Idempotent replay of an already-committed spend: no second deduction.
 		return true;
 	}
+	if (CommittedTransactionIds.Num() >= QinglanSave::MaxTransactionEntries)
+	{
+		return false; // never accept a mutation that would make the profile unsavable
+	}
 	if (!IsAffordable(Inventory, Cost))
 	{
 		// Insufficient resources (or a negative component): return false, change nothing.
@@ -323,6 +330,10 @@ bool UQinglanProfileSubsystem::TryAdvanceRank(FName TransactionId)
 	if (WasTransactionCommitted(TransactionId))
 	{
 		return true; // this rank was already purchased by the same transaction
+	}
+	if (CommittedTransactionIds.Num() >= QinglanSave::MaxTransactionEntries)
+	{
+		return false; // never accept a mutation that would make the profile unsavable
 	}
 
 	FQinglanRankCost Cost;
@@ -364,6 +375,10 @@ bool UQinglanProfileSubsystem::TryBreakthrough(FName TransactionId)
 	if (WasTransactionCommitted(TransactionId))
 	{
 		return true; // this breakthrough already committed
+	}
+	if (CommittedTransactionIds.Num() >= QinglanSave::MaxTransactionEntries)
+	{
+		return false; // never accept a mutation that would make the profile unsavable
 	}
 
 	FText BlockingReason;
@@ -452,6 +467,10 @@ bool UQinglanProfileSubsystem::UnlockTechnique(FName TransactionId, FName Techni
 	{
 		return true; // idempotent replay of this grant
 	}
+	if (CommittedTransactionIds.Num() >= QinglanSave::MaxTransactionEntries)
+	{
+		return false; // never accept a mutation that would make the profile unsavable
+	}
 	if (!QinglanProgression::IsKnownTechniqueId(TechniqueId))
 	{
 		UE_LOG(LogQinglan, Warning, TEXT("UnlockTechnique rejected: unknown technique id"));
@@ -511,7 +530,7 @@ bool UQinglanProfileSubsystem::TrySetEquippedTechniques(const TArray<FName>& Tec
 
 bool UQinglanProfileSubsystem::IsLoadoutLockedByExpedition() const
 {
-	// Shared gate for every loadout swap (techniques, relic, passives):
+	// Shared gate for every loadout swap (techniques, relic, passives, talismans):
 	// swapping is free but only at a sanctuary/entrance shrine, never
 	// mid-expedition (docs/03 sections 3-5).
 	const UGameInstance* GameInstance = GetGameInstance();
@@ -533,6 +552,10 @@ bool UQinglanProfileSubsystem::TryPurchaseRelic(FName TransactionId, FName Relic
 	if (WasTransactionCommitted(TransactionId))
 	{
 		return true; // idempotent replay of this purchase
+	}
+	if (CommittedTransactionIds.Num() >= QinglanSave::MaxTransactionEntries)
+	{
+		return false; // never accept a mutation that would make the profile unsavable
 	}
 	FQinglanRelicDef Def;
 	if (!UQinglanEconomyLibrary::FindRelic(RelicId, Def))
@@ -639,6 +662,10 @@ bool UQinglanProfileSubsystem::TryPurchasePassive(FName TransactionId, FName Pas
 	{
 		return true; // idempotent replay of this purchase
 	}
+	if (CommittedTransactionIds.Num() >= QinglanSave::MaxTransactionEntries)
+	{
+		return false; // never accept a mutation that would make the profile unsavable
+	}
 	FQinglanPassiveCatalogEntry Entry;
 	if (!UQinglanEconomyLibrary::FindPassive(PassiveId, Entry))
 	{
@@ -686,6 +713,10 @@ bool UQinglanProfileSubsystem::TryPurchaseTechniqueTier(FName TransactionId, FNa
 	if (WasTransactionCommitted(TransactionId))
 	{
 		return true; // idempotent replay of this purchase
+	}
+	if (CommittedTransactionIds.Num() >= QinglanSave::MaxTransactionEntries)
+	{
+		return false; // never accept a mutation that would make the profile unsavable
 	}
 	if (!QinglanProgression::IsKnownTechniqueId(TechniqueId)
 		|| !UnlockedTechniques.Contains(TechniqueId))
@@ -737,6 +768,48 @@ int32 UQinglanProfileSubsystem::GetTalismanChargeCount(FName TalismanId) const
 {
 	const int32* Charges = TalismanCharges.Find(TalismanId);
 	return Charges ? *Charges : 0;
+}
+
+void UQinglanProfileSubsystem::ResetTalismanLoadout()
+{
+	EquippedTalismans.Reset();
+	// Defaults are independent of refill timing and remaining charges. A pawn
+	// can already exist when the player selects a profile at the sanctuary.
+	for (const FQinglanTalismanCatalogEntry& Entry : UQinglanEconomyLibrary::GetTalismanCatalog())
+	{
+		if (EquippedTalismans.Num() >= QinglanProgression::EquippedTalismanLimit) { break; }
+		EquippedTalismans.Add(Entry.TalismanId);
+	}
+}
+
+TArray<FName> UQinglanProfileSubsystem::GetEquippedTalismans() const
+{
+	return EquippedTalismans;
+}
+
+bool UQinglanProfileSubsystem::TrySetEquippedTalismans(const TArray<FName>& TalismanIds)
+{
+	if (IsLoadoutLockedByExpedition() || TalismanIds.Num() > QinglanProgression::EquippedTalismanLimit)
+	{
+		return false;
+	}
+	TSet<FName> Seen;
+	for (const FName TalismanId : TalismanIds)
+	{
+		FQinglanTalismanCatalogEntry Entry;
+		if (!UQinglanEconomyLibrary::FindTalisman(TalismanId, Entry) || Seen.Contains(TalismanId)
+			|| (GetTalismanChargeCount(TalismanId) <= 0 && !EquippedTalismans.Contains(TalismanId)))
+		{
+			return false;
+		}
+		Seen.Add(TalismanId);
+	}
+	if (EquippedTalismans != TalismanIds)
+	{
+		EquippedTalismans = TalismanIds;
+		OnProfileCommitted.Broadcast();
+	}
+	return true;
 }
 
 bool UQinglanProfileSubsystem::TryConsumeTalismanCharge(FName TalismanId)
@@ -939,6 +1012,8 @@ void UQinglanProfileSubsystem::ExportStateForSave(FQinglanProfileSnapshot& OutSn
 	// TMap iteration order is not stable, but the save-side fingerprint folds
 	// the charge map in key order, so the checksum step stays deterministic.
 	OutSnapshot.TalismanCharges = TalismanCharges;
+	OutSnapshot.EquippedTalismans = EquippedTalismans;
+	OutSnapshot.bTalismanLoadoutInitialized = true;
 	OutSnapshot.CampaignFlags = CampaignFlags.Array();
 	OutSnapshot.CampaignFlags.Sort([](const FName& A, const FName& B) { return A.LexicalLess(B); });
 	OutSnapshot.CommittedTransactionIds = CommittedTransactionIds.Array();
@@ -971,6 +1046,14 @@ void UQinglanProfileSubsystem::ImportStateFromSave(const FQinglanProfileSnapshot
 	OwnedPassives = ToNameSet(Snapshot.OwnedPassives);
 	EquippedPassives = Snapshot.EquippedPassives;
 	TalismanCharges = Snapshot.TalismanCharges;
+	if (Snapshot.bTalismanLoadoutInitialized)
+	{
+		EquippedTalismans = Snapshot.EquippedTalismans;
+	}
+	else
+	{
+		ResetTalismanLoadout();
+	}
 	CampaignFlags = ToNameSet(Snapshot.CampaignFlags);
 	CommittedTransactionIds = ToNameSet(Snapshot.CommittedTransactionIds);
 	CompletedSideStages = ToNameSet(Snapshot.Narrative.CompletedSideStages);

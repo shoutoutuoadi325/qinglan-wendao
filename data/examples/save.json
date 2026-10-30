@@ -20,6 +20,12 @@
     "jade_sword_arc",
     "flowing_ward"
   ],
+  "equipped_talismans": [
+    "healing_talisman",
+    "cleansing_talisman"
+  ],
+  "talisman_loadout_initialized": true,
+  "talisman_charges": {},
   "campaign_flags": [],
   "committed_transaction_ids": [],
   "checkpoint": null,

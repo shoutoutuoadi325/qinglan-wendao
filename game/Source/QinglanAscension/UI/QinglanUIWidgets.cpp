@@ -4,7 +4,7 @@
 // tables; live refresh without restart), docs/dev/implementation-blueprint.md
 // section 1.1 (typed events only; no global untyped event bus).
 //
-// Dialogue/HUD subsystem bindings use their outer-owned event relay. Choice
+// Dialogue/HUD subsystem bindings use a reflected, widget-owned event relay. Choice
 // buttons emit requests to Character, which clears the old menu before selecting
 // so synchronous story events can safely present the next group.
 //
@@ -13,8 +13,10 @@
 // trees so stale placeholder Blueprints cannot remove required controls; the
 // pure state structs at the top of QinglanUIWidgets.h remain automation-safe.
 #include "UI/QinglanUIWidgets.h"
+#include "UI/QinglanHUDLayout.h"
 
 #include "Abilities/QinglanTechniqueTypes.h"
+#include "Abilities/QinglanBlessingLibrary.h"
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetTree.h" // UWidgetTree for named-element lookup/creation
 #include "Blueprint/WidgetLayoutLibrary.h"
@@ -137,6 +139,13 @@ namespace
 		return FText::Format(UQinglanHUDStatics::GameText(Key), Args);
 	}
 
+	FText QinglanUIWithDescription(const FText& Label, FName DescriptionKey)
+	{
+		if (DescriptionKey.IsNone() || !UQinglanHUDStatics::HasGameText(DescriptionKey)) { return Label; }
+		return FText::Join(FText::FromString(TEXT("\n")),
+			TArray<FText>{ Label, UQinglanHUDStatics::GameText(DescriptionKey) });
+	}
+
 	/**
 	 * AUD-51 input routing: mouse clicks move Slate focus onto buttons; arrow/
 	 * Enter/Escape must keep reaching the Character's menu bindings. Returning
@@ -191,40 +200,6 @@ namespace
 	float SafeFraction(float Current, float Maximum)
 	{
 		return Maximum > 0.f ? FMath::Clamp(Current / Maximum, 0.f, 1.f) : 0.f;
-	}
-
-	/**
-	 * One relay per live widget: re-entrant NativeConstruct (viewport re-add)
-	 * reuses the relay after an UnbindAll instead of stacking bindings.
-	 */
-	TMap<TWeakObjectPtr<UUserWidget>, TWeakObjectPtr<UQinglanUIEventRelay>>& RelayByWidget()
-	{
-		static TMap<TWeakObjectPtr<UUserWidget>, TWeakObjectPtr<UQinglanUIEventRelay>> Map;
-		return Map;
-	}
-
-	UQinglanUIEventRelay* AcquireRelay(UUserWidget* Owner)
-	{
-		TMap<TWeakObjectPtr<UUserWidget>, TWeakObjectPtr<UQinglanUIEventRelay>>& Relays = RelayByWidget();
-		for (auto It = Relays.CreateIterator(); It; ++It)
-		{
-			if (!It->Key.IsValid())
-			{
-				It.RemoveCurrent(); // the widget (and its outer-owned relay) is gone
-			}
-		}
-		UQinglanUIEventRelay* Relay = nullptr;
-		if (TWeakObjectPtr<UQinglanUIEventRelay>* Existing = Relays.Find(Owner))
-		{
-			Relay = Existing->Get();
-		}
-		if (!Relay)
-		{
-			Relay = NewObject<UQinglanUIEventRelay>(Owner);
-			Relays.Add(Owner, Relay);
-		}
-		Relay->UnbindAll(); // re-construct must never double-bind
-		return Relay;
 	}
 
 	/** Reflectively invokes a BP custom event on the HUD widget (see relay header). */
@@ -301,8 +276,9 @@ void UQinglanDialogueWidget::NativeConstruct()
 
 	// Subscribe OnSceneLine/OnChoicesPresented and forward to the
 	// BlueprintImplementableEvents declared on this scaffold class.
-	UQinglanUIEventRelay* Relay = AcquireRelay(this);
-	Relay->SetupDialogue(this);
+	if (!EventRelay) { EventRelay = NewObject<UQinglanUIEventRelay>(this); }
+	EventRelay->UnbindAll();
+	EventRelay->SetupDialogue(this);
 	BindNamedElements();
 	SetCurrentLine(CurrentSpeaker, CurrentLineText);
 	const int32 PreviousSelection = SelectedChoiceIndex;
@@ -327,6 +303,12 @@ void UQinglanDialogueWidget::BindNamedElements()
 	{
 		SourceKindText->SetText(CurrentSourceLabel);
 	}
+}
+
+void UQinglanDialogueWidget::NativeDestruct()
+{
+	if (EventRelay) { EventRelay->UnbindAll(); }
+	Super::NativeDestruct();
 }
 
 void UQinglanDialogueWidget::SetSourceKind(EQinglanSourceKind SourceKind)
@@ -438,7 +420,16 @@ bool UQinglanDialogueWidget::SetChoiceEntries(const TArray<FQinglanSceneChoice>&
 		FFormatNamedArguments Args;
 		Args.Add(TEXT("index"), FText::AsNumber(Index + 1));
 		Args.Add(TEXT("label"), Choices[Index].Label);
-		EntryText->SetText(FText::Format(UQinglanHUDStatics::GameText(GChoiceEntryTextKey), Args));
+		TArray<FText> ChoiceLines = { FText::Format(UQinglanHUDStatics::GameText(GChoiceEntryTextKey), Args) };
+		for (FName Requirement : Choices[Index].UnmetRequirements)
+		{
+			// Disabled ending options must still explain which effective
+			// agreements are missing; the player cannot open their preview.
+			ChoiceLines.Add(Requirement == FName(TEXT("mq_live_question_answered"))
+				? UQinglanHUDStatics::GameText(TEXT("story.ch05.s04.objective"))
+				: QinglanEnding::RequirementTextForFlag(Requirement));
+		}
+		EntryText->SetText(FText::Join(FText::FromString(TEXT("\n")), ChoiceLines));
 		EntryText->SetAutoWrapText(true);
 		FSlateFontInfo ChoiceFont = EntryText->GetFont();
 		ChoiceFont.Size = 17;
@@ -993,10 +984,12 @@ void UQinglanMenuWidget::BuildMenuTree()
 	MenuHint = QinglanUIAddText(WidgetTree, Content, 14, MenuMutedColor, TEXT("Txt_MenuHint"), 6.f);
 	BackButton = WidgetTree->ConstructWidget<UButton>();
 	BackLabel = QinglanUICreateText(WidgetTree, 17, MenuBodyColor);
+	BackLabel->SetJustification(ETextJustify::Center);
 	BackButton->AddChild(BackLabel);
 	if (UButtonSlot* BackSlot = Cast<UButtonSlot>(BackLabel->Slot))
 	{
 		BackSlot->SetPadding(FMargin(12.f, 8.f));
+		BackSlot->SetHorizontalAlignment(HAlign_Fill);
 	}
 	Content->AddChildToVerticalBox(BackButton)->SetPadding(FMargin(0.f, 4.f));
 	BackButton->OnClicked.AddDynamic(this, &UQinglanMenuWidget::HandleBackPressed);
@@ -1212,7 +1205,13 @@ void UQinglanMenuWidget::ApplyPauseRows()
 	Rows.Add({ UQinglanHUDStatics::GameText(FName(TEXT("menu.equipment"))), FName(TEXT("equipment")), NAME_None });
 	Rows.Add({ UQinglanHUDStatics::GameText(FName(TEXT("menu.journal"))), FName(TEXT("journal")), NAME_None });
 	Rows.Add({ UQinglanHUDStatics::GameText(FName(TEXT("menu.outcome"))), FName(TEXT("outcome")), NAME_None });
-	Rows.Add({ UQinglanHUDStatics::GameText(FName(TEXT("menu.quit_sanctuary"))), FName(TEXT("quit")), NAME_None });
+	UGameInstance* Instance = GetGameInstance();
+	UQinglanRunSubsystem* Run = Instance ? Instance->GetSubsystem<UQinglanRunSubsystem>() : nullptr;
+	const bool bSuspendExpedition = Run && Run->IsInExpedition();
+	Rows.Add({ QinglanUIWithDescription(UQinglanHUDStatics::GameText(FName(bSuspendExpedition
+			? TEXT("menu.suspend_profile") : TEXT("menu.quit_sanctuary"))),
+			bSuspendExpedition ? FName(TEXT("menu.suspend_profile_hint")) : NAME_None),
+		FName(TEXT("quit")), NAME_None });
 }
 
 void UQinglanMenuWidget::ApplyProfileRows()
@@ -1340,8 +1339,9 @@ void UQinglanMenuWidget::ApplyEquipmentRows()
 		const bool bEquipped = Profile->GetEquippedRelic() == RelicId;
 		FFormatNamedArguments Args;
 		Args.Add(TEXT("name"), Name);
-		Rows.Add({ QinglanUIFormat(FName(bEquipped
+		Rows.Add({ QinglanUIWithDescription(QinglanUIFormat(FName(bEquipped
 				? TEXT("menu.equipment.relic_unequip") : TEXT("menu.equipment.relic_equip")), Args),
+				bKnown ? Relic.DescriptionTextKey : NAME_None),
 			FName(bEquipped ? TEXT("equipment.relic.unequip") : TEXT("equipment.relic.equip")),
 			RelicId });
 	}
@@ -1356,14 +1356,15 @@ void UQinglanMenuWidget::ApplyEquipmentRows()
 		const bool bEquipped = EquippedPassives.Contains(PassiveId);
 		FFormatNamedArguments Args;
 		Args.Add(TEXT("name"), Name);
-		Rows.Add({ QinglanUIFormat(FName(bEquipped
+		Rows.Add({ QinglanUIWithDescription(QinglanUIFormat(FName(bEquipped
 				? TEXT("menu.equipment.passive_unequip") : TEXT("menu.equipment.passive_equip")), Args),
+				bKnown ? Passive.DescriptionTextKey : NAME_None),
 			FName(bEquipped ? TEXT("equipment.passive.unequip") : TEXT("equipment.passive.equip")),
 			PassiveId });
 	}
 
-	// Talisman slots use the component's equipped list (the profile owns the
-	// remaining charges); owned = at least one charge remains.
+	// Keep exhausted equipped talismans visible so the player can free their
+	// slots. Unequipped talismans still require a charge before being offered.
 	AQinglanCharacter* Character = GetQinglanCharacter();
 	UQinglanTalismanComponent* TalismanComponent =
 		Character ? Character->FindComponentByClass<UQinglanTalismanComponent>() : nullptr;
@@ -1372,7 +1373,8 @@ void UQinglanMenuWidget::ApplyEquipmentRows()
 		const TArray<FName> EquippedTalismans = TalismanComponent->GetEquippedTalismans();
 		for (const FQinglanTalismanCatalogEntry& Entry : UQinglanEconomyLibrary::GetTalismanCatalog())
 		{
-			if (Profile->GetTalismanChargeCount(Entry.TalismanId) <= 0)
+			if (Profile->GetTalismanChargeCount(Entry.TalismanId) <= 0
+				&& !EquippedTalismans.Contains(Entry.TalismanId))
 			{
 				continue;
 			}
@@ -1380,8 +1382,9 @@ void UQinglanMenuWidget::ApplyEquipmentRows()
 			const FText Name = QinglanUILocalizedOrId(Entry.NameTextKey, Entry.TalismanId);
 			FFormatNamedArguments Args;
 			Args.Add(TEXT("name"), Name);
-			Rows.Add({ QinglanUIFormat(FName(bEquipped
+			Rows.Add({ QinglanUIWithDescription(QinglanUIFormat(FName(bEquipped
 					? TEXT("menu.equipment.talisman_unequip") : TEXT("menu.equipment.talisman_equip")), Args),
+					Entry.DescriptionTextKey),
 				FName(bEquipped ? TEXT("equipment.talisman.unequip") : TEXT("equipment.talisman.equip")),
 				Entry.TalismanId });
 		}
@@ -1433,8 +1436,20 @@ void UQinglanMenuWidget::ApplyOfferRows()
 		Args.Add(TEXT("index"), FText::AsNumber(Index + 1));
 		Args.Add(TEXT("title"), Entry.Title);
 		Args.Add(TEXT("cost"), Entry.Cost);
-		Rows.Add({ QinglanUIFormat(FName(Entry.Cost.IsEmpty()
-				? TEXT("menu.offer.entry_nocost") : TEXT("menu.offer.entry")), Args),
+		FName DescriptionKey;
+		FQinglanBlessingDef Blessing;
+		FQinglanRelicDef Relic;
+		FQinglanPassiveCatalogEntry Passive;
+		FQinglanTalismanCatalogEntry Talisman;
+		if (Entry.bBlessing && UQinglanBlessingLibrary::FindBlessingDef(Entry.OfferId, Blessing))
+		{
+			DescriptionKey = Blessing.DescriptionTextKey;
+		}
+		else if (!Entry.bBlessing && UQinglanEconomyLibrary::FindRelic(Entry.OfferId, Relic)) { DescriptionKey = Relic.DescriptionTextKey; }
+		else if (!Entry.bBlessing && UQinglanEconomyLibrary::FindPassive(Entry.OfferId, Passive)) { DescriptionKey = Passive.DescriptionTextKey; }
+		else if (!Entry.bBlessing && UQinglanEconomyLibrary::FindTalisman(Entry.OfferId, Talisman)) { DescriptionKey = Talisman.DescriptionTextKey; }
+		Rows.Add({ QinglanUIWithDescription(QinglanUIFormat(FName(Entry.Cost.IsEmpty()
+				? TEXT("menu.offer.entry_nocost") : TEXT("menu.offer.entry")), Args), DescriptionKey),
 			FName(TEXT("offer.select")), Entry.OfferId });
 	}
 }
@@ -1569,6 +1584,11 @@ FText UQinglanMenuWidget::ResolveSummary() const
 
 FText UQinglanMenuWidget::ResolveHint() const
 {
+	if (MenuState.Screen == EQinglanMenuScreen::Offer
+		&& OfferState.Entries.ContainsByPredicate([](const FQinglanOfferChoice& Entry) { return Entry.bBlessing; }))
+	{
+		return UQinglanHUDStatics::GameText(TEXT("menu.offer.blessing_hint"));
+	}
 	return UQinglanHUDStatics::GameText(FName(MenuState.Screen == EQinglanMenuScreen::Offer
 		? TEXT("menu.offer.hint") : TEXT("menu.hint")));
 }
@@ -1588,6 +1608,9 @@ void UQinglanMenuWidget::RefreshPresentation()
 	MenuHint->SetText(ResolveHint());
 	BackLabel->SetText(UQinglanHUDStatics::GameText(FName(MenuState.Screen == EQinglanMenuScreen::Offer
 		? TEXT("menu.offer.dismiss") : TEXT("menu.back"))));
+	const bool bMandatoryBlessing = MenuState.Screen == EQinglanMenuScreen::Offer
+		&& OfferState.Entries.ContainsByPredicate([](const FQinglanOfferChoice& Entry) { return Entry.bBlessing; });
+	BackButton->SetVisibility(bMandatoryBlessing ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
 
 	RowBox->ClearChildren();
 	RowButtons.Reset();
@@ -1596,11 +1619,16 @@ void UQinglanMenuWidget::RefreshPresentation()
 	{
 		UTextBlock* Label = QinglanUICreateText(WidgetTree, 18, MenuBodyColor);
 		Label->SetText(Rows[Index].Label);
+		Label->SetJustification(ETextJustify::Center);
 		UButton* Button = WidgetTree->ConstructWidget<UButton>();
 		Button->AddChild(Label);
 		if (UButtonSlot* ContentSlot = Cast<UButtonSlot>(Label->Slot))
 		{
 			ContentSlot->SetPadding(FMargin(12.f, 9.f));
+			// Center the glyphs within the available row width. Centering a
+			// shrink-wrapped auto-wrap block can collapse CJK labels to one
+			// character per line after a live language switch.
+			ContentSlot->SetHorizontalAlignment(HAlign_Fill);
 		}
 		Button->SetBackgroundColor(Index == MenuState.SelectionIndex ? MenuRowSelectedColor : MenuRowColor);
 		RowBox->AddChildToVerticalBox(Button)->SetPadding(FMargin(0.f, 3.f));
@@ -1699,15 +1727,16 @@ void UQinglanMenuWidget::ActivateRow(int32 RowIndex)
 		}
 		const int32 ProfileSlotIndex = FCString::Atoi(*Row.Payload.ToString());
 		FText Result;
-		bool bOk = true;
-		if (Action == FName(TEXT("profile.load")))
+		bool bOk = false;
+		if (Character)
 		{
-			bOk = Save->LoadProfile(ProfileSlotIndex, Result);
+			bOk = Character->SelectProfileFromMenu(ProfileSlotIndex, Action == FName(TEXT("profile.create")), Result);
 		}
-		else
+		else if (Save->SaveActiveSession(Result))
 		{
-			Save->CreateNewProfile(ProfileSlotIndex);
-			bOk = Save->HasProfile(ProfileSlotIndex);
+			// A standalone menu preview has no pawn/world cache to rebuild.
+			bOk = Action == FName(TEXT("profile.load")) ? Save->LoadProfile(ProfileSlotIndex, Result)
+				: Save->TryCreateNewProfile(ProfileSlotIndex, Result);
 		}
 		if (Result.IsEmpty() && !bOk)
 		{
@@ -1755,7 +1784,7 @@ void UQinglanMenuWidget::ActivateRow(int32 RowIndex)
 		{
 			const EQinglanQualityPreset Preset =
 				static_cast<EQinglanQualityPreset>(FCString::Atoi(*Row.Payload.ToString()));
-			Graphics->ApplySettings(QinglanGraphics::MakePresetSettings(Preset));
+			Graphics->ApplySettings(QinglanGraphics::MakePresetSettings(Preset, Graphics->GetCurrentSettings()));
 		}
 		RebuildRows();
 		RefreshPresentation();
@@ -1779,7 +1808,7 @@ void UQinglanMenuWidget::ActivateRow(int32 RowIndex)
 		{
 			Equipped.Add(Row.Payload);
 		}
-		bChanged = Profile->TrySetEquippedTechniques(Equipped);
+		bChanged = Equipped != Profile->GetEquippedTechniques() && Profile->TrySetEquippedTechniques(Equipped);
 	}
 	else if (Action == FName(TEXT("equipment.relic.equip")))
 	{
@@ -1800,7 +1829,7 @@ void UQinglanMenuWidget::ActivateRow(int32 RowIndex)
 		{
 			Equipped.Add(Row.Payload);
 		}
-		bChanged = Profile->TrySetEquippedPassives(Equipped);
+		bChanged = Equipped != Profile->GetEquippedPassives() && Profile->TrySetEquippedPassives(Equipped);
 	}
 	else if (Action == FName(TEXT("equipment.talisman.equip")) || Action == FName(TEXT("equipment.talisman.unequip")))
 	{
@@ -1817,7 +1846,8 @@ void UQinglanMenuWidget::ActivateRow(int32 RowIndex)
 			{
 				Equipped.Add(Row.Payload);
 			}
-			bChanged = TalismanComponent->SetEquippedTalismans(Equipped);
+			bChanged = Equipped != TalismanComponent->GetEquippedTalismans()
+				&& TalismanComponent->SetEquippedTalismans(Equipped);
 		}
 	}
 	if (!bChanged)
@@ -2056,8 +2086,9 @@ void UQinglanHUDWidget::NativeConstruct()
 	// Bind vitals (health/energy/stamina/barrier), technique cooldowns, and
 	// room completion; the relay pushes an initial vitals snapshot so bars
 	// start filled without waiting for the first change event.
-	UQinglanUIEventRelay* Relay = AcquireRelay(this);
-	Relay->SetupHUD(this);
+	if (!EventRelay) { EventRelay = NewObject<UQinglanUIEventRelay>(this); }
+	EventRelay->UnbindAll();
+	EventRelay->SetupHUD(this);
 	BindNamedElements();
 
 	// AUD-51: objective and bark text update from typed story delegates. These
@@ -2077,6 +2108,7 @@ void UQinglanHUDWidget::NativeConstruct()
 
 void UQinglanHUDWidget::NativeDestruct()
 {
+	if (EventRelay) { EventRelay->UnbindAll(); }
 	if (bBoundStoryDelegates)
 	{
 		if (UGameInstance* Instance = GetGameInstance())
@@ -2132,6 +2164,7 @@ void UQinglanHUDWidget::BindNamedElements()
 	{
 		return;
 	}
+	QinglanHUDLayout::Apply(Tree);
 	HealthBar = Tree->FindWidget<UProgressBar>(TEXT("Bar_Health"));
 	EnergyBar = Tree->FindWidget<UProgressBar>(TEXT("Bar_Energy"));
 	StaminaBar = Tree->FindWidget<UProgressBar>(TEXT("Bar_Stamina"));

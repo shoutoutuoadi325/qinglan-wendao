@@ -67,6 +67,17 @@ before cleaning those project-specific logs.
 
 The official source checkout has been acquired and verified:
 
+For a sparse engine checkout, retain
+`Engine/Binaries/ThirdParty/Python3/Mac` as well as the GitDependencies launcher.
+GitDependencies provides the embedded Python binaries and cached bytecode; the
+matching standard-library sources are tracked by Git. Omitting those sources
+can make editor startup fail with `no codec search functions registered` before
+any project commandlet or test runs. On 2026-10-29 the missing 2,730 source files
+were restored from the pinned engine revision and checked against their Git
+blob hashes. The embedded Python 3.11.8 then successfully imported `encodings`,
+`json`, `ctypes`, `hashlib`, and `ssl` in isolated mode. Receipt:
+`.local/bootstrap/engine-python-runtime-current.json`.
+
 - UE version: **5.8.3**, compatible changelist **55116800**.
 - Engine commit: **396c9f059903aed5fec78ecd3d437a40c6415368**, matching
   [`versions.lock`](../../tools/build/versions.lock).

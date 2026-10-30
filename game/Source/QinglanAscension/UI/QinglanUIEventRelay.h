@@ -2,13 +2,10 @@
 // technique components) and forwards them into the frozen scaffold widget
 // classes.
 //
-// Rationale: code-contracts.md fixes the scaffold widget headers
-// (UI/QinglanUIWidgets.h), which declare NativeConstruct and the two dialogue
-// BlueprintImplementableEvents but no UFUNCTION handlers, no HUD update hooks,
-// and no storage members. Dynamic multicast delegates can only bind UFUNCTIONs,
-// so this small UObject (created and outer-owned by each widget, per contract
-// "add private helpers freely ... or new headers in your folder") holds the
-// bound handlers. It is NOT a global event bus: one relay exists per widget and
+// Dynamic multicast delegates bind UFUNCTIONs on this adapter. Each widget
+// retains its relay through a reflected property; an Outer pointer alone does
+// not keep a UObject alive during garbage collection. Construction rebinds the
+// adapter and destruction unsubscribes it. One relay exists per widget and
 // re-emits only what that widget subscribed to.
 #pragma once
 
@@ -27,7 +24,7 @@ class UQinglanRunSubsystem;
 class UGameInstance;
 
 /**
- * Delegate-to-widget adapter owned (as outer) by one UMG widget instance.
+ * Delegate-to-widget adapter retained by one UMG widget instance.
  *
  * HUD forwarding contract (FIXME-CONTRACT: the frozen scaffold header for
  * UQinglanHUDWidget declares no BlueprintImplementableEvent update hooks, so

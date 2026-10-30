@@ -392,24 +392,19 @@ void UQinglanTechniqueExecutors::ExecuteSelfDash(const FQinglanTechniqueCastCont
 	UQinglanDodgeComponent* Dodge = QinglanCharacter ? QinglanCharacter->FindComponentByClass<UQinglanDodgeComponent>() : nullptr;
 	if (Dodge)
 	{
-		// Mirror AQinglanCharacter::TryDodge: raise MaxWalkSpeed to the dash
-		// speed so the movement component never clamps the driven velocity; the
-		// character's dodge-finished handler restores it when the dash ends.
-		if (UCharacterMovementComponent* Movement = Character->GetCharacterMovement())
-		{
-			Movement->MaxWalkSpeed = FMath::Max(Movement->MaxWalkSpeed, DashDistance / DashDurationSeconds);
-		}
+		// The bounded root-motion override supplies dash speed without changing
+		// ordinary locomotion settings, including when a start is rejected.
 		if (!Dodge->StartDodge(HorizontalDirection, DashDistance, DashDurationSeconds,
 				QinglanCharacter->GetDodgeIFrameStart(), QinglanCharacter->GetDodgeIFrameEnd()))
 		{
-			// One dodge at a time: an in-flight dodge keeps its own clock; the
-			// release still cleanses and cues below.
-			UE_LOG(LogQinglanCombat, Verbose, TEXT("SelfDash: dodge already active; travel skipped"));
+			UE_LOG(LogQinglanCombat, Verbose, TEXT("SelfDash: movement rejected"));
+			return;
 		}
 	}
 	else
 	{
 		UE_LOG(LogQinglanCombat, Warning, TEXT("SelfDash: caster has no dodge component; travel skipped"));
+		return;
 	}
 
 	// Water technique: cleanse one Burn application from self (docs/02 §7).

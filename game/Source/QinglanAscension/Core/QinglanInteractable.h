@@ -112,7 +112,7 @@ namespace QinglanInteraction
 	 * prerequisites pass (realm entry contract: entering a realm map starts
 	 * that realm's current chapter scene).
 	 */
-	bool BeginFirstSceneOfChapters(UQinglanStorySubsystem* Story, const TArray<FName>& ChapterIds);
+	QINGLANASCENSION_API bool BeginFirstSceneOfChapters(UQinglanStorySubsystem* Story, const TArray<FName>& ChapterIds);
 
 	/** Chapter ids a realm expedition presents (data/story chapter ids). */
 	TArray<FName> ChaptersForRealm(FName RealmId);

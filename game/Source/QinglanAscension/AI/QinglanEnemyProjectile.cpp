@@ -12,6 +12,7 @@
 #include "Engine/Engine.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "GameFramework/ProjectileMovementComponent.h"
 #include "Materials/MaterialInterface.h"
 
@@ -32,12 +33,17 @@ AQinglanEnemyProjectile::AQinglanEnemyProjectile()
 	CollisionSphere->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	CollisionSphere->SetCollisionResponseToAllChannels(ECR_Ignore);
 	CollisionSphere->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+	CollisionSphere->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
+	CollisionSphere->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Block);
 	CollisionSphere->SetGenerateOverlapEvents(true);
 	CollisionSphere->OnComponentBeginOverlap.AddDynamic(this, &AQinglanEnemyProjectile::HandleBeginOverlap);
 	RootComponent = CollisionSphere;
 
 	Movement = CreateDefaultSubobject<UProjectileMovementComponent>(TEXT("Movement"));
 	Movement->bAutoActivate = false;
+	// The actor supplies one range/lifetime-bounded movement step. An independent
+	// component tick could otherwise move before expiry or after our range check.
+	Movement->PrimaryComponentTick.bCanEverTick = false;
 	Movement->ProjectileGravityScale = 0.f; // aimed shots fly straight
 	Movement->bRotationFollowsVelocity = true;
 	Movement->bInitialVelocityInLocalSpace = false;
@@ -89,7 +95,9 @@ void AQinglanEnemyProjectile::BeginPlay()
 void AQinglanEnemyProjectile::LaunchFrom(AQinglanEnemyCharacter* InOwner, const FVector& Direction,
 	float Speed, float InDamage, float InRange, const FQinglanCastId& InCastId, FName InTechniqueId, FName InCueId)
 {
+	ResetForPool();
 	OwningEnemy = InOwner;
+	SetOwner(InOwner);
 	Damage = InDamage;
 	RemainingRange = InRange;
 	CastId = InCastId;
@@ -100,19 +108,30 @@ void AQinglanEnemyProjectile::LaunchFrom(AQinglanEnemyCharacter* InOwner, const 
 	FlightSeconds = 0.f;
 
 	SetActorHiddenInGame(false);
-	SetActorEnableCollision(true);
 	if (Visual)
 	{
 		Visual->SetVisibility(true, true);
 	}
-	CollisionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	if (InOwner)
 	{
 		CollisionSphere->IgnoreActorWhenMoving(InOwner, true);
 		SetActorLocation(InOwner->GetActorLocation() + FVector(0.f, 0.f, 60.f)); // authored chest-height socket
 	}
+	// Simultaneous boss bolts share a muzzle. They block world geometry but
+	// must not consume one another before leaving that shared spawn point.
+	for (TActorIterator<AQinglanEnemyProjectile> It(GetWorld()); It; ++It)
+	{
+		if (*It != this)
+		{
+			CollisionSphere->IgnoreActorWhenMoving(*It, true);
+			It->CollisionSphere->IgnoreActorWhenMoving(this, true);
+		}
+	}
 	SetActorRotation(Direction.Rotation());
 
+	// StopSimulating clears UpdatedComponent after a blocking impact. A
+	// pooled projectile must bind its sphere again before the next launch.
+	Movement->SetUpdatedComponent(CollisionSphere);
 	Movement->InitialSpeed = Speed;
 	Movement->MaxSpeed = Speed;
 	Movement->Velocity = Direction.GetSafeNormal() * Speed;
@@ -121,6 +140,10 @@ void AQinglanEnemyProjectile::LaunchFrom(AQinglanEnemyCharacter* InOwner, const 
 	Movement->OnProjectileStop.AddDynamic(this, &AQinglanEnemyProjectile::HandleImpact);
 
 	SetActorTickEnabled(true);
+	SetActorEnableCollision(true);
+	// Enable overlaps only after placement and flight state are complete.
+	// A point-blank contact may deactivate the projectile synchronously.
+	CollisionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 }
 
 void AQinglanEnemyProjectile::ResetForPool()
@@ -130,6 +153,7 @@ void AQinglanEnemyProjectile::ResetForPool()
 	bInFlight = false;
 	Victim = nullptr;
 	OwningEnemy = nullptr;
+	SetOwner(nullptr);
 	Damage = 0.f;
 	RemainingRange = 0.f;
 	FlightSeconds = 0.f;
@@ -161,10 +185,24 @@ void AQinglanEnemyProjectile::Tick(float DeltaSeconds)
 	{
 		return;
 	}
-	// Paused-game-time semantics: accumulate DeltaTime, never wall clock.
-	FlightSeconds += DeltaSeconds;
-	RemainingRange -= DeltaSeconds * Movement->Velocity.Size(); // UE 5.8: UProjectileMovementComponent has no GetVelocity(); use Velocity
-	if (RemainingRange <= 0.f || FlightSeconds >= MaxFlightSeconds)
+	const float TimeLeft = FMath::Max(0.f, MaxFlightSeconds - FlightSeconds);
+	const float Speed = Movement->Velocity.Size();
+	const float RangeTime = Speed > KINDA_SMALL_NUMBER ? FMath::Max(0.f, RemainingRange) / Speed : TimeLeft;
+	const float StepSeconds = FMath::Min3(FMath::Max(0.f, DeltaSeconds), TimeLeft, RangeTime);
+	const FVector Start = GetActorLocation();
+	if (StepSeconds > 0.f)
+	{
+		Movement->TickComponent(StepSeconds, LEVELTICK_All, nullptr);
+	}
+	if (!bInFlight)
+	{
+		return; // collision may already have spent the shot during the swept step
+	}
+	// Resolve the final swept segment before retiring, including on a slow frame.
+	FlightSeconds += StepSeconds;
+	RemainingRange = FMath::Max(0.f, RemainingRange - FVector::Dist(Start, GetActorLocation()));
+	if (StepSeconds >= RangeTime || StepSeconds >= TimeLeft
+		|| RemainingRange <= KINDA_SMALL_NUMBER || FlightSeconds >= MaxFlightSeconds)
 	{
 		Deactivate();
 	}
@@ -217,7 +255,7 @@ void AQinglanEnemyProjectile::HandleBeginOverlap(UPrimitiveComponent* /*Overlapp
 	// chain (code-contracts: immunity -> barrier/health -> reaction -> status
 	// -> cue). Dodged and duplicate-rejected hits never apply or refresh the
 	// status (AUD-31).
-	if (bAccepted && StatusOnHit != EQinglanStatus::None)
+	if (bAccepted && VictimCombat->IsAlive() && StatusOnHit != EQinglanStatus::None)
 	{
 		VictimCombat->ApplyStatus(StatusOnHit);
 	}

@@ -26,6 +26,8 @@
 #include "Persistence/QinglanProfileSnapshot.h"
 #include "Persistence/QinglanSaveMigration.h"
 #include "Progression/QinglanProfileSubsystem.h"
+#include "Progression/QinglanEconomyLibrary.h"
+#include "Progression/QinglanProgressionTables.h"
 #include "Progression/QinglanRunSubsystem.h"
 #include "QinglanAscension.h"
 
@@ -91,6 +93,7 @@ namespace
 	FFailureInjectionForTesting GMoveFailureForTesting;
 	FFailureInjectionForTesting GDeleteFailureForTesting;
 	FFailureInjectionForTesting GWriteFailureForTesting;
+	FFailureInjectionForTesting GFlushFailureForTesting;
 
 	bool ConsumeInjectedFailure(FFailureInjectionForTesting& Injection)
 	{
@@ -252,6 +255,11 @@ namespace
 			OutError = QinglanSave::Loc(Outcome == EFileLoadOutcome::FutureSchema ? TEXT("save.future_schema") : TEXT("save.corrupt"));
 			return Outcome;
 		}
+		if (Parsed.SchemaVersion > UQinglanSaveSubsystem::CurrentSchemaVersion)
+		{
+			OutError = QinglanSave::Loc(TEXT("save.future_schema"));
+			return EFileLoadOutcome::FutureSchema; // newer bodies need not deserialize in this build
+		}
 
 		UQinglanSaveGame* Loaded = NewObject<UQinglanSaveGame>(GetTransientPackage());
 		FMemoryReader BodyReader(Parsed.Body);
@@ -351,6 +359,9 @@ namespace
 		AppendNameArray(Dump, Save->EquippedPassives);
 		Dump += TCHAR('|');
 		AppendChargeMap(Dump, Save->TalismanCharges);
+		Dump += TCHAR('|');
+		Dump += Save->bTalismanLoadoutInitialized ? TEXT("talismans1|") : TEXT("talismans0|");
+		AppendNameArray(Dump, Save->EquippedTalismans);
 		Dump += TCHAR('|');
 		AppendNameArray(Dump, Save->CampaignFlags);
 		Dump += TCHAR('|');
@@ -513,9 +524,12 @@ namespace
 		}
 #endif
 		const bool bWrote = Handle->Write(Bytes.GetData(), Bytes.Num());
-		Handle->Flush(true); // durable-write step 3: flush before verification
+		bool bFlushed = Handle->Flush(true); // re-opening alone may only read the OS cache
+#if WITH_DEV_AUTOMATION_TESTS
+		if (ConsumeInjectedFailure(GFlushFailureForTesting)) { bFlushed = false; }
+#endif
 		delete Handle;
-		return bWrote ? 0 : 1; // failed write of an opened handle: quota
+		return !bWrote ? 1 : (bFlushed ? 0 : 3);
 	}
 
 	/**
@@ -574,6 +588,8 @@ namespace
 		Snapshot.OwnedPassives = Save->OwnedPassives;
 		Snapshot.EquippedPassives = Save->EquippedPassives;
 		Snapshot.TalismanCharges = Save->TalismanCharges;
+		Snapshot.EquippedTalismans = Save->EquippedTalismans;
+		Snapshot.bTalismanLoadoutInitialized = Save->bTalismanLoadoutInitialized;
 		Snapshot.CampaignFlags = Save->CampaignFlags;
 		Snapshot.CommittedTransactionIds = Save->CommittedTransactionIds;
 		Snapshot.Narrative = Save->Narrative;
@@ -595,6 +611,8 @@ namespace
 		Save->OwnedPassives = Snapshot.OwnedPassives;
 		Save->EquippedPassives = Snapshot.EquippedPassives;
 		Save->TalismanCharges = Snapshot.TalismanCharges;
+		Save->EquippedTalismans = Snapshot.EquippedTalismans;
+		Save->bTalismanLoadoutInitialized = Snapshot.bTalismanLoadoutInitialized;
 		Save->CampaignFlags = Snapshot.CampaignFlags;
 		Save->CommittedTransactionIds = Snapshot.CommittedTransactionIds;
 		Save->Narrative = Snapshot.Narrative;
@@ -625,6 +643,9 @@ void UQinglanSaveSubsystem::SetFileOperationFailureForTesting(EQinglanSaveFileOp
 		break;
 	case EQinglanSaveFileOperationForTesting::Write:
 		GWriteFailureForTesting.RemainingSkips = RemainingSkips;
+		break;
+	case EQinglanSaveFileOperationForTesting::Flush:
+		GFlushFailureForTesting.RemainingSkips = RemainingSkips;
 		break;
 	}
 }
@@ -725,6 +746,15 @@ bool UQinglanSaveSubsystem::LoadProfile(int32 Slot, FText& OutNotice)
 	FDateTime ChosenStamp = FDateTime::MinValue();
 	if (PrimaryOutcome == EFileLoadOutcome::Ok)
 	{
+		for (int32 BackupIndex = 1; BackupIndex <= BackupsPerProfile; ++BackupIndex)
+		{
+			UQinglanSaveGame* BackupSave = nullptr;
+			if (TryLoadValidSave(GetBackupPath(Slot, BackupIndex), BackupSave, LoadError) == EFileLoadOutcome::FutureSchema)
+			{
+				OutNotice = LoadError;
+				return false; // a later build's recovery copy must survive a downgrade
+			}
+		}
 		ChosenSave = LoadedSave;
 		ChosenStamp = IFileManager::Get().GetTimeStamp(*PrimaryPath);
 	}
@@ -766,11 +796,16 @@ bool UQinglanSaveSubsystem::LoadProfile(int32 Slot, FText& OutNotice)
 				ChosenStamp = Stamp;
 			}
 		}
+		if (bSawFutureSchema)
+		{
+			OutNotice = QinglanSave::Loc(TEXT("save.future_schema"));
+			return false;
+		}
 		if (ChosenSave == nullptr)
 		{
 			UE_LOG(LogQinglanSave, Error, TEXT("LoadProfile: slot %d unreadable (primary %d)"), Slot,
 				static_cast<int32>(PrimaryOutcome));
-			OutNotice = QinglanSave::Loc(bSawFutureSchema ? TEXT("save.future_schema") : TEXT("save.corrupt"));
+			OutNotice = QinglanSave::Loc(TEXT("save.corrupt"));
 			return false;
 		}
 		// Timestamp + progress preview notice (docs/05 §6).
@@ -837,6 +872,12 @@ bool UQinglanSaveSubsystem::LoadProfile(int32 Slot, FText& OutNotice)
 
 bool UQinglanSaveSubsystem::SaveNow(FText& OutError)
 {
+	return WriteProfileSave(OutError, nullptr, INDEX_NONE);
+}
+
+bool UQinglanSaveSubsystem::WriteProfileSave(FText& OutError,
+	const FQinglanProfileSnapshot* ReplacementSnapshot, int32 ReplacementSlot, int32* OutSavedSequence)
+{
 	OutError = FText::GetEmpty();
 	if (!IsInGameThread())
 	{
@@ -855,10 +896,12 @@ bool UQinglanSaveSubsystem::SaveNow(FText& OutError)
 		return false;
 	}
 	TGuardValue<bool> SavingGuard(Bookkeeping.bSaving, true);
-	if (!IsValidSlot(Bookkeeping.ActiveSlot))
+	const int32 Slot = ReplacementSnapshot ? ReplacementSlot : Bookkeeping.ActiveSlot;
+	const FName SavingProfileId = ReplacementSnapshot ? ReplacementSnapshot->ProfileId : Bookkeeping.ProfileId;
+	if (!IsValidSlot(Slot))
 	{
 		OutError = QinglanSave::Loc(TEXT("save.no_profile_loaded"));
-		OnSaveFailed.Broadcast(Bookkeeping.ProfileId, OutError);
+		OnSaveFailed.Broadcast(SavingProfileId, OutError);
 		return false;
 	}
 	UGameInstance* GameInstancePtr = GetGameInstance();
@@ -868,21 +911,27 @@ bool UQinglanSaveSubsystem::SaveNow(FText& OutError)
 	{
 		UE_LOG(LogQinglanSave, Error, TEXT("SaveNow: profile subsystem missing"));
 		OutError = QinglanSave::Loc(TEXT("error.save_failed"));
-		OnSaveFailed.Broadcast(Bookkeeping.ProfileId, OutError);
+		OnSaveFailed.Broadcast(SavingProfileId, OutError);
 		return false;
 	}
-	const int32 Slot = Bookkeeping.ActiveSlot;
 	const FString PrimaryPath = GetPrimaryPath(Slot);
 
 	// Highest sequence known before this write: in-memory + every still-valid
 	// file on disk. Guarantees monotonicity across restarts.
-	int32 HighestSequence = Bookkeeping.LastAcceptedSequence;
+	int32 HighestSequence = ReplacementSnapshot ? 0 : Bookkeeping.LastAcceptedSequence;
 	for (int32 BackupIndex = 0; BackupIndex <= BackupsPerProfile; ++BackupIndex)
 	{
 		const FString CandidatePath = BackupIndex == 0 ? GetPrimaryPath(Slot) : GetBackupPath(Slot, BackupIndex);
 		UQinglanSaveGame* Candidate = nullptr;
 		FText CandidateError;
-		if (TryLoadValidSave(CandidatePath, Candidate, CandidateError) == EFileLoadOutcome::Ok)
+		const EFileLoadOutcome Outcome = TryLoadValidSave(CandidatePath, Candidate, CandidateError);
+		if (Outcome == EFileLoadOutcome::FutureSchema)
+		{
+			OutError = CandidateError;
+			OnSaveFailed.Broadcast(SavingProfileId, OutError);
+			return false; // never rotate over files from an unsupported newer build
+		}
+		if (Outcome == EFileLoadOutcome::Ok)
 		{
 			HighestSequence = FMath::Max(HighestSequence, Candidate->SaveSequence);
 		}
@@ -899,16 +948,23 @@ bool UQinglanSaveSubsystem::SaveNow(FText& OutError)
 	// brand-new profile before its first scene). ExportStateForSave then
 	// merges the progression-owned fields (plus side stages / read records)
 	// on top.
-	Snapshot.Narrative = Bookkeeping.CarriedNarrative;
-	if (UQinglanStorySubsystem* StorySubsystem = GameInstancePtr ? GameInstancePtr->GetSubsystem<UQinglanStorySubsystem>() : nullptr)
+	if (ReplacementSnapshot)
 	{
-		QinglanStoryRuntime::ExportNarrativeState(StorySubsystem, Snapshot.Narrative);
+		Snapshot = *ReplacementSnapshot;
 	}
-	ProfileSubsystem->ExportStateForSave(Snapshot);
+	else
+	{
+		Snapshot.Narrative = Bookkeeping.CarriedNarrative;
+		if (UQinglanStorySubsystem* StorySubsystem = GameInstancePtr ? GameInstancePtr->GetSubsystem<UQinglanStorySubsystem>() : nullptr)
+		{
+			QinglanStoryRuntime::ExportNarrativeState(StorySubsystem, Snapshot.Narrative);
+		}
+		ProfileSubsystem->ExportStateForSave(Snapshot);
+	}
 	ApplySnapshotToSave(Save, Snapshot);
 	if (Save->ProfileId.IsNone())
 	{
-		Save->ProfileId = Bookkeeping.ProfileId != NAME_None ? Bookkeeping.ProfileId : MakeProfileIdForSlot(Slot);
+		Save->ProfileId = SavingProfileId != NAME_None ? SavingProfileId : MakeProfileIdForSlot(Slot);
 	}
 	if (Save->ContentVersion.IsNone())
 	{
@@ -918,9 +974,13 @@ bool UQinglanSaveSubsystem::SaveNow(FText& OutError)
 	// snapshot, so even a save requested mid-room persists room-entrance state
 	// (docs/05 §6 crash-resume semantics). Suppression flag comes from
 	// ClearCheckpoint (expedition end / return to hub).
-	if (RunSubsystem != nullptr && RunSubsystem->IsInExpedition() && !Bookkeeping.bCheckpointSuppressed)
+	if (!ReplacementSnapshot && RunSubsystem != nullptr && RunSubsystem->IsInExpedition() && !Bookkeeping.bCheckpointSuppressed)
 	{
 		RunSubsystem->ExportCheckpoint(Save->Checkpoint);
+		// An unfinished room replays its enemies and entrance vitals on load.
+		// Its talismans must rewind with them; spent charges stay live in memory
+		// and become durable when the room reward commits.
+		RunSubsystem->ExportCheckpointTalismanCharges(Save->TalismanCharges);
 		Save->bHasCheckpoint = true;
 	}
 	else
@@ -933,7 +993,7 @@ bool UQinglanSaveSubsystem::SaveNow(FText& OutError)
 	{
 		Phase = EQinglanSavePhase::Failed;
 		UE_LOG(LogQinglanSave, Error, TEXT("SaveNow: snapshot failed invariant validation"));
-		OnSaveFailed.Broadcast(Bookkeeping.ProfileId, OutError);
+		OnSaveFailed.Broadcast(SavingProfileId, OutError);
 		return false; // nothing touched on disk
 	}
 
@@ -944,7 +1004,7 @@ bool UQinglanSaveSubsystem::SaveNow(FText& OutError)
 	{
 		Phase = EQinglanSavePhase::Failed;
 		OutError = QinglanSave::Loc(TEXT("save.invalid"));
-		OnSaveFailed.Broadcast(Bookkeeping.ProfileId, OutError);
+		OnSaveFailed.Broadcast(SavingProfileId, OutError);
 		return false;
 	}
 	const FString TempPath = GetTempPath(Slot);
@@ -954,7 +1014,7 @@ bool UQinglanSaveSubsystem::SaveNow(FText& OutError)
 		Phase = EQinglanSavePhase::Failed;
 		DeleteSaveFile(IFileManager::Get(), TempPath);
 		OutError = IoErrorText(WriteResult); // localized disk-full / permission, retry by re-invoking
-		OnSaveFailed.Broadcast(Bookkeeping.ProfileId, OutError);
+		OnSaveFailed.Broadcast(SavingProfileId, OutError);
 		return false; // last valid primary untouched
 	}
 
@@ -974,7 +1034,7 @@ bool UQinglanSaveSubsystem::SaveNow(FText& OutError)
 		DeleteSaveFile(IFileManager::Get(), TempPath);
 		OutError = QinglanSave::Loc(TEXT("save.corrupt"));
 		UE_LOG(LogQinglanSave, Error, TEXT("SaveNow: temp file failed re-open verification"));
-		OnSaveFailed.Broadcast(Bookkeeping.ProfileId, OutError);
+		OnSaveFailed.Broadcast(SavingProfileId, OutError);
 		return false; // last valid primary untouched
 	}
 
@@ -1004,7 +1064,7 @@ bool UQinglanSaveSubsystem::SaveNow(FText& OutError)
 			DeleteSaveFile(FileManager, TempPath);
 			OutError = IoErrorText(3);
 			UE_LOG(LogQinglanSave, Error, TEXT("SaveNow: bak1 -> bak2 rotation failed"));
-			OnSaveFailed.Broadcast(Bookkeeping.ProfileId, OutError);
+			OnSaveFailed.Broadcast(SavingProfileId, OutError);
 			return false; // primary, bak1, and bak2 all keep their bytes
 		}
 	}
@@ -1020,7 +1080,7 @@ bool UQinglanSaveSubsystem::SaveNow(FText& OutError)
 			DeleteSaveFile(FileManager, TempPath);
 			OutError = IoErrorText(3);
 			UE_LOG(LogQinglanSave, Error, TEXT("SaveNow: could not remove the invalid bak1 before rotation"));
-			OnSaveFailed.Broadcast(Bookkeeping.ProfileId, OutError);
+			OnSaveFailed.Broadcast(SavingProfileId, OutError);
 			return false; // primary/bak2 keep the last valid saves
 		}
 	}
@@ -1039,7 +1099,7 @@ bool UQinglanSaveSubsystem::SaveNow(FText& OutError)
 		DeleteSaveFile(FileManager, TempPath);
 		OutError = IoErrorText(3);
 		UE_LOG(LogQinglanSave, Error, TEXT("SaveNow: could not stage primary into backup"));
-		OnSaveFailed.Broadcast(Bookkeeping.ProfileId, OutError);
+		OnSaveFailed.Broadcast(SavingProfileId, OutError);
 		return false; // the primary never moved; it is still the last valid save
 	}
 
@@ -1055,7 +1115,7 @@ bool UQinglanSaveSubsystem::SaveNow(FText& OutError)
 		DeleteSaveFile(FileManager, TempPath);
 		OutError = IoErrorText(3);
 		UE_LOG(LogQinglanSave, Error, TEXT("SaveNow: atomic replace failed"));
-		OnSaveFailed.Broadcast(Bookkeeping.ProfileId, OutError);
+		OnSaveFailed.Broadcast(SavingProfileId, OutError);
 		return false; // the last valid primary is never deleted by a failed write
 	}
 
@@ -1084,12 +1144,16 @@ bool UQinglanSaveSubsystem::SaveNow(FText& OutError)
 	}
 
 	// ---- Step 6: report completion on the game thread ----
-	Bookkeeping.LastAcceptedSequence = NextSequence;
-	Bookkeeping.ProfileId = Save->ProfileId;
-	Bookkeeping.CarriedNarrative = Save->Narrative; // carry what this write persisted
 	Phase = EQinglanSavePhase::Done;
+	if (OutSavedSequence) { *OutSavedSequence = NextSequence; }
 	UE_LOG(LogQinglanSave, Log, TEXT("SaveNow: slot %d sequence %d committed"), Slot, NextSequence);
-	OnSaveCompleted.Broadcast(Save->ProfileId);
+	if (!ReplacementSnapshot)
+	{
+		Bookkeeping.LastAcceptedSequence = NextSequence;
+		Bookkeeping.ProfileId = Save->ProfileId;
+		Bookkeeping.CarriedNarrative = Save->Narrative; // carry what this write persisted
+		OnSaveCompleted.Broadcast(Save->ProfileId);
+	}
 	Phase = EQinglanSavePhase::Idle;
 	return true;
 }
@@ -1117,46 +1181,45 @@ bool UQinglanSaveSubsystem::HasProfile(int32 Slot) const
 
 void UQinglanSaveSubsystem::CreateNewProfile(int32 Slot)
 {
+	FText Error;
+	TryCreateNewProfile(Slot, Error);
+}
+
+bool UQinglanSaveSubsystem::TryCreateNewProfile(int32 Slot, FText& OutError)
+{
+	OutError = FText::GetEmpty();
 	if (!IsInGameThread())
 	{
 		UE_LOG(LogQinglanSave, Error, TEXT("CreateNewProfile called off the game thread"));
-		return;
+		OutError = QinglanSave::Loc(TEXT("error.save_failed"));
+		return false;
 	}
 	FQinglanSaveBookkeeping& Bookkeeping = Book(this);
 	if (Bookkeeping.bSaving || Bookkeeping.bApplyingProfileState)
 	{
 		UE_LOG(LogQinglanSave, Warning, TEXT("CreateNewProfile rejected during a save/profile replacement"));
-		return;
+		OutError = QinglanSave::Loc(TEXT("error.save_failed"));
+		return false;
 	}
 	if (!IsValidSlot(Slot))
 	{
 		UE_LOG(LogQinglanSave, Error, TEXT("CreateNewProfile: slot %d out of range"), Slot);
-		return;
+		OutError = QinglanSave::Loc(TEXT("save.invalid"));
+		return false;
 	}
 	UGameInstance* GameInstancePtr = GetGameInstance();
 	UQinglanProfileSubsystem* ProfileSubsystem = GameInstancePtr ? GameInstancePtr->GetSubsystem<UQinglanProfileSubsystem>() : nullptr;
-	if (ProfileSubsystem == nullptr)
+	if (!ProfileSubsystem)
 	{
 		UE_LOG(LogQinglanSave, Error, TEXT("CreateNewProfile: profile subsystem missing"));
-		return;
+		OutError = QinglanSave::Loc(TEXT("error.save_failed"));
+		return false;
 	}
 
-	Bookkeeping.ActiveSlot = Slot;
-	Bookkeeping.LastAcceptedSequence = 0;
-	Bookkeeping.ProfileId = MakeProfileIdForSlot(Slot);
-	Bookkeeping.bCheckpointSuppressed = false;
-
-	// AUD-04: creating a profile replaces the whole session; a run left open
-	// by the previously active profile must not survive into the new one.
-	Bookkeeping.bApplyingProfileState = true;
-	if (UQinglanRunSubsystem* RunSubsystem = GameInstancePtr->GetSubsystem<UQinglanRunSubsystem>())
-	{
-		RunSubsystem->ResetRun();
-	}
-
-	// New-profile template mirrors data/examples/save.json.
+	// Build and durably write the candidate without importing it. Failure must
+	// not replace the active profile, live combat, pending dialogue, or slot.
 	FQinglanProfileSnapshot Fresh;
-	Fresh.ProfileId = Bookkeeping.ProfileId;
+	Fresh.ProfileId = MakeProfileIdForSlot(Slot);
 	Fresh.ContentVersion = DefaultContentVersion;
 	Fresh.CultivationStage = EQinglanStage::QiRefining;
 	Fresh.CultivationRank = 0;
@@ -1166,29 +1229,37 @@ void UQinglanSaveSubsystem::CreateNewProfile(int32 Slot)
 		Fresh.UnlockedTechniques.Add(FName(TechniqueId));
 		Fresh.EquippedTechniques.Add(FName(TechniqueId));
 	}
-	ProfileSubsystem->ImportStateFromSave(Fresh);
-	// Reset the story subsystem to the same fresh narrative state so flags
-	// from a previously loaded profile cannot leak into the new profile's
-	// saves through the narrative export bridge.
-	if (UGameInstance* StoryGameInstance = GetGameInstance())
+	for (const FQinglanTalismanCatalogEntry& Entry : UQinglanEconomyLibrary::GetTalismanCatalog())
 	{
-		if (UQinglanStorySubsystem* StorySubsystem = StoryGameInstance->GetSubsystem<UQinglanStorySubsystem>())
-		{
-			QinglanStoryRuntime::ImportNarrativeState(StorySubsystem, Fresh.Narrative);
-		}
+		if (Fresh.EquippedTalismans.Num() >= QinglanProgression::EquippedTalismanLimit) { break; }
+		Fresh.EquippedTalismans.Add(Entry.TalismanId);
+	}
+	Fresh.bTalismanLoadoutInitialized = true;
+	int32 SavedSequence = 0;
+	if (!WriteProfileSave(OutError, &Fresh, Slot, &SavedSequence))
+	{
+		return false;
+	}
+
+	TGuardValue<bool> ApplyingGuard(Bookkeeping.bApplyingProfileState, true);
+	Bookkeeping.ActiveSlot = Slot;
+	Bookkeeping.LastAcceptedSequence = SavedSequence;
+	Bookkeeping.ProfileId = Fresh.ProfileId;
+	Bookkeeping.bCheckpointSuppressed = false;
+	if (UQinglanRunSubsystem* RunSubsystem = GameInstancePtr->GetSubsystem<UQinglanRunSubsystem>())
+	{
+		RunSubsystem->ResetRun();
+	}
+	ProfileSubsystem->ImportStateFromSave(Fresh);
+	if (UQinglanStorySubsystem* StorySubsystem = GameInstancePtr->GetSubsystem<UQinglanStorySubsystem>())
+	{
+		QinglanStoryRuntime::ImportNarrativeState(StorySubsystem, Fresh.Narrative);
 	}
 	Bookkeeping.CarriedNarrative = Fresh.Narrative;
-	Bookkeeping.bApplyingProfileState = false;
 	Bookkeeping.bProfileActiveThisSession = true;
-	OnProfileChanged.Broadcast(Bookkeeping.ProfileId);
-
-	// Persist the fresh profile through the full durable protocol so the slot
-	// exists on disk immediately (first accepted save has sequence 1).
-	FText CreateError;
-	if (!SaveNow(CreateError))
-	{
-		UE_LOG(LogQinglanSave, Error, TEXT("CreateNewProfile: initial durable write failed for slot %d"), Slot);
-	}
+	OnProfileChanged.Broadcast(Fresh.ProfileId);
+	OnSaveCompleted.Broadcast(Fresh.ProfileId);
+	return true;
 }
 
 void UQinglanSaveSubsystem::ClearCheckpoint()
@@ -1246,6 +1317,11 @@ void UQinglanSaveSubsystem::HandleProfileCommitted()
 		return; // no session yet, or LoadProfile/CreateNewProfile is mid-swap
 	}
 	UGameInstance* GameInstancePtr = GetGameInstance();
+	UQinglanStorySubsystem* StorySubsystem = GameInstancePtr ? GameInstancePtr->GetSubsystem<UQinglanStorySubsystem>() : nullptr;
+	if (QinglanStoryRuntime::IsStorySaveDeferred(StorySubsystem))
+	{
+		return; // the owning scene writes completion and all rewards together
+	}
 	UQinglanRunSubsystem* RunSubsystem = GameInstancePtr ? GameInstancePtr->GetSubsystem<UQinglanRunSubsystem>() : nullptr;
 	if (RunSubsystem && RunSubsystem->IsInExpedition())
 	{
@@ -1272,4 +1348,24 @@ bool UQinglanSaveSubsystem::SaveActiveSession(FText& OutError)
 bool UQinglanSaveSubsystem::IsProfileSessionActive() const
 {
 	return Book(const_cast<UQinglanSaveSubsystem*>(this)).bProfileActiveThisSession;
+}
+
+bool UQinglanSaveSubsystem::SuspendActiveSession(FText& OutError)
+{
+	if (!SaveActiveSession(OutError))
+	{
+		return false; // storage failure leaves the playable session intact
+	}
+	// The durable checkpoint remains in its slot. The hub must display profile
+	// selection before refilling charges or autosaving; otherwise it overwrites
+	// the suspended realm with a fresh hub pawn. Selecting the slot resumes it.
+	Book(this).bProfileActiveThisSession = false;
+	if (UGameInstance* Instance = GetGameInstance())
+	{
+		if (UQinglanRunSubsystem* Run = Instance->GetSubsystem<UQinglanRunSubsystem>())
+		{
+			Run->ResetRun();
+		}
+	}
+	return true;
 }

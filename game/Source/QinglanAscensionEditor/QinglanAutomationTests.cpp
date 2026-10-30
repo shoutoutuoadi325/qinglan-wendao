@@ -42,10 +42,12 @@
 #include "Kismet/GameplayStatics.h"
 #include "Math/RandomStream.h"
 #include "Misc/FileHelper.h"
+#include "Misc/Guid.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "UObject/UObjectGlobals.h"
+#include "UObject/Package.h"
 
 namespace
 {
@@ -1000,20 +1002,15 @@ namespace
 	public:
 		FQinglanTrialWorld()
 		{
-			Instance = NewObject<UGameInstance>(GetTransientPackage());
+			if (!GEngine) { return; }
+			Instance = NewObject<UGameInstance>(GEngine);
 			if (Instance == nullptr) { return; }
-			World = UWorld::CreateWorld(EWorldType::Game, false);
+			const FString Name = TEXT("L_TrialFixture_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			// InitializeStandalone owns a real world context and lets every
+			// game-instance subsystem resolve this fixture's world.
+			Instance->InitializeStandalone(FName(*Name), CreatePackage(*(TEXT("/Temp/") + Name)));
+			World = Instance->GetWorld();
 			if (World == nullptr) { return; }
-			// Register a world context: without one the world is absent from
-			// the engine's world list, controller SpawnActor fails silently,
-			// and every enemy is dropped as "controller-less".
-			if (GEngine != nullptr)
-			{
-				FWorldContext& Context = GEngine->CreateNewWorldContext(EWorldType::Game);
-				Context.SetCurrentWorld(World);
-			}
-			World->SetGameInstance(Instance);
-			Instance->Init(); // instantiates the game-instance subsystems
 
 			FActorSpawnParameters SpawnParams;
 			SpawnParams.ObjectFlags |= RF_Transient;
@@ -1029,12 +1026,10 @@ namespace
 			{
 				PlayerController->Possess(Pawn);
 			}
-			// Begin play so pawns with PlacedInWorldOrSpawned AI receive
-			// their controller at spawn: the encounter director rejects
-			// controller-less enemies, which would silently drop every wave
-			// and the required boss in this headless world. BeginPlay()
-			// dispatches actor callbacks; SetBegunPlay flips the flag
-			// PostInitializeComponents consults for at-spawn possession.
+			// UE 5.8.3 AActor::ProcessEvent suppresses dynamic delegate calls
+			// until AreActorsInitialized() is true. BeginPlay/SetBegunPlay
+			// alone cannot deliver the wave engine's completion callback.
+			World->InitializeActorsForPlay(FURL());
 			World->BeginPlay();
 			World->SetBegunPlay(true);
 		}
@@ -1044,11 +1039,13 @@ namespace
 #if WITH_DEV_AUTOMATION_TESTS
 			QinglanStoryRuntime::SetRegistryForTesting(nullptr); // injection contract: always clear
 #endif
+			if (World) { World->EndPlay(EEndPlayReason::Quit); }
+			if (Instance) { Instance->Shutdown(); }
 			if (World != nullptr)
 			{
 				if (GEngine != nullptr)
 				{
-					GEngine->WorldDestroyed(World); // drop the fixture's world context
+					GEngine->DestroyWorldContext(World);
 				}
 				World->DestroyWorld(false);
 			}
@@ -1396,6 +1393,93 @@ bool FAutomationTestQinglanTrialHazardPlacement::RunTest(const FString& Paramete
 // grants nothing: the phase machine moves to the required kill and proof is
 // withheld until the elite construct dies
 // ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanTrialWarningSurvivesSlowFrame, "Qinglan.Trial.WarningSurvivesSlowFrame", QinglanTestFlags)
+bool FQinglanTrialWarningSurvivesSlowFrame::RunTest(const FString& Parameters)
+{
+	FQinglanTrialWorld Fix;
+	if (!TestNotNull(TEXT("World"), Fix.World) || !TestNotNull(TEXT("Instance"), Fix.Instance)
+		|| !TestNotNull(TEXT("Player combat"), Fix.PlayerCombat())) { return false; }
+#if WITH_DEV_AUTOMATION_TESTS
+	QinglanStoryRuntime::SetRegistryForTesting(MakeTrialStoryRegistry());
+#endif
+	GrindTrialProfileToFoundationReady(Fix.Instance);
+	AQinglanTrialDirector* Director = SpawnTrialDirector(Fix.World);
+	if (!TestNotNull(TEXT("Trial director"), Director)
+		|| !TestTrue(TEXT("Foundation trial admitted"), Director->BeginTrial(TEXT("CH03_S02"), TEXT("CH03_S02_OBJECTIVE"), 90.f, 1))) { return false; }
+	// Cross the first volley boundary in one slow frame. The outline has
+	// only just appeared, so this frame cannot also consume its warning.
+	Director->Tick(4.f);
+	if (!TestTrue(TEXT("New warning remains visible after a slow frame"), !Director->GetPendingStrikes().IsEmpty())) { return false; }
+	for (const FQinglanPendingStrike& Strike : Director->GetPendingStrikes())
+	{
+		TestEqual(TEXT("Every new strike retains its full warning interval"), Strike.WarnRemaining, QinglanTrialStorm::StrikeWarnSeconds);
+	}
+	Fix.PlayerController->GetPawn()->SetActorLocation(Director->GetPendingStrikes()[0].Center);
+	const float Health = Fix.PlayerCombat()->GetAttributes().Health;
+	Director->Tick(0.75f);
+	TestEqual(TEXT("Standing in the warning is safe before impact"), Fix.PlayerCombat()->GetAttributes().Health, Health);
+	TestTrue(TEXT("Warning has not expired early"), !Director->GetPendingStrikes().IsEmpty());
+	Director->Tick(0.26f);
+	TestTrue(TEXT("Damage lands after the full warning window"), Fix.PlayerCombat()->GetAttributes().Health < Health);
+	TestTrue(TEXT("Resolved volley clears its warnings"), Director->GetPendingStrikes().IsEmpty());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanTrialLethalStrikeCancelsVictory, "Qinglan.Trial.LethalStrikeCannotAwardVictory", QinglanTestFlags)
+bool FQinglanTrialLethalStrikeCancelsVictory::RunTest(const FString& Parameters)
+{
+	for (const bool bQueuedVictory : { false, true })
+	{
+		FQinglanTrialWorld Fix;
+		if (!TestNotNull(TEXT("World"), Fix.World) || !TestNotNull(TEXT("Instance"), Fix.Instance)
+			|| !TestNotNull(TEXT("Player combat"), Fix.PlayerCombat())) { return false; }
+#if WITH_DEV_AUTOMATION_TESTS
+		QinglanStoryRuntime::SetRegistryForTesting(MakeTrialStoryRegistry());
+#endif
+		GrindTrialProfileToGoldenCoreReady(Fix.Instance);
+		AQinglanTrialDirector* Director = SpawnTrialDirector(Fix.World);
+		if (!TestNotNull(TEXT("Trial director"), Director)
+			|| !TestTrue(TEXT("Golden Core trial admitted"),
+				Director->BeginTrial(TEXT("CH06_S02"), TEXT("s02.objective"), 150.f, 2))) { return false; }
+		Director->Tick(bQueuedVictory ? 149.5f : 0.5f);
+		if (bQueuedVictory)
+		{
+			// Carry the final warning into the required kill, materialize the
+			// boss, then kill it while that warning is still on screen.
+			Director->Tick(0.5f);
+			for (int32 Step = 0; Step < 4; ++Step) { TickTrialWorld(Fix, Director, 0.21f); }
+			ACharacter* Boss = FindTrialEnginePawn(Fix, Director);
+			UQinglanCombatComponent* BossCombat = Boss ? Boss->FindComponentByClass<UQinglanCombatComponent>() : nullptr;
+			if (!TestNotNull(TEXT("Required boss"), BossCombat)) { return false; }
+			FQinglanDamageEvent Lethal;
+			Lethal.CastId = UQinglanCombatComponent::NextCastId();
+			Lethal.RawMagnitude = 99999.f;
+			if (!TestTrue(TEXT("Required boss dies"), BossCombat->ApplyDamage(Lethal))) { return false; }
+			AActor* Engine = FindTrialWaveEngine(Fix, Director);
+			if (!TestNotNull(TEXT("Wave engine"), Engine)) { return false; }
+			Engine->Tick(0.f);
+			TestTrue(TEXT("Fixture initializes actors for dynamic completion callbacks"), Fix.World->AreActorsInitialized());
+			if (!TestEqual(TEXT("Victory is queued before the last strike"),
+				Director->GetTrialPhase(), EQinglanTrialPhase::Victory)) { return false; }
+		}
+		if (!TestTrue(TEXT("A warned strike remains pending"), !Director->GetPendingStrikes().IsEmpty())) { return false; }
+		const FQinglanPendingStrike Strike = Director->GetPendingStrikes()[0];
+		Fix.PlayerController->GetPawn()->SetActorLocation(Strike.Center);
+		FQinglanAttributes Vulnerable = Fix.PlayerCombat()->GetAttributes();
+		Vulnerable.Health = 1.f;
+		Fix.PlayerCombat()->SetDerivedAttributes(Vulnerable);
+		Director->Tick(Strike.WarnRemaining + 0.01f);
+		TestFalse(TEXT("Residual lightning is lethal"), Fix.PlayerCombat()->IsAlive());
+		TestFalse(TEXT("Lethal lightning ends the attempt in the same frame"), Director->IsTrialActive());
+		UQinglanStorySubsystem* Story = Fix.Instance->GetSubsystem<UQinglanStorySubsystem>();
+		TestFalse(TEXT("A lethal strike cannot complete the trial objective"),
+			QinglanStoryRuntime::IsSceneObjectiveCompleted(Story, TEXT("CH06_S02"), TEXT("s02.objective")));
+		TestEqual(TEXT("Defeat cannot award a cultivation breakthrough"),
+			Fix.Instance->GetSubsystem<UQinglanProfileSubsystem>()->GetCultivationStage(), EQinglanStage::FoundationEstablishment);
+	}
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationTestQinglanTrialTimerExpiry, "Qinglan.Trial.TimerExpiryRequiresKill", QinglanTestFlags)
 bool FAutomationTestQinglanTrialTimerExpiry::RunTest(const FString& Parameters)
 {

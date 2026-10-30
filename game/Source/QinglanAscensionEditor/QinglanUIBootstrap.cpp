@@ -17,6 +17,7 @@
 #include "Misc/FileHelper.h" // FFileHelper::LoadFileToArray for the disk verification pass
 #include "Misc/PackageName.h"
 #include "UI/QinglanUIWidgets.h"
+#include "UI/QinglanHUDLayout.h"
 #include "UObject/Package.h"
 #include "UObject/SavePackage.h"
 #include "WidgetBlueprint.h"
@@ -190,9 +191,8 @@ int32 UQinglanUIBootstrapCommandlet::Main(const FString& Params)
 		AddText(Tree, Root, FText::FromString(TEXT("Barrier 0")), FVector2D(40, 940), FVector2D(220, 28), 16, TEXT("Txt_Barrier"));
 		for (int32 i = 0; i < 4; ++i)
 		{
-			// Wide enough for a full technique name at 18 px; 150 cm slots and
-			// 20 px overflowed into the neighbouring label ("Jade Sword Arc"
-			// rendered across slot 2 in the first packaged screenshot).
+			// Named template nodes; the shared layout below allocates their
+			// responsive columns and also repairs existing runtime assets.
 			AddText(Tree, Root, FText::FromString(FString::Printf(TEXT("[Skill %d]"), i + 1)),
 				FVector2D(360 + i * 220, 980), FVector2D(210, 44), 14, *FString::Printf(TEXT("Txt_Skill%d"), i));
 		}
@@ -203,6 +203,7 @@ int32 UQinglanUIBootstrapCommandlet::Main(const FString& Params)
 		}
 		AddText(Tree, Root, FText::FromString(TEXT("Objective")), FVector2D(40, 40), FVector2D(700, 60), 20, TEXT("Txt_Objective"));
 		AddText(Tree, Root, FText::FromString(TEXT("")), FVector2D(500, 830), FVector2D(900, 100), 18, TEXT("Txt_Bark"));
+		QinglanHUDLayout::Apply(Tree);
 		bOk &= SaveWidget(Hud);
 	}
 

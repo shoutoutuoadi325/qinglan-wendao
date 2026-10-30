@@ -5,11 +5,13 @@
 #include "Combat/QinglanTrainingTarget.h"
 #include "Core/QinglanInteractable.h"
 #include "Core/QinglanObjectiveGuide.h"
+#include "Core/QinglanRoomLayout.h"
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/TargetPoint.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "GameFramework/PlayerStart.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/Guid.h"
 #include "Narrative/QinglanStoryDataTypes.h"
@@ -304,6 +306,116 @@ bool FQinglanCatalogObjectiveGuide::RunTest(const FString& Parameters)
 	TestNotNull(TEXT("Production spawner creates the next room door"), Fixture.Find(TEXT("door.2_3")));
 	TestEqual(TEXT("Distant next scene routes through the current room exit"), Guide.Target, static_cast<AActor*>(Fixture.Find(TEXT("door.2_3"))));
 	TestEqual(TEXT("Door guidance replaces the old document instruction"), Guide.HintKey, FName(TEXT("guide.exit")));
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanLegacyHubInspectionStations,
+	"Qinglan.Narrative.LegacyHubSynthesizesRequiredDocuments",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FQinglanLegacyHubInspectionStations::RunTest(const FString& Parameters)
+{
+	for (const bool bAuthoredStations : { false, true })
+	{
+		FObjectiveGuideWorld Fixture(TEXT("L_Hub"));
+		if (!TestNotNull(TEXT("Private hub world"), Fixture.World)) { return false; }
+		Fixture.AddAnchor(TEXT("hub.shrine"), FVector(0.f, 3200.f, 600.f));
+		Fixture.AddAnchor(TEXT("hub.archive_table"), FVector(2000.f, 0.f, 600.f));
+		if (bAuthoredStations)
+		{
+			Fixture.AddAnchor(TEXT("hub.ledger_table"), FVector(-2300.f, 400.f, 600.f));
+			Fixture.AddAnchor(TEXT("hub.correspondence_table"), FVector(2300.f, 800.f, 600.f));
+		}
+		Fixture.BeginPlay();
+		for (const TCHAR* Id : { TEXT("hub.ledger_table"), TEXT("hub.correspondence_table"),
+			TEXT("inspect.sealed_page_1"), TEXT("inspect.sealed_page_4"), TEXT("inspect.morning_ledger"),
+			TEXT("inspect.thirty_day_card"), TEXT("inspect.outcome_report"), TEXT("inspect.yun_new_letter") })
+		{
+			TestNotNull(*FString::Printf(TEXT("%s exists with authored stations=%d"), Id, bAuthoredStations), Fixture.Find(Id));
+		}
+		if (bAuthoredStations && Fixture.Find(TEXT("hub.ledger_table")))
+		{
+			TestEqual(TEXT("Authored station position takes precedence"), Fixture.Find(TEXT("hub.ledger_table"))->GetActorLocation(),
+				FVector(-2300.f, 400.f, 600.f));
+		}
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanDoorMissingEntranceFallback,
+	"Qinglan.Progression.DoorCannotTeleportToAnotherRoomsEntrance",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FQinglanDoorMissingEntranceFallback::RunTest(const FString& Parameters)
+{
+	FObjectiveGuideWorld Fixture(TEXT("L_DoorRegression"));
+	if (!TestNotNull(TEXT("Private room world"), Fixture.World)) { return false; }
+	Fixture.BeginPlay();
+	UQinglanRunSubsystem* Run = Fixture.Instance->GetSubsystem<UQinglanRunSubsystem>();
+	if (!TestNotNull(TEXT("Player"), Fixture.Player) || !TestNotNull(TEXT("Run"), Run)) { return false; }
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	APlayerStart* OtherEntrance = Fixture.World->SpawnActor<APlayerStart>(APlayerStart::StaticClass(),
+		FVector(100.f, 0.f, 150.f), FRotator::ZeroRotator, Params);
+	AQinglanInteractable* Door = Fixture.World->SpawnActor<AQinglanInteractable>();
+	if (!TestNotNull(TEXT("Other entrance"), OtherEntrance) || !TestNotNull(TEXT("Door"), Door)) { return false; }
+	Door->InteractionId = TEXT("door.2_3");
+	for (const FName Tag : { FName(TEXT("Qinglan.RoomEntrance.0")), FName(TEXT("Qinglan.RoomEntrance")) })
+	{
+		OtherEntrance->PlayerStartTag = Tag;
+		FQinglanCheckpoint Checkpoint;
+		Checkpoint.RealmId = UQinglanEconomyLibrary::BambooRealmIdText;
+		Checkpoint.RoomIndex = 2;
+		Checkpoint.CommittedRoomIds = { 0, 1, 2 };
+		Run->ImportCheckpoint(Checkpoint);
+		Run->MarkCheckpointResumed();
+		Door->ExecuteInteraction(Fixture.Player);
+		TestEqual(TEXT("The safe room becomes current"), Run->GetCurrentRoomIndex(), 3);
+		TestEqual(TEXT("A missing destination uses its own layout entrance"), Fixture.Player->GetActorLocation(),
+			QinglanRoomLayout::RoomEntrance(3));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanRealmExitGuidance,
+	"Qinglan.Narrative.CompletedRealmGuidesToItsReturnStation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FQinglanRealmExitGuidance::RunTest(const FString& Parameters)
+{
+	struct FCase { const TCHAR* Map; const TCHAR* Realm; const TCHAR* NextScene; const TCHAR* Exit; };
+	const FCase Cases[] = {
+		{ TEXT("L_BambooHollow"), UQinglanEconomyLibrary::BambooRealmIdText, TEXT("CH03_S01"), TEXT("bamboo.room_5_safe") },
+		// CH05_S01 is the Ashen Guardian fight at the exit station. A finished
+		// realm returns after CH05_S02's release controls, toward the hub ledger.
+		{ TEXT("L_AshenVerge"), UQinglanEconomyLibrary::AshenRealmIdText, TEXT("CH05_S03"), TEXT("ashen.boss_5") }
+	};
+	for (const FCase& Entry : Cases)
+	{
+		FObjectiveGuideWorld Fixture(Entry.Map);
+		if (!TestNotNull(TEXT("Private realm world"), Fixture.World)) { return false; }
+		Fixture.AddAnchor(Entry.Exit, QinglanRoomLayout::RoomCenter(6));
+		Fixture.BeginPlay();
+		UQinglanStorySubsystem* Story = Fixture.Instance->GetSubsystem<UQinglanStorySubsystem>();
+		UQinglanRunSubsystem* Run = Fixture.Instance->GetSubsystem<UQinglanRunSubsystem>();
+		if (!TestNotNull(TEXT("Player"), Fixture.Player) || !TestNotNull(TEXT("Story"), Story)
+			|| !TestNotNull(TEXT("Run"), Run) || !TestNotNull(TEXT("Registry"), Story->GetRegistry())) { return false; }
+		QinglanStoryRuntime::ImportNarrativeState(Story, BeforeScene(Story->GetRegistry(), Entry.NextScene));
+		FQinglanCheckpoint Checkpoint;
+		Checkpoint.RealmId = Entry.Realm;
+		Checkpoint.RoomIndex = 6;
+		Checkpoint.CommittedRoomIds = { 0, 1, 2, 3, 4, 5, 6 };
+		Run->ImportCheckpoint(Checkpoint);
+		Run->MarkCheckpointResumed();
+		const FQinglanObjectiveGuide Guide = QinglanObjectiveGuide::Resolve(Fixture.Player);
+		TestTrue(TEXT("Fixture has completed the realm's victory requirements"), Run->CanClaimVictory());
+		TestEqual(TEXT("The next tracked objective is the authored hub scene"), Guide.SceneId, FName(Entry.NextScene));
+		const FQinglanRegistryScene* Scene = Story->GetRegistry()->FindMainScene(Guide.SceneId);
+		TestTrue(TEXT("The pending objective belongs to the hub"), Scene && Scene->Location.ToString().StartsWith(TEXT("hub.")));
+		TestNotNull(TEXT("Production return station exists"), Fixture.Find(Entry.Exit));
+		TestEqual(TEXT("A hub objective directs the completed realm to its own return station"),
+			Guide.Target, static_cast<AActor*>(Fixture.Find(Entry.Exit)));
+		TestEqual(TEXT("Exit station teaches returning"), Guide.HintKey, FName(TEXT("guide.return")));
+	}
 	return true;
 }
 #endif

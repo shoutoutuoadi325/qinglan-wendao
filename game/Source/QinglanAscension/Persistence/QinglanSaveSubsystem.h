@@ -42,7 +42,9 @@ public:
 		 * prefix and reports success, so the post-write verification (step 3)
 		 * must reject it.
 		 */
-		Write
+		Write,
+		/** Reports a failed durable flush after the payload was written. */
+		Flush
 	};
 
 	/**
@@ -71,10 +73,14 @@ public:
 	 * active session: true (nothing earned to persist).
 	 */
 	UFUNCTION(BlueprintCallable) bool SaveActiveSession(FText& OutError);
+	/** Saves the checkpoint before returning to profile selection. No banking or loot penalty. */
+	UFUNCTION(BlueprintCallable) bool SuspendActiveSession(FText& OutError);
 	/** True once a profile was loaded or created in this process session. */
 	UFUNCTION(BlueprintPure) bool IsProfileSessionActive() const;
 	UFUNCTION(BlueprintCallable) bool HasProfile(int32 Slot) const;
 	UFUNCTION(BlueprintCallable) void CreateNewProfile(int32 Slot);
+	/** Creates durably before replacing the active session; failure leaves its profile/run untouched. */
+	UFUNCTION(BlueprintCallable) bool TryCreateNewProfile(int32 Slot, FText& OutError);
 	/** Removes checkpoint state (used on expedition end / return to hub). */
 	UFUNCTION(BlueprintCallable) void ClearCheckpoint();
 	/** Run lifecycle hook: re-enable checkpoint writes after a new expedition starts successfully. */
@@ -100,6 +106,9 @@ protected:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 
 private:
+	/** An explicit replacement snapshot writes a new profile without sampling or mutating the current session. */
+	bool WriteProfileSave(FText& OutError, const struct FQinglanProfileSnapshot* ReplacementSnapshot,
+		int32 ReplacementSlot, int32* OutSavedSequence = nullptr);
 	/** Commit-boundary autosave (hub purchases, rank unlocks): saves when a profile commit lands outside an expedition. */
 	UFUNCTION() void HandleProfileCommitted();
 

@@ -40,6 +40,10 @@ struct FQinglanProfileSnapshot
 	UPROPERTY() TArray<FName> EquippedPassives;
 	/** Talisman id -> remaining expedition charges; refilled at the sanctuary (docs/03 section 5). */
 	UPROPERTY() TMap<FName, int32> TalismanCharges;
+	/** Slot order is permanent profile equipment, including exhausted slots. */
+	UPROPERTY() TArray<FName> EquippedTalismans;
+	/** Missing in older saves; distinguishes legacy defaults from an intentionally empty loadout. */
+	UPROPERTY() bool bTalismanLoadoutInitialized = false;
 	UPROPERTY() TArray<FName> CampaignFlags;
 	/** Journal of committed transaction ids; idempotency key for grants/banking (§1.5). */
 	UPROPERTY() TArray<FName> CommittedTransactionIds;

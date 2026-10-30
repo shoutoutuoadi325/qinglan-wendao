@@ -127,6 +127,22 @@ def native_path(path, host):
     return str(path)
 
 
+def resolve_editor(editor, scripts, repo, env, host):
+    """Select the host's layout after building a fresh source checkout."""
+    if editor:
+        path = Path(editor).resolve()
+    else:
+        result = subprocess.run(
+            ["bash", "-c",
+             'fail() { echo "$*" >&2; exit 1; }; source "$1"; qinglan_init_host; qinglan_editor_tool',
+             "qinglan-acceptance-editor", str(scripts / "common.sh")],
+            cwd=repo, env=env, capture_output=True, text=True, check=True)
+        path = Path(result.stdout.strip()).resolve()
+    if not path.is_file() or (host != "Win64" and not os.access(path, os.X_OK)):
+        raise ValueError(f"Built editor executable is unavailable: {path}")
+    return path
+
+
 def package_inventory(archive, platform):
     """Hash this invocation's native client and cooked containers, not engine libs."""
     clients, containers = [], []
@@ -236,13 +252,15 @@ def run_baseline(args):
                     "campaign_environment": step_env["QINGLAN_RUN_CAMPAIGN"],
                     "ddc_graph": step_env["QINGLAN_DDC"]}
             if selection:
+                editor = resolve_editor(args.editor, scripts, repo, step_env, args.host)
+                step["editor"] = str(editor)
                 report_dir = run_dir / (name + "-report")
                 report_dir.mkdir()
                 step["report_export_path"] = str(report_dir)
                 step["expected_tests"] = expected if selection == "Qinglan" else [selection]
                 command = ["bash", "-c",
                            'fail() { echo "$*" >&2; exit 1; }; source "$1"; qinglan_init_host; qinglan_run_engine "$2" "${@:3}"',
-                           "qinglan-acceptance", str(scripts / "common.sh"), str(Path(args.editor).resolve()),
+                           "qinglan-acceptance", str(scripts / "common.sh"), str(editor),
                            native_path(project / "QinglanAscension.uproject", args.host),
                            "-ExecCmds=Automation RunTests " + selection,
                            "-TestExit=Automation Test Queue Empty", "-ReportExportPath=" + native_path(report_dir, args.host),
@@ -298,8 +316,9 @@ def run_baseline(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    for argument in ("repo", "engine", "project", "editor", "host", "platform"):
+    for argument in ("repo", "engine", "project", "host", "platform"):
         parser.add_argument("--" + argument, required=True)
+    parser.add_argument("--editor", help="Optional editor override; otherwise resolve the built host editor before tests")
     parser.add_argument("--timeout-seconds", type=int, default=14400, help="Maximum seconds per step (default: 14400)")
     arguments = parser.parse_args()
     if arguments.timeout_seconds <= 0:

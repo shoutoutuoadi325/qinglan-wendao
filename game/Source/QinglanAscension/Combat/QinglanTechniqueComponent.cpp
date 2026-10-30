@@ -13,9 +13,11 @@
 #include "Combat/QinglanCharacter.h"
 #include "Combat/QinglanCombatComponent.h"
 #include "Combat/QinglanCombatState.h"
+#include "Combat/QinglanDodgeComponent.h"
 #include "Core/QinglanAudioSubsystem.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Progression/QinglanEconomyLibrary.h"
 #include "Progression/QinglanProfileSubsystem.h"
 #include "Progression/QinglanRunSubsystem.h"
@@ -129,9 +131,19 @@ namespace
 		{
 		case EQinglanTargeting::SelfBarrier:
 		case EQinglanTargeting::SelfHeal:
-		case EQinglanTargeting::SelfDash:
 		case EQinglanTargeting::SelfPulses:
 			return true; // self techniques need no external target
+		case EQinglanTargeting::SelfDash:
+		{
+			// Mist Step uses the dodge movement path and cannot bypass Root. Root
+			// still permits stationary self techniques and the cleansing talisman.
+			const UQinglanCombatComponent* Combat = Owner->FindComponentByClass<UQinglanCombatComponent>();
+			const UQinglanDodgeComponent* Dodge = Character ? Character->FindComponentByClass<UQinglanDodgeComponent>() : nullptr;
+			const UCharacterMovementComponent* Movement = Character ? Character->GetCharacterMovement() : nullptr;
+			return Combat && !Combat->HasStatus(EQinglanStatus::Root)
+				&& Dodge && !Dodge->IsDodging() && Movement && Movement->MovementMode != MOVE_None
+				&& !OutAimDirection.GetSafeNormal2D().IsNearlyZero();
+		}
 		case EQinglanTargeting::GroundStrike:
 			return FVector::Dist(SocketOrigin, AimPoint) <= KMaxGroundStrikeAimRangeCm;
 		case EQinglanTargeting::Projectile:
@@ -541,13 +553,15 @@ void UQinglanTechniqueComponent::ReleaseCurrentCast()
 		UQinglanEconomyLibrary::AppendPermanentModifiers(this, Blessings);
 	}
 
-	// Release chime rides the commit (docs/04 audio pass); null-safe.
-	if (UGameInstance* GameInstance = Owner->GetGameInstance())
+	// Aiming and movement may change during anticipation. Validate the actual
+	// release target before committing either resource, then execute that same
+	// resolved aim instead of spending energy on an invalid ground strike.
+	FVector AimPoint = FVector::ZeroVector;
+	FVector AimDirection = FVector::ForwardVector;
+	if (!ResolveAim(this, Technique, AimPoint, AimDirection))
 	{
-		if (UQinglanAudioSubsystem* Audio = GameInstance->GetSubsystem<UQinglanAudioSubsystem>())
-		{
-			Audio->PlaySfx(FName(TEXT("sfx_technique_release")));
-		}
+		InterruptCast();
+		return;
 	}
 
 	// Commit energy exactly once; if energy dropped below cost during
@@ -564,6 +578,14 @@ void UQinglanTechniqueComponent::ReleaseCurrentCast()
 	// never reenter (docs/02 §3 "Prevent reentrant ability release with a
 	// unique cast ID").
 	bInAnticipation = false;
+	// Release chime rides a successful commit (docs/04 audio pass); null-safe.
+	if (UGameInstance* GameInstance = Owner->GetGameInstance())
+	{
+		if (UQinglanAudioSubsystem* Audio = GameInstance->GetSubsystem<UQinglanAudioSubsystem>())
+		{
+			Audio->PlaySfx(FName(TEXT("sfx_technique_release")));
+		}
+	}
 
 	// Commit cooldown exactly once.
 	const float Cooldown = ComputeCooldownSeconds(Technique, Blessings);
@@ -588,7 +610,8 @@ void UQinglanTechniqueComponent::ReleaseCurrentCast()
 			Context.TierMultiplier = Profile->GetTechniqueTierMultiplier(Technique->TechniqueId);
 		}
 	}
-	ResolveAim(this, Technique, Context.AimPoint, Context.AimDirection);
+	Context.AimPoint = AimPoint;
+	Context.AimDirection = AimDirection;
 	UQinglanTechniqueExecutors::Execute(Context);
 
 	OnCastReleased.Broadcast(Technique->TechniqueId, CurrentCastId);

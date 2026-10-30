@@ -95,6 +95,9 @@ public:
 	// --- Talisman charges (docs/03 section 5: expedition charges, free refill at the sanctuary) ---
 	UFUNCTION(BlueprintPure) void GetTalismanCharges(TMap<FName, int32>& OutCharges) const;
 	UFUNCTION(BlueprintPure) int32 GetTalismanChargeCount(FName TalismanId) const;
+	UFUNCTION(BlueprintPure) TArray<FName> GetEquippedTalismans() const;
+	/** Equips up to two available catalog talismans; existing exhausted slots may remain. Never mid-expedition. */
+	UFUNCTION(BlueprintCallable) bool TrySetEquippedTalismans(const TArray<FName>& TalismanIds);
 	/** Consumes one charge; false (and no change) when none remain. */
 	UFUNCTION(BlueprintCallable) bool TryConsumeTalismanCharge(FName TalismanId);
 	/** Resets every catalog talisman to its authored charge count (sanctuary arrival). */
@@ -126,6 +129,8 @@ private:
 	/** Seeds the fresh-profile defaults (docs/03 section 3; data/examples/save.json). */
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	void ResetToFreshProfile();
+	/** Supplies stable initial slots for fresh profiles and saves predating talisman loadouts. */
+	void ResetTalismanLoadout();
 	/** Shared gate validator for TryBreakthrough and CanAttemptBreakthrough. */
 	bool CheckBreakthroughGate(class FText& OutBlockingReason) const;
 	/** Boss/trial proofs accept either the campaign proof flag or the story flag. */
@@ -150,6 +155,7 @@ private:
 	TSet<FName> OwnedPassives;
 	TArray<FName> EquippedPassives;
 	TMap<FName, int32> TalismanCharges;
+	TArray<FName> EquippedTalismans;
 	TSet<FName> CommittedTransactionIds;
 	TSet<FName> ReadRecords;
 	TSet<FName> CompletedSideStages;

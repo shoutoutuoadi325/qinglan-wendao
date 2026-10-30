@@ -37,7 +37,11 @@ namespace
 
 void UQinglanAudioSubsystem::SetMusicState(EQinglanMusicState NewState)
 {
-	if (NewState == MusicState)
+	// The subsystem survives map travel, but its audio component does not.
+	// Recreate a stopped or previous-world component even for the same track.
+	if (NewState == MusicState && (NewState == EQinglanMusicState::None
+		|| (IsValid(MusicComponent) && MusicComponent->GetWorld() == GetWorld()
+			&& MusicComponent->IsPlaying())))
 	{
 		return;
 	}
@@ -75,9 +79,9 @@ USoundBase* UQinglanAudioSubsystem::LoadSound(const TCHAR* PackagePath) const
 
 void UQinglanAudioSubsystem::StopMusic()
 {
-	if (MusicComponent)
+	if (IsValid(MusicComponent))
 	{
 		MusicComponent->FadeOut(MusicFadeOutSeconds, 0.f);
-		MusicComponent = nullptr;
 	}
+	MusicComponent = nullptr;
 }

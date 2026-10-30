@@ -11,6 +11,7 @@
 #include "Narrative/QinglanStoryDataTypes.h"
 #include "Narrative/QinglanStoryRuntime.h"
 #include "Narrative/QinglanStorySubsystem.h"
+#include "Progression/QinglanEconomyLibrary.h"
 #include "Progression/QinglanRunSubsystem.h"
 
 FQinglanObjectiveGuide QinglanObjectiveGuide::Resolve(AQinglanCharacter* Player)
@@ -157,7 +158,12 @@ FQinglanObjectiveGuide QinglanObjectiveGuide::Resolve(AQinglanCharacter* Player)
 			Guide.HintKey = TEXT("guide.exit");
 			if (!Guide.Target)
 			{
-				Guide.Target = FindAnchor(TEXT("bamboo.tutorial_return"));
+				const UQinglanRealmDataAsset* Realm = Run->GetCurrentRealm();
+				const FName ExitId = Realm && Realm->RealmId == FName(UQinglanEconomyLibrary::TutorialRealmIdText)
+					? FName(TEXT("bamboo.tutorial_return"))
+					: Player->GetWorld()->GetMapName().Contains(TEXT("Ashen"))
+						? FName(TEXT("ashen.boss_5")) : FName(TEXT("bamboo.room_5_safe"));
+				Guide.Target = FindAnchor(ExitId);
 				Guide.HintKey = TEXT("guide.return");
 			}
 		}

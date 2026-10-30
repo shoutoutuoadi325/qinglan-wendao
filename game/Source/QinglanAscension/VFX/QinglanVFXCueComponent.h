@@ -41,8 +41,8 @@ public:
 	UFUNCTION(BlueprintCallable)
 	void PlayTelegraph(FVector Center, float Radius, float Duration, EQinglanElement Element);
 
-	/** AUD-42: readable safe-lane marker for ring/ember telegraphs (placeholder
-	 *  stretched shape; no light, so Low quality and low-flash keep it visible).
+	/** Safe-sector marker for ring/ember telegraphs; every triangle stays inside
+	 *  the damage exemption. No light, so Low quality and low-flash keep it visible.
 	 *  SafeLaneDegrees is the world-space yaw the mechanic treats as safe. */
 	UFUNCTION(BlueprintCallable)
 	void PlaySafeLane(FVector Center, float Radius, float SafeLaneDegrees, float HalfWidthDegrees,
@@ -70,6 +70,8 @@ private:
 		TWeakObjectPtr<UNiagaraComponent> Niagara;
 		float Remaining = 0.f;
 		float Total = 0.f;
+		/** Warnings age from creation game time, not time before their first frame. */
+		float LastWorldSeconds = -1.f;
 		float BaseRadius = 0.f;
 		/** Authored light intensity; decay scales from this, never compounds. */
 		float LightBaseIntensity = 0.f;

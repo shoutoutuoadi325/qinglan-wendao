@@ -17,13 +17,17 @@
 
 #include "QinglanAscension.h"
 
+#include "CollisionQueryParams.h"
 #include "Components/DecalComponent.h"
+#include "Components/DynamicMeshComponent.h"
 #include "Core/QinglanAudioSubsystem.h"
 #include "Components/PointLightComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/GameInstance.h"
+#include "Engine/HitResult.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "DynamicMesh/DynamicMesh3.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialParameterCollectionInstance.h" // IWYU
 #include "NiagaraComponent.h"
@@ -60,7 +64,8 @@ namespace
 	{
 		if (CueId == QinglanVFXCues::TelegraphRing || CueId == QinglanVFXCues::BossGroundMarker)
 		{
-			return TEXT("/Game/Qinglan/Materials/M_QinglanDecalRing");
+			// PlayCue hosts a mesh; deferred-decal materials cannot render on it.
+			return TEXT("/Game/Qinglan/Materials/M_QinglanAdditive");
 		}
 		if (CueId == QinglanVFXCues::FlowingWardBarrier || CueId == QinglanVFXCues::StoneAegisBarrier)
 		{
@@ -80,6 +85,26 @@ namespace
 	}
 
 	bool QualityAllowsLights(EQinglanVFXQuality Q) { return Q >= EQinglanVFXQuality::Balanced; }
+
+	FVector ResolveWarningGround(UWorld* World, AActor* Owner, const FVector& Center)
+	{
+		// Damage centers are often capsule centers. Preserve their frozen X/Y
+		// footprint while placing its presentation on the walkable surface.
+		FCollisionObjectQueryParams Objects;
+		Objects.AddObjectTypesToQuery(ECC_WorldStatic);
+		Objects.AddObjectTypesToQuery(ECC_WorldDynamic);
+		FCollisionQueryParams Query(SCENE_QUERY_STAT(QinglanWarningGround), false, Owner);
+		FHitResult Ground;
+		constexpr float ProbeAboveCm = 100.f;
+		constexpr float ProbeBelowCm = 1500.f;
+		if (World && World->LineTraceSingleByObjectType(Ground,
+			Center + FVector(0.f, 0.f, ProbeAboveCm), Center - FVector(0.f, 0.f, ProbeBelowCm), Objects, Query)
+			&& Ground.ImpactNormal.Z >= 0.5f)
+		{
+			return FVector(Center.X, Center.Y, Ground.ImpactPoint.Z + 2.f);
+		}
+		return Center; // isolated/headless worlds may have no ground geometry
+	}
 
 	/** AUD-43: bounded cosmetic-light budget per component (docs/06 VFX GPU
 	 *  budget); exceeded cues keep their mesh silhouette but spawn no light. */
@@ -348,11 +373,16 @@ void UQinglanVFXCueComponent::PlayTelegraph(FVector Center, float Radius, float 
 	{
 		return;
 	}
+	const FVector GroundCenter = ResolveWarningGround(World, OwnerActor, Center);
 	UDecalComponent* Decal = NewObject<UDecalComponent>(OwnerActor);
 	Decal->SetupAttachment(RootComp);
-	Decal->SetWorldLocation(Center);
+	// Establish world-space semantics before assigning a frozen ground point.
+	// Toggling absolute flags afterwards reinterprets the relative transform.
+	Decal->SetAbsolute(true, true, true);
+	Decal->SetWorldLocation(GroundCenter);
 	Decal->SetWorldRotation(FRotator(-90.f, 0.f, 0.f));
-	Decal->DecalSize = FVector(Duration * 100.f, Radius, Radius);
+	// A ground outline must not project through the player's legs and torso.
+	Decal->DecalSize = FVector(8.f, Radius, Radius);
 	if (UMaterialInterface* Mat = GetCueMaterial(TEXT("/Game/Qinglan/Materials/M_QinglanDecalRing")))
 	{
 		// UE 5.8: UMaterialInstanceDynamic has no public SetParent; assign the
@@ -362,23 +392,24 @@ void UQinglanVFXCueComponent::PlayTelegraph(FVector Center, float Radius, float 
 		{
 			MID->SetVectorParameterValue("Color", ElementColor(Element));
 			MID->SetScalarParameterValue("Intensity", 1.f);
+			MID->SetScalarParameterValue("Opacity", 0.7f);
 		}
 	}
-	Decal->SetAbsolute(true, true, true);
 	Decal->RegisterComponent();
 
 	FCueInstance Inst;
 	Inst.Root = Decal;
 	Inst.Remaining = Duration;
 	Inst.Total = Duration;
+	Inst.LastWorldSeconds = World->GetTimeSeconds();
 	Inst.BaseRadius = Radius;
 	Inst.bRing = true;
 
 	// AUD-42: real Niagara telegraph when the authored system exists; the decal
 	// and disc above remain the fallback and the quality-independent silhouette.
 	FTransform NiagaraSource;
-	NiagaraSource.SetLocation(Center);
-	SpawnNiagaraForCue(QinglanVFXCues::TelegraphRing, NiagaraSource, Center, Element, 1.f, Inst.Niagara);
+	NiagaraSource.SetLocation(GroundCenter);
+	SpawnNiagaraForCue(QinglanVFXCues::TelegraphRing, NiagaraSource, GroundCenter, Element, 1.f, Inst.Niagara);
 	ActiveCues.Add(Inst);
 
 	// AUD-42: the decal alone disappears when the bootstrap material is missing
@@ -395,18 +426,22 @@ void UQinglanVFXCueComponent::PlayTelegraph(FVector Center, float Radius, float 
 	Disc->SetStaticMesh(DiscMesh);
 	Disc->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Disc->SetGenerateOverlapEvents(false);
-	Disc->SetWorldLocation(Center);
+	Disc->SetCastShadow(false);
+	Disc->SetWorldLocation(GroundCenter);
 	// Cylinder primitive: radius 50 cm, height 100 cm. Flatten it into a ground
 	// disc whose X/Y radius matches the authored telegraph radius.
 	const float DiscScale = FMath::Max(Radius, 1.f) / 50.f;
 	Disc->SetWorldScale3D(FVector(DiscScale, DiscScale, 0.02f));
-	if (UMaterialInterface* Mat = GetCueMaterial(TEXT("/Game/Qinglan/Materials/M_QinglanDecalRing")))
+	// The cylinder itself masks the danger area. Use a surface material for
+	// the Low/low-flash fallback; a deferred decal is not a mesh shader.
+	if (UMaterialInterface* Mat = GetCueMaterial(TEXT("/Game/Qinglan/Materials/M_QinglanGroundMarker")))
 	{
 		Disc->SetMaterial(0, Mat);
 		if (UMaterialInstanceDynamic* MID = Disc->CreateAndSetMaterialInstanceDynamic(0))
 		{
 			MID->SetVectorParameterValue("Color", ElementColor(Element));
-			MID->SetScalarParameterValue("Intensity", 0.7f);
+			MID->SetScalarParameterValue("Intensity", 0.55f);
+			MID->SetScalarParameterValue("Opacity", 0.22f);
 		}
 	}
 	Disc->SetAbsolute(true, true, true);
@@ -416,53 +451,65 @@ void UQinglanVFXCueComponent::PlayTelegraph(FVector Center, float Radius, float 
 	DiscInst.Root = Disc;
 	DiscInst.Remaining = Duration;
 	DiscInst.Total = Duration;
+	DiscInst.LastWorldSeconds = World->GetTimeSeconds();
 	DiscInst.BaseRadius = Radius;
-	DiscInst.bRing = false; // fixed ground footprint; only fades
+	DiscInst.bRing = false; // fixed, steady footprint through the warning deadline
 	ActiveCues.Add(DiscInst);
 }
 
 void UQinglanVFXCueComponent::PlaySafeLane(FVector Center, float Radius, float SafeLaneDegrees,
 	float HalfWidthDegrees, float Duration, EQinglanElement Element)
 {
-	// AUD-42 placeholder: a wedge is approximated by a stretched box laid along
-	// the safe bearing. It deliberately carries no light and no Niagara, so it
-	// reads identically at Low quality and in low-flash mode; the authoritative
-	// safe-lane value stays in the AI math (presentation never gates gameplay).
 	UWorld* World = GetWorld();
 	AActor* OwnerActor = GetOwner();
-	if (!World || !OwnerActor)
+	if (!World || !OwnerActor || !FMath::IsFinite(Radius) || Radius <= 0.f
+		|| !FMath::IsFinite(HalfWidthDegrees) || HalfWidthDegrees <= 0.f
+		|| !FMath::IsFinite(SafeLaneDegrees) || Duration <= 0.f)
 	{
 		return;
 	}
-	UStaticMesh* BoxMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube"));
-	if (!BoxMesh)
+
+	// A constant-width rectangle extends outside an angular exemption near
+	// its origin. Render a triangle fan bounded by the actual safe arc
+	// (docs/02 section 9). Its chords stay inside the safe radius as well.
+	const float HalfAngle = FMath::Min(HalfWidthDegrees, 89.f);
+	constexpr float ArcSegmentDegrees = 5.f; // smooth static outline; no flashing
+	const int32 SegmentCount = FMath::Max(1, FMath::CeilToInt(2.f * HalfAngle / ArcSegmentDegrees));
+	UE::Geometry::FDynamicMesh3 Sector;
+	Sector.EnableVertexNormals(FVector3f(0.f, 0.f, 1.f));
+	const int32 Origin = Sector.AppendVertex(FVector3d(0.0, 0.0, 0.0));
+	int32 Previous = INDEX_NONE;
+	for (int32 Index = 0; Index <= SegmentCount; ++Index)
 	{
-		UE_LOG(LogQinglanCombat, Warning, TEXT("Safe-lane placeholder mesh unavailable; telegraph remains center-only"));
-		return;
+		const float Angle = FMath::DegreesToRadians(FMath::Lerp(-HalfAngle, HalfAngle,
+			static_cast<float>(Index) / SegmentCount));
+		const int32 Vertex = Sector.AppendVertex(FVector3d(Radius * FMath::Cos(Angle),
+			Radius * FMath::Sin(Angle), 0.0));
+		// UE ground faces use clockwise indices from above, as in
+		// FDiscMeshGenerator. The opposite order is culled by a single-sided shader.
+		if (Previous != INDEX_NONE) { Sector.AppendTriangle(Origin, Vertex, Previous); }
+		Previous = Vertex;
 	}
 
-	const float YawRad = FMath::DegreesToRadians(SafeLaneDegrees);
-	const FVector Direction(FMath::Cos(YawRad), FMath::Sin(YawRad), 0.f);
-	const float HalfWidthCm = Radius * FMath::Tan(FMath::DegreesToRadians(FMath::Clamp(HalfWidthDegrees, 1.f, 80.f)));
-	const FVector LaneCenter = Center + Direction * (Radius * 0.5f) + FVector(0.f, 0.f, 4.f);
-
-	UStaticMeshComponent* Lane = NewObject<UStaticMeshComponent>(OwnerActor);
-	Lane->SetStaticMesh(BoxMesh); // 100 cm cube: X = length, Y = width, Z = thickness
+	UDynamicMeshComponent* Lane = NewObject<UDynamicMeshComponent>(OwnerActor);
+	Lane->SetMesh(MoveTemp(Sector));
 	Lane->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Lane->SetGenerateOverlapEvents(false);
+	Lane->SetCastShadow(false);
+	Lane->SetTranslucentSortPriority(1);
 	Lane->SetAbsolute(true, true, true);
-	Lane->SetWorldLocationAndRotation(LaneCenter, FRotator(0.f, SafeLaneDegrees, 0.f));
-	Lane->SetWorldScale3D(FVector(
-		FMath::Max(Radius, 1.f) / 100.f,
-		FMath::Max(HalfWidthCm * 2.f, 1.f) / 100.f,
-		0.03f));
-	if (UMaterialInterface* Mat = GetCueMaterial(TEXT("/Game/Qinglan/Materials/M_QinglanDecalRing")))
+	Lane->SetWorldLocationAndRotation(ResolveWarningGround(World, OwnerActor, Center) + FVector(0.f, 0.f, 4.f),
+		FRotator(0.f, SafeLaneDegrees, 0.f));
+	// This material has no UV-dependent disc mask: the geometry is the mask.
+	// A steady green sector remains distinct from the fire danger footprint.
+	if (UMaterialInterface* Mat = GetCueMaterial(TEXT("/Game/Qinglan/Materials/M_QinglanGroundMarker")))
 	{
 		Lane->SetMaterial(0, Mat);
 		if (UMaterialInstanceDynamic* MID = Lane->CreateAndSetMaterialInstanceDynamic(0))
 		{
-			MID->SetVectorParameterValue("Color", ElementColor(Element));
+			MID->SetVectorParameterValue("Color", ElementColor(EQinglanElement::Wood));
 			MID->SetScalarParameterValue("Intensity", 0.65f);
+			MID->SetScalarParameterValue("Opacity", 0.6f);
 		}
 	}
 	Lane->RegisterComponent();
@@ -471,12 +518,10 @@ void UQinglanVFXCueComponent::PlaySafeLane(FVector Center, float Radius, float S
 	Inst.Root = Lane;
 	Inst.Remaining = Duration;
 	Inst.Total = Duration;
+	Inst.LastWorldSeconds = World->GetTimeSeconds();
 	Inst.BaseRadius = Radius;
-	Inst.bRing = false;
-	FTransform NiagaraSource;
-	NiagaraSource.SetLocation(Center);
-	NiagaraSource.SetRotation(FQuat(FRotator(0.f, SafeLaneDegrees, 0.f)));
-	SpawnNiagaraForCue(QinglanVFXCues::TelegraphRing, NiagaraSource, Center, Element, 0.8f, Inst.Niagara);
+	// Decorative particles must not obscure the exact safe boundary,
+	// including at High quality (docs/08 section 3).
 	ActiveCues.Add(Inst);
 }
 
@@ -630,7 +675,14 @@ void UQinglanVFXCueComponent::DecayCues(float DeltaTime)
 	for (int32 i = ActiveCues.Num() - 1; i >= 0; --i)
 	{
 		FCueInstance& Inst = ActiveCues[i];
-		Inst.Remaining -= DeltaTime;
+		float Elapsed = FMath::Max(0.f, DeltaTime);
+		if (Inst.LastWorldSeconds >= 0.f && GetWorld())
+		{
+			const float Now = GetWorld()->GetTimeSeconds();
+			Elapsed = FMath::Max(0.f, Now - Inst.LastWorldSeconds);
+			Inst.LastWorldSeconds = Now;
+		}
+		Inst.Remaining -= Elapsed;
 		const float Alpha = FMath::Clamp(Inst.Remaining / FMath::Max(Inst.Total, 0.01f), 0.f, 1.f);
 		if (UStaticMeshComponent* MeshComp = Cast<UStaticMeshComponent>(Inst.Root.Get()))
 		{

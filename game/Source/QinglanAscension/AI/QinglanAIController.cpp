@@ -10,6 +10,7 @@
 #include "Combat/QinglanCharacter.h"
 #include "Combat/QinglanCombatComponent.h"
 #include "Combat/QinglanStatusComponent.h"
+#include "Components/CapsuleComponent.h"
 #include "Core/QinglanAudioAssets.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Engine/Engine.h"
@@ -69,6 +70,10 @@ void AQinglanAIController::OnEnemyDataInitialized(UQinglanEnemyDataAsset* InData
 
 void AQinglanAIController::ResetForPool()
 {
+	for (const TWeakObjectPtr<AQinglanEnemyProjectile>& Projectile : ProjectilePool)
+	{
+		if (Projectile.IsValid()) { Projectile->ResetForPool(); }
+	}
 	ReleaseHeldSlots();
 	TargetPawn = nullptr;
 	EnemyDataRef = nullptr;
@@ -328,6 +333,18 @@ void AQinglanAIController::BeginPortalWarning(float Duration)
 	bPortalPending = true;
 	PortalElapsed = 0.f;
 	PortalDuration = Duration > 0.f ? Duration : QinglanAITunables::PortalWarningSeconds;
+	if (AQinglanEnemyCharacter* Enemy = GetEnemy())
+	{
+		if (UCharacterMovementComponent* Movement = Enemy->GetCharacterMovement())
+		{
+			// Actor ticking and collision do not disable the movement component.
+			// Hidden portal pawns must not fall through the floor or consume an
+			// old queued lunge before the warning completes.
+			Movement->ClearAccumulatedForces();
+			Movement->StopMovementImmediately();
+			Movement->DisableMovement();
+		}
+	}
 }
 
 void AQinglanAIController::MaterializeFromPortal()
@@ -339,7 +356,15 @@ void AQinglanAIController::MaterializeFromPortal()
 		return;
 	}
 	Enemy->SetActorHiddenInGame(false);
+	if (UCapsuleComponent* Capsule = Enemy->GetCapsuleComponent())
+	{
+		Capsule->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	}
 	Enemy->SetActorEnableCollision(true);
+	if (UCharacterMovementComponent* Movement = Enemy->GetCharacterMovement())
+	{
+		Movement->SetMovementMode(MOVE_Walking);
+	}
 	Enemy->SetActorTickEnabled(true);
 }
 

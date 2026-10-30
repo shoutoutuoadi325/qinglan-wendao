@@ -182,7 +182,11 @@ public:
 	UFUNCTION(BlueprintCallable) bool DismissMenuOffer();
 	/** Save-before-travel exit used by the pause menu; never leaves unsaved state. */
 	UFUNCTION(BlueprintCallable) void QuitToSanctuary();
+	/** Saves the outgoing slot, imports the selection, and rebuilds an active world. */
+	UFUNCTION(BlueprintCallable) bool SelectProfileFromMenu(int32 ProfileSlot, bool bCreateNew, FText& OutNotice);
 	UFUNCTION(BlueprintPure) bool IsMenuInputActive() const { return bMenuOpen; }
+	/** A failed defeat settlement/return can be retried with the interact action. */
+	bool IsDefeatReturnPending() const { return bDefeatReturnPending; }
 	/**
 	 * AUD-01: cold-start slot selection. Opens the Profile screen without a
 	 * profile session; the game does not auto-load or auto-create a save.
@@ -278,6 +282,8 @@ protected:
 	/** Re-applies focus/cursor mode from the active modal (menu > journal > choices). */
 	void RefreshMenuInputState();
 	void UpdateMenuInputMode();
+	/** Modal input is routed by physical UI keys, separately from gameplay actions. */
+	bool HasModalInputContext() const;
 	void MoveMenuSelection(int32 Direction);
 	void ConfirmMenuSelection();
 	void CancelMenu();
@@ -325,10 +331,15 @@ protected:
 	/** Owned by this actor; a process-wide strong root would retain its entire world. */
 	UPROPERTY(Transient) TObjectPtr<UQinglanGameplayProofRelay> GameplayProofRelay;
 	bool bDefeatHandled = false;
+	bool bDefeatReturnPending = false;
 	/** AUD-51 gameplay input gate; mirrors any open menu/journal overlay. */
 	bool bMenuOpen = false;
 	/** AUD-01: the menu currently on screen is the cold-start slot selector. */
 	bool bProfileFrontendOpen = false;
+	/** The old pawn stays input-blocked until its selected profile's new world loads. */
+	bool bProfileTransitionPending = false;
+	/** Only release a pause that this character's modal UI acquired. */
+	bool bWorldPausedForMenu = false;
 
 	/** AUD-26 focus cache; the prompt is shown only when the selection changes. */
 	TWeakObjectPtr<AQinglanInteractable> FocusedInteractable;

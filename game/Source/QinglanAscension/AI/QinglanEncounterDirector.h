@@ -17,7 +17,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FQinglanEncounterCompleted);
  * all living encounter enemies die.
  */
 UCLASS()
-class AQinglanEncounterDirector : public AActor
+class QINGLANASCENSION_API AQinglanEncounterDirector : public AActor
 {
 	GENERATED_BODY()
 
@@ -49,6 +49,8 @@ private:
 
 	UPROPERTY() TArray<TWeakObjectPtr<AQinglanEnemyCharacter>> LivingEnemies;
 	UPROPERTY() TArray<TWeakObjectPtr<AQinglanEnemyCharacter>> PendingSpawns;
+	/** Generated archetypes must stay reachable until their delayed portal spawn. */
+	UPROPERTY(Transient) TArray<TObjectPtr<UQinglanEnemyDataAsset>> WaveQueue;
 	int32 CurrentRoomIndex = -1;
 	bool bBossRoom = false;
 	bool bActive = false;

@@ -57,6 +57,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Guid.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
 
 // AUD-45 path-contract helpers live in QinglanAnimBootstrap.cpp (same module).
 // Declared here because the commandlet header is intentionally frozen.
@@ -2131,7 +2132,10 @@ bool FQinglanAuditImpactContextCarriesTechnique::RunTest(const FString& Paramete
 		/*InOwner*/ nullptr, FVector::ForwardVector, 100.f, 100.f, 10.f,
 		/*bInAppliesBurn*/ true, /*bInPiercing*/ false, 1.f, 3.f);
 
-	UQinglanTechniqueDataAsset* Technique = NewObject<UQinglanTechniqueDataAsset>(GetTransientPackage());
+	UClass* TechniqueClass = FindObject<UClass>(nullptr, TEXT("/Script/QinglanAscension.QinglanTechniqueDataAsset"));
+	if (!TestNotNull(TEXT("Technique data class"), TechniqueClass)) { return false; }
+	UQinglanTechniqueDataAsset* Technique = static_cast<UQinglanTechniqueDataAsset*>(
+		NewObject<UObject>(GetTransientPackage(), TechniqueClass));
 	Technique->TechniqueId = TechniqueId;
 	Technique->Element = EQinglanElement::Fire;
 	FQinglanTechniqueCastContext Context;
@@ -2162,8 +2166,16 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQinglanAuditExitRequiresBossClear,
 
 bool FQinglanAuditExitRequiresBossClear::RunTest(const FString& Parameters)
 {
-	UGameInstance* Owner = NewObject<UGameInstance>(GetTransientPackage());
-	UQinglanRunSubsystem* Run = NewObject<UQinglanRunSubsystem>(Owner);
+	const FScopedQinglanSaveDirectory Scope;
+	FQinglanSaveDiskFixture Fixture;
+	ON_SCOPE_EXIT { Fixture.Shutdown(); };
+	FText Error;
+	if (!TestTrue(TEXT("Settlement subsystems initialize"), Fixture.Initialize())
+		|| !TestTrue(TEXT("A durable profile owns the expedition"), Fixture.Save->TryCreateNewProfile(SaveDiskTestSlot, Error)))
+	{
+		return false;
+	}
+	UQinglanRunSubsystem* Run = Fixture.Instance->GetSubsystem<UQinglanRunSubsystem>();
 	if (!TestNotNull(TEXT("Run subsystem"), Run))
 	{
 		return false;
@@ -2198,6 +2210,9 @@ bool FQinglanAuditExitRequiresBossClear::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Retreat settlement never writes boss proof"), Run->ShouldWriteBossProof(false));
 	TestTrue(TEXT("Victory settlement writes boss proof"), Run->ShouldWriteBossProof(true));
 	TestTrue(TEXT("Exit request is accepted after the boss clear"), Run->RequestExit());
+	TestFalse(TEXT("Successful settlement closes the expedition"), Run->IsInExpedition());
+	TestTrue(TEXT("Successful settlement commits the boss proof"),
+		Fixture.Profile->HasCampaignFlag(FName(QinglanProgression::BambooClearedCampaignFlag)));
 	return true;
 }
 
@@ -2341,9 +2356,13 @@ bool FQinglanAuditLoadoutSync::RunTest(const FString& Parameters)
 	Snapshot.EquippedTechniques = { JadeId, EmberId };
 	Profile->ImportStateFromSave(Snapshot);
 
-	UQinglanTechniqueDataAsset* Jade = NewObject<UQinglanTechniqueDataAsset>(GetTransientPackage());
+	UClass* TechniqueClass = FindObject<UClass>(nullptr, TEXT("/Script/QinglanAscension.QinglanTechniqueDataAsset"));
+	if (!TestNotNull(TEXT("Technique data class"), TechniqueClass)) { return false; }
+	UQinglanTechniqueDataAsset* Jade = static_cast<UQinglanTechniqueDataAsset*>(
+		NewObject<UObject>(GetTransientPackage(), TechniqueClass));
 	Jade->TechniqueId = JadeId;
-	UQinglanTechniqueDataAsset* Ember = NewObject<UQinglanTechniqueDataAsset>(GetTransientPackage());
+	UQinglanTechniqueDataAsset* Ember = static_cast<UQinglanTechniqueDataAsset*>(
+		NewObject<UObject>(GetTransientPackage(), TechniqueClass));
 	Ember->TechniqueId = EmberId;
 	TArray<UQinglanTechniqueDataAsset*> Catalog;
 	Catalog.Add(Jade);
@@ -3121,7 +3140,13 @@ bool FQinglanAuditHubMapInteractionSpawner::RunTest(const FString& Parameters)
 		GameWorld->SpawnActor<ATargetPoint>(
 			ATargetPoint::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, Params);
 	}
-	UQinglanInteractionSpawner* Spawner = NewObject<UQinglanInteractionSpawner>(GameWorld);
+	UClass* SpawnerClass = FindObject<UClass>(nullptr, TEXT("/Script/QinglanAscension.QinglanInteractionSpawner"));
+	if (!TestNotNull(TEXT("Interaction spawner class"), SpawnerClass))
+	{
+		GameWorld->DestroyWorld(false);
+		return false;
+	}
+	UWorldSubsystem* Spawner = static_cast<UWorldSubsystem*>(NewObject<UObject>(GameWorld, SpawnerClass));
 	if (!TestNotNull(TEXT("Interaction spawner instance"), Spawner))
 	{
 		GameWorld->DestroyWorld(false);

@@ -180,9 +180,10 @@ private:
 	float WetTrailRadiusCm = 220.f;    // capsule-side reach along the dodge path; FIXME-CONTRACT: tunable
 	float WetTrailDurationBonus = 0.f; // blessing WetDurationBonus (docs/03 §4)
 	TSet<TWeakObjectPtr<AActor>> WetTrailVictims;
+	TWeakObjectPtr<UActorComponent> TrailTickPrerequisite;
 
 	// --- Lifetime (paused-game-time via Tick DeltaSeconds) ---
-	float LifetimeRemaining = 3.f;     // safety expiry; normal exits are range/pulse/heal completion
+	float LifetimeRemaining = UQinglanTechniqueExecutors::EffectLifetimeSafety;
 
 	// --- Damage bookkeeping ---
 	float RawMagnitude = 0.f;

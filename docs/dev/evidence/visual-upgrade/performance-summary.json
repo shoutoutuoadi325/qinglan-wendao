@@ -1,0 +1,56 @@
+{
+  "executable": "UnrealEditor -game, Metal offscreen",
+  "map": "L_Hub; stationary normal player camera",
+  "hardware": "Apple M4 Pro, 16 GPU cores, 48 GB RAM",
+  "outputResolution": [
+    1600,
+    900
+  ],
+  "configuredScalability": "Epic (3)",
+  "frameRateLimit": 30,
+  "dynamicResolutionEnabled": true,
+  "capturedFrames": 900,
+  "analysisFrameIndices": [
+    300,
+    899
+  ],
+  "startupFramesDiscarded": 300,
+  "otherBuildCookOrGameProcesses": "none during capture",
+  "csv": ".local/visual-review/performance-final-user/Saved/Profiling/CSV/Profile(20261108_183516).csv",
+  "csvSha256": "004975c646d431f7edb978811379a6f1e6a1e45d634622c36f6d64bc0e8aa400",
+  "metrics": {
+    "FrameTime": {
+      "count": 600,
+      "meanMs": 33.34870883333333,
+      "medianMs": 33.3066,
+      "p95Ms": 34.9265,
+      "p99Ms": 35.3415,
+      "maxMs": 36.3836
+    },
+    "GameThreadTime": {
+      "count": 600,
+      "meanMs": 3.166526833333333,
+      "medianMs": 3.32555,
+      "p95Ms": 3.9458,
+      "p99Ms": 4.129,
+      "maxMs": 4.6997
+    },
+    "RenderThreadTime": {
+      "count": 600,
+      "meanMs": 4.958018166666666,
+      "medianMs": 5.11795,
+      "p95Ms": 6.0875,
+      "p99Ms": 6.6208,
+      "maxMs": 7.2951
+    },
+    "GPUTime": {
+      "count": 600,
+      "meanMs": 17.786426166666665,
+      "medianMs": 17.691850000000002,
+      "p95Ms": 18.0893,
+      "p99Ms": 18.5504,
+      "maxMs": 59.3196
+    }
+  },
+  "scope": "Editor game-mode hub sample; not a Shipping or combat performance benchmark"
+}

@@ -1,0 +1,15 @@
+{
+  "reportCreatedOn": "2026.11.08-10.32.32",
+  "succeeded": 130,
+  "succeededWithWarnings": 35,
+  "failed": 0,
+  "notRun": 0,
+  "inProcess": 0,
+  "totalDuration": 11.848878860473633,
+  "testCount": 165,
+  "report": ".local/visual-review/automation-clearance-report/index.json",
+  "reportSha256": "2284abe4f1ccce505e4b3fe97f0490c30b22db1ddcf23644d1b3d11f58699bfe",
+  "platform": "MacEditor NullRHI; rendered Metal evidence is separate",
+  "wrapperTests": 9,
+  "repositoryValidation": "passed"
+}

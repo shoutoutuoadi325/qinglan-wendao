@@ -1,0 +1,64 @@
+[
+  {
+    "name": "SM_SanctuaryRoof",
+    "vertices": 27684,
+    "polygons": 19308,
+    "slots": [
+      "RoofTile",
+      "Wood",
+      "Bronze"
+    ],
+    "units": "metres; FBX converts to cm"
+  },
+  {
+    "name": "SM_SanctuaryFrame",
+    "vertices": 5760,
+    "polygons": 5260,
+    "slots": [
+      "Stone",
+      "Wood",
+      "Bronze"
+    ],
+    "units": "metres; FBX converts to cm"
+  },
+  {
+    "name": "SM_ScholarRock",
+    "vertices": 10242,
+    "polygons": 20480,
+    "slots": [
+      "Stone"
+    ],
+    "units": "metres; FBX converts to cm"
+  },
+  {
+    "name": "SM_CliffRock",
+    "vertices": 4225,
+    "polygons": 4096,
+    "slots": [
+      "Stone"
+    ],
+    "units": "metres; FBX converts to cm"
+  },
+  {
+    "name": "SM_BambooCluster",
+    "vertices": 5180,
+    "polygons": 3360,
+    "slots": [
+      "Bamboo",
+      "Leaf"
+    ],
+    "units": "metres; FBX converts to cm"
+  },
+  {
+    "name": "SM_StoneLantern",
+    "vertices": 584,
+    "polygons": 554,
+    "slots": [
+      "Stone",
+      "Bronze",
+      "Glow",
+      "RoofTile"
+    ],
+    "units": "metres; FBX converts to cm"
+  }
+]

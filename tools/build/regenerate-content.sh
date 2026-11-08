@@ -85,6 +85,12 @@ rm -f "$CONTENT/UI/WBP_HUD.uasset" "$CONTENT/UI/WBP_Dialogue.uasset" \
 # key count). Delete the generated Data tree so every run starts clean.
 rm -rf "$CONTENT/Data"
 
+# Legacy skeletal reimport preserves the mesh's previous reference pose, even
+# with replacement settings. Recreate this generated costume so an export-pose
+# correction is applied to geometry and bones together. The shared Human
+# skeleton and source takes remain the importer's stable animation contract.
+rm -f "$CONTENT/Characters/Human/SK_Cultivator.uasset"
+
 # Project commandlets live in the PostEngineInit editor module, which is not
 # auto-discovered without the "Module.Class" form (-run appends "Commandlet").
 run_cmdlet QinglanAscensionEditor.QinglanDataImport "-data=$NATIVE_DATA" || rc_all=1
@@ -163,6 +169,21 @@ for MIC in M_BambooWall M_Cobblestone M_CobblestoneAlt M_StonePath M_GrassRock M
     || { echo "regenerate-content.sh: ERROR: surface material instance $CONTENT/Materials/$MIC.uasset missing" >&2; rc_all=1; }
   [ -f "$CONTENT/Materials/${MIC}_Solid.uasset" ] \
     || { echo "regenerate-content.sh: ERROR: solid fallback instance $CONTENT/Materials/${MIC}_Solid.uasset missing" >&2; rc_all=1; }
+done
+
+# Visual upgrade assets must reach the generated game content, not only exist
+# as source FBX files or Blender previews. Their folders are already cooked.
+for Art in SM_SanctuaryRoof SM_SanctuaryFrame SM_ScholarRock SM_CliffRock SM_BambooCluster SM_StoneLantern; do
+  [ -f "$CONTENT/Environments/Sanctuary/$Art.uasset" ] \
+    || { echo "regenerate-content.sh: ERROR: missing sanctuary mesh $Art" >&2; rc_all=1; }
+done
+for Hero in SK_Cultivator T_CultivatorSkin T_CultivatorWeaveNormal; do
+  [ -f "$CONTENT/Characters/Human/$Hero.uasset" ] \
+    || { echo "regenerate-content.sh: ERROR: missing cultivator asset $Hero" >&2; rc_all=1; }
+done
+for Surface in Skin InkCloth IvoryCloth JadeCloth AntiqueGold Jade Leather Hair; do
+  [ -f "$CONTENT/Materials/MIC_Cultivator_$Surface.uasset" ] \
+    || { echo "regenerate-content.sh: ERROR: missing cultivator material $Surface" >&2; rc_all=1; }
 done
 
 echo "=== content regeneration done rc_all=$rc_all $(qinglan_timestamp) ==="

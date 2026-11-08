@@ -16,6 +16,8 @@
 #include "Factories/TextureFactory.h"
 #include "Engine/Texture2D.h"
 #include "Engine/SkeletalMesh.h"
+#include "SkeletalMeshAttributes.h"
+#include "Engine/StaticMesh.h"
 #include "Editor/EditorEngine.h"
 #include "Animation/AnimData/IAnimationDataController.h"
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -236,6 +238,119 @@ int32 UQinglanMeshImportCommandlet::Main(const FString& Params)
 		}
 	}
 
+	// Project-original kit is tracked with its generator; it needs no external acquisition.
+	const FString OriginalRoot = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir() / TEXT("../assets/original/environment"));
+	for (const TCHAR* Name : {TEXT("SM_SanctuaryRoof"), TEXT("SM_SanctuaryFrame"),
+		TEXT("SM_ScholarRock"), TEXT("SM_CliffRock"), TEXT("SM_BambooCluster"), TEXT("SM_StoneLantern")})
+	{
+		bOk &= ImportStaticFBX(OriginalRoot / (FString(Name) + TEXT(".fbx")),
+			TEXT("/Game/Qinglan/Environments/Sanctuary"), Name);
+	}
+
+	// Costume geometry is rebound to the native Human pose and original takes.
+	// This import must never create another animation/skeleton family.
+	const FString HeroRoot = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir() / TEXT("../assets/art-source"));
+	USkeletalMesh* Human = LoadObject<USkeletalMesh>(nullptr,
+		TEXT("/Game/Qinglan/Characters/Human/SK_Human.SK_Human"));
+	if (!Human || !Human->GetSkeleton() || !IFileManager::Get().FileExists(*(HeroRoot / TEXT("SK_Cultivator.fbx"))))
+	{
+		UE_LOG(LogTemp, Error, TEXT("Cultivator import requires its tracked FBX and the original Human skeleton"));
+		bOk = false;
+	}
+	else
+	{
+		UFbxImportUI* Options = NewObject<UFbxImportUI>();
+		Options->bAutomatedImportShouldDetectType = false;
+		Options->MeshTypeToImport = FBXIT_SkeletalMesh;
+		Options->bImportAsSkeletal = true;
+		Options->bImportMesh = true;
+		Options->bImportAnimations = false;
+		Options->bImportTextures = false;
+		Options->bImportMaterials = false;
+		Options->bCreatePhysicsAsset = false;
+		Options->Skeleton = Human->GetSkeleton();
+		Options->SkeletalMeshImportData->bUpdateSkeletonReferencePose = false;
+        // The FBX preserves the evaluated Idle77 defaults and rest bind matrices;
+        // Unreal skins geometry to those T0 defaults, matching native Human.
+        Options->SkeletalMeshImportData->bUseT0AsRefPose = true;
+		// Blender sources carry smooth normals; Unreal builds MikkTSpace tangents.
+		Options->SkeletalMeshImportData->NormalImportMethod = FBXNIM_ImportNormals;
+		UAssetImportTask* Task = MakeTask(HeroRoot / TEXT("SK_Cultivator.fbx"),
+			TEXT("/Game/Qinglan/Characters/Human"), TEXT("SK_Cultivator"), Options);
+		// Explicit legacy factory honors the supplied skeleton on unattended imports.
+		Task->Factory = NewObject<UFbxFactory>();
+		FAssetToolsModule::GetModule().Get().ImportAssetTasks({Task});
+		USkeletalMesh* Cultivator = LoadObject<USkeletalMesh>(nullptr,
+			TEXT("/Game/Qinglan/Characters/Human/SK_Cultivator.SK_Cultivator"));
+		bool bCompatible = Cultivator && !Task->GetObjects().IsEmpty()
+			&& Cultivator->GetSkeleton() == Human->GetSkeleton();
+        UE_LOG(LogTemp, Display, TEXT("Cultivator import objects=%d skeleton=%s source=%s"),
+            Task->GetObjects().Num(), Cultivator && Cultivator->GetSkeleton() ? *Cultivator->GetSkeleton()->GetPathName() : TEXT("none"),
+            *Human->GetSkeleton()->GetPathName());
+		if (bCompatible)
+		{
+            // Legacy T0 import updates the mesh reference skeleton and skins
+            // vertices, but its MeshDescription can retain rest-pose bone
+            // attributes. Persist the evaluated pose there too, so subsequent
+            // LOD builds use the same binding as the saved rendering mesh.
+            for (int32 LOD = 0; LOD < Cultivator->GetLODNum(); ++LOD)
+            {
+                FMeshDescription* Description = Cultivator->GetMeshDescription(LOD);
+                if (!Description) { bCompatible = false; break; }
+                FSkeletalMeshAttributes Attributes(*Description);
+                const FReferenceSkeleton& Rig = Cultivator->GetRefSkeleton();
+                if (Attributes.GetNumBones() != Rig.GetRawBoneNum()) { bCompatible = false; break; }
+                for (int32 Bone = 0; Bone < Rig.GetRawBoneNum(); ++Bone)
+                {
+                    Attributes.GetBoneNames().Set(FBoneID(Bone), Rig.GetBoneName(Bone));
+                    Attributes.GetBoneParentIndices().Set(FBoneID(Bone), Rig.GetParentIndex(Bone));
+                    Attributes.GetBonePoses().Set(FBoneID(Bone), Rig.GetRawRefBonePose()[Bone]);
+                }
+                bCompatible &= Cultivator->CommitMeshDescription(LOD);
+            }
+            Cultivator->PostEditChange();
+            UPackage* Package = Cultivator->GetOutermost();
+            FSavePackageArgs SaveArgs;
+            SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+            SaveArgs.SaveFlags = SAVE_NoError;
+            bCompatible &= UPackage::SavePackage(Package, Cultivator,
+                *FPackageName::LongPackageNameToFilename(Package->GetName(), FPackageName::GetAssetPackageExtension()), SaveArgs);
+			const FReferenceSkeleton& Original = Human->GetRefSkeleton();
+			const FReferenceSkeleton& Costume = Cultivator->GetRefSkeleton();
+			bCompatible &= Original.GetNum() == Costume.GetNum();
+            UE_LOG(LogTemp, Display, TEXT("Cultivator rig bones source=%d costume=%d"), Original.GetNum(), Costume.GetNum());
+			for (int32 Bone = 0; bCompatible && Bone < Original.GetNum(); ++Bone)
+			{
+				bCompatible = Original.GetBoneName(Bone) == Costume.GetBoneName(Bone)
+					&& Original.GetParentIndex(Bone) == Costume.GetParentIndex(Bone)
+					&& Original.GetRefBonePose()[Bone].Equals(Costume.GetRefBonePose()[Bone], 1.e-3f);
+                if (!bCompatible)
+                {
+                    UE_LOG(LogTemp, Error, TEXT("Cultivator bone %d source=%s parent=%d pose=%s costume=%s parent=%d pose=%s"),
+                        Bone, *Original.GetBoneName(Bone).ToString(), Original.GetParentIndex(Bone), *Original.GetRefBonePose()[Bone].ToString(),
+                        *Costume.GetBoneName(Bone).ToString(), Costume.GetParentIndex(Bone), *Costume.GetRefBonePose()[Bone].ToString());
+                }
+			}
+			// Check every required take after import; no reimport/retarget is permitted.
+			for (const QinglanHumanAnimation::FSourceTake& Take : QinglanHumanAnimation::RequiredTakes)
+			{
+				const UAnimSequence* Sequence = LoadObject<UAnimSequence>(nullptr, *QinglanHumanAnimation::ObjectPath(Take.Suffix));
+				FString Reason;
+				if (!QinglanHumanAnimation::Validate(Sequence, Human->GetSkeleton(), Take, Reason))
+				{
+					UE_LOG(LogTemp, Error, TEXT("Cultivator animation contract %s: %s"), Take.Suffix, *Reason);
+					bCompatible = false;
+				}
+			}
+		}
+		if (!bCompatible)
+		{
+			UE_LOG(LogTemp, Error, TEXT("Cultivator reference pose or Human animation contract does not match"));
+		}
+		bOk &= bCompatible;
+	}
+	bOk &= ImportTexturePNG(HeroRoot / TEXT("Textures/NakedLightSkin.png"),
+		TEXT("/Game/Qinglan/Characters/Human"), TEXT("T_CultivatorSkin"));
 	UE_LOG(LogTemp, Log, TEXT("QinglanMeshImport finished ok=%d"), bOk);
 	return bOk ? 0 : 1;
 }
@@ -281,10 +396,37 @@ bool UQinglanMeshImportCommandlet::ImportStaticFBX(const FString& SourceFile, co
 	if (Options->StaticMeshImportData)
 	{
 		Options->StaticMeshImportData->bCombineMeshes = false;
+		if (DestPath.EndsWith(TEXT("/Sanctuary")))
+		{
+			Options->StaticMeshImportData->bAutoGenerateCollision = false;
+			Options->StaticMeshImportData->NormalImportMethod = FBXNIM_ImportNormals;
+		}
 	}
 	UAssetImportTask* Task = MakeTask(SourceFile, DestPath, AssetName, Options);
+	if (DestPath.EndsWith(TEXT("/Sanctuary")))
+	{
+		Options->bAutomatedImportShouldDetectType = false;
+		Task->Factory = NewObject<UFbxFactory>();
+	}
 	FAssetToolsModule::GetModule().Get().ImportAssetTasks({ Task });
 	const bool bOk = Task->GetObjects().Num() > 0; // UE 5.8: ImportedObjects replaced by GetObjects()
+	if (bOk && DestPath.EndsWith(TEXT("/Sanctuary")))
+	{
+		for (UObject* Imported : Task->GetObjects())
+		{
+			if (UStaticMesh* Static = Cast<UStaticMesh>(Imported))
+			{
+				// Ordinary reduction LODs work on Metal as well as DX12. Nanite is optional.
+				Static->SetLODGroup(TEXT("SmallProp"));
+				UPackage* Package = Static->GetOutermost();
+				FSavePackageArgs Args;
+				Args.TopLevelFlags = RF_Public | RF_Standalone;
+				if (!UPackage::SavePackage(Package, Static,
+					*FPackageName::LongPackageNameToFilename(Package->GetName(), FPackageName::GetAssetPackageExtension()), Args))
+				{ return false; }
+			}
+		}
+	}
 	UE_LOG(LogTemp, Log, TEXT("static import %s -> %d objects"), *AssetName, Task->GetObjects().Num());
 	return bOk;
 }

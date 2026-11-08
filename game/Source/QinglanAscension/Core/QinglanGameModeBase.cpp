@@ -18,6 +18,8 @@
 #include "Combat/QinglanCharacter.h"
 #include "Combat/QinglanCombatComponent.h"
 #include "Combat/QinglanStatusComponent.h"
+#include "Camera/CameraActor.h"
+#include "Camera/CameraComponent.h"
 #include "Core/QinglanInteractable.h"
 #include "Core/QinglanRoomLayout.h"
 #include "Core/QinglanTrialDirector.h"
@@ -146,14 +148,52 @@ namespace
 			return;
 		}
 		FTimerHandle Unused;
-		World->GetTimerManager().SetTimer(Unused, FTimerDelegate::CreateWeakLambda(Mode, [World, ShotId]()
+		// Optional repeatable art-review cameras. The normal player camera is
+		// untouched unless an explicit screenshot run requests this view.
+		FString ArtView;
+		if (FParse::Value(FCommandLine::Get(), TEXT("QinglanArtView="), ArtView))
+		{
+			FTimerHandle CameraTimer;
+			World->GetTimerManager().SetTimer(CameraTimer, FTimerDelegate::CreateWeakLambda(Mode, [World, ArtView]()
+			{
+				APlayerController* PC = World->GetFirstPlayerController();
+				if (!PC || !PC->GetPawn()) { return; }
+				FVector Position;
+				FVector Target;
+				if (ArtView == TEXT("hall"))
+				{
+					Position = FVector(4200, -900, 1900);
+					Target = FVector(0, -3800, 1100);
+				}
+				else if (ArtView == TEXT("bamboo"))
+				{
+					Position = FVector(1700, -1700, 600);
+					Target = FVector(1100, 1000, 250);
+				}
+				else if (ArtView == TEXT("hero"))
+				{
+					APawn* Pawn = PC->GetPawn();
+					Position = Pawn->GetActorLocation() + Pawn->GetActorForwardVector()*480
+						+ Pawn->GetActorRightVector()*180 + FVector(0,0,80);
+					Target = Pawn->GetActorLocation() + FVector(0,0,15);
+				}
+				else { return; }
+				ACameraActor* Camera = World->SpawnActor<ACameraActor>(Position, (Target-Position).Rotation());
+				if (Camera)
+				{
+					Camera->GetCameraComponent()->SetFieldOfView(ArtView == TEXT("hero") ? 42.f : 58.f);
+					PC->SetViewTarget(Camera);
+				}
+			}), FMath::Max(0.1f, ShotDelaySeconds - 3.f), false);
+		}
+        World->GetTimerManager().SetTimer(Unused, FTimerDelegate::CreateWeakLambda(Mode, [World, ShotId, bShowUI = ArtView.IsEmpty()]()
 		{
 			// Sandboxed Mac packages cannot write outside their container, so an
 			// absolute /tmp path fails silently. Keep the capture in the
 			// project Saved tree (honors -UserDir) where the process can write.
 			const FString Path = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Screenshots"),
 				FString::Printf(TEXT("qinglan_shot_%s"), *ShotId));
-			FScreenshotRequest::RequestScreenshot(Path, /*bShowUI=*/true, /*bAddFilenameSuffix=*/false);
+            FScreenshotRequest::RequestScreenshot(Path, bShowUI, /*bAddFilenameSuffix=*/false);
 			UE_LOG(LogQinglan, Log, TEXT("QinglanShot: requested %s.png"), *Path);
 			// Give the readback two frames, then quit so batch runs terminate.
 			World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(World, [World]()

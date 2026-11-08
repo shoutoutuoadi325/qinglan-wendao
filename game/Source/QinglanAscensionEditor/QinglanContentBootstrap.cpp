@@ -1,6 +1,9 @@
 // Content bootstrap implementation. See header for intent.
 #include "QinglanContentBootstrap.h"
+#include "QinglanCultivatorAppearance.h"
+#include "QinglanEnvironmentArt.h"
 #include "QinglanRawAssets.h"
+#include "QinglanLookDevelopment.h"
 #include "Core/QinglanRoomLayout.h"
 
 #include "AssetImportTask.h"
@@ -36,6 +39,11 @@
 #include "InputTriggers.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialExpressionConstant2Vector.h"
+#include "Materials/MaterialExpressionCustom.h"
+#include "Materials/MaterialExpressionWorldPosition.h"
+#include "Materials/MaterialExpressionVertexNormalWS.h"
+#include "Materials/MaterialExpressionTransform.h"
+#include "Materials/MaterialExpressionLinearInterpolate.h"
 #include "Materials/MaterialExpressionFresnel.h"
 #include "Materials/MaterialExpressionMultiply.h"
 #include "Materials/MaterialExpressionScalarParameter.h"
@@ -191,6 +199,7 @@ int32 UQinglanContentBootstrapCommandlet::Main(const FString& Params)
 	bool bOk = true;
 	bOk &= BootstrapInput();
 	bOk &= BootstrapMaterials();
+	bOk &= QinglanCultivatorAppearance::Bootstrap();
 	bOk &= BootstrapVFXMaterials();
 	bOk &= BootstrapNiagaraEffects(); // AUD-42: real Niagara cue systems (placeholder fallback kept)
 	bOk &= BootstrapMaps();
@@ -387,38 +396,62 @@ UMaterial* UQinglanContentBootstrapCommandlet::CreateOrLoadMasterMaterial()
 	Mat->BlendMode = BLEND_Opaque;
 	Mat->SetShadingModel(MSM_DefaultLit); // UE 5.8: ShadingModel is private; setter is the engine idiom
 
-	// Shared tiling: Poly Haven sets are authored to tile, so sample them more
-	// than once per blockout face instead of stretching one 2K image across a
-	// 22 m terrace.
+	// World projection gives terrace, wall and rock surfaces a consistent
+	// centimetre scale. Dominant-face projection uses one sample per map;
+	// authored character UVs bypass projection.
 	UMaterialExpressionTextureCoordinate* TexCoord = NewObject<UMaterialExpressionTextureCoordinate>(Mat);
-	TexCoord->UTiling = 1.f;
-	TexCoord->VTiling = 1.f;
-	TexCoord->MaterialExpressionEditorX = -1100;
-	TexCoord->MaterialExpressionEditorY = -300;
 	Mat->GetExpressionCollection().AddExpression(TexCoord);
-
 	UMaterialExpressionScalarParameter* Tiling = NewObject<UMaterialExpressionScalarParameter>(Mat);
 	Tiling->ParameterName = TEXT("Tiling");
-	Tiling->DefaultValue = 4.f;
-	Tiling->MaterialExpressionEditorX = -1100;
-	Tiling->MaterialExpressionEditorY = -120;
+	Tiling->DefaultValue = 1.f;
 	Mat->GetExpressionCollection().AddExpression(Tiling);
-
 	UMaterialExpressionMultiply* ScaledUV = NewObject<UMaterialExpressionMultiply>(Mat);
 	ScaledUV->A.Connect(0, TexCoord);
 	ScaledUV->B.Connect(0, Tiling);
-	ScaledUV->MaterialExpressionEditorX = -850;
-	ScaledUV->MaterialExpressionEditorY = -250;
 	Mat->GetExpressionCollection().AddExpression(ScaledUV);
+	UMaterialExpressionWorldPosition* WorldPosition = NewObject<UMaterialExpressionWorldPosition>(Mat);
+	Mat->GetExpressionCollection().AddExpression(WorldPosition);
+	UMaterialExpressionVertexNormalWS* WorldNormal = NewObject<UMaterialExpressionVertexNormalWS>(Mat);
+	Mat->GetExpressionCollection().AddExpression(WorldNormal);
+	UMaterialExpressionScalarParameter* WorldSize = NewObject<UMaterialExpressionScalarParameter>(Mat);
+	WorldSize->ParameterName = TEXT("TextureWorldSize");
+	WorldSize->DefaultValue = 180.f;
+	Mat->GetExpressionCollection().AddExpression(WorldSize);
+	UMaterialExpressionScalarParameter* UseWorld = NewObject<UMaterialExpressionScalarParameter>(Mat);
+	UseWorld->ParameterName = TEXT("UseWorldMapping");
+	UseWorld->DefaultValue = 1.f;
+	Mat->GetExpressionCollection().AddExpression(UseWorld);
+	auto AddCustomInput = [](UMaterialExpressionCustom* Expression, const FName& Name, UMaterialExpression* Source)
+	{
+		FCustomInput Input;
+		Input.InputName = Name;
+		Input.Input.Connect(0, Source);
+		Expression->Inputs.Add(Input);
+	};
+	UMaterialExpressionCustom* ProjectedUV = NewObject<UMaterialExpressionCustom>(Mat);
+	ProjectedUV->Inputs.Reset();
+	ProjectedUV->OutputType = CMOT_Float2;
+	ProjectedUV->Description = TEXT("Centimetre-scale dominant world projection");
+	ProjectedUV->Code = TEXT("if (UseWorld < 0.5) return UV;\n")
+		TEXT("float3 w = Position / max(WorldSize, 1.0); float3 a = abs(FaceNormal);\n")
+		TEXT("if (a.x > a.y && a.x > a.z) return float2(w.y * sign(FaceNormal.x), w.z);\n")
+		TEXT("if (a.y > a.z) return float2(-w.x * sign(FaceNormal.y), w.z);\n")
+		TEXT("return float2(w.x, w.y * sign(FaceNormal.z));");
+	AddCustomInput(ProjectedUV, TEXT("UV"), ScaledUV);
+	AddCustomInput(ProjectedUV, TEXT("Position"), WorldPosition);
+	AddCustomInput(ProjectedUV, TEXT("FaceNormal"), WorldNormal);
+	AddCustomInput(ProjectedUV, TEXT("WorldSize"), WorldSize);
+	AddCustomInput(ProjectedUV, TEXT("UseWorld"), UseWorld);
+	Mat->GetExpressionCollection().AddExpression(ProjectedUV);
 
-	auto AddTextureParam = [Mat, ScaledUV](const FName& Name, EMaterialSamplerType Sampler, int32& OutY)
+	auto AddTextureParam = [Mat, ProjectedUV](const FName& Name, EMaterialSamplerType Sampler, int32& OutY)
 		-> UMaterialExpressionTextureSampleParameter2D*
 	{
 		UMaterialExpressionTextureSampleParameter2D* Param =
 			NewObject<UMaterialExpressionTextureSampleParameter2D>(Mat);
 		Param->ParameterName = Name;
 		Param->SamplerType = Sampler;
-		Param->Coordinates.Connect(0, ScaledUV);
+		Param->Coordinates.Connect(0, ProjectedUV);
 		Param->MaterialExpressionEditorX = -600;
 		Param->MaterialExpressionEditorY = OutY;
 		OutY += 220;
@@ -432,8 +465,8 @@ UMaterial* UQinglanContentBootstrapCommandlet::CreateOrLoadMasterMaterial()
 	UMaterialExpressionTextureSampleParameter2D* RoughParam = AddTextureParam(TEXT("Roughness"), SAMPLERTYPE_LinearGrayscale, Y);
 	UMaterialExpressionTextureSampleParameter2D* AOParam = AddTextureParam(TEXT("AmbientOcclusion"), SAMPLERTYPE_LinearGrayscale, Y);
 
-	// No Poly Haven set on disk ships a normal map. Default the Normal sample to
-	// the engine flat normal so the master remains valid when a MIC omits it.
+	// Poly Haven DirectX normals are imported when present. Keep a flat
+	// fallback for absent maps and the character palette material.
 	if (UTexture2D* FlatNormal = LoadObject<UTexture2D>(nullptr, TEXT("/Engine/EngineMaterials/DefaultNormal.DefaultNormal")))
 	{
 		NormalParam->Texture = FlatNormal;
@@ -467,8 +500,42 @@ UMaterial* UQinglanContentBootstrapCommandlet::CreateOrLoadMasterMaterial()
 
 	// UE 5.8: material input properties (BaseColor, Normal, ...) live on UMaterialEditorOnlyData.
 	Mat->GetEditorOnlyData()->BaseColor.Connect(0, BaseColorParam);
-	Mat->GetEditorOnlyData()->Normal.Connect(0, NormalParam);
-	Mat->GetEditorOnlyData()->Roughness.Connect(1, RoughParam); // R channel (Poly Haven rough maps are grayscale)
+	// A projected map has its own tangent basis. Transform its decoded normal
+	// from that world basis back into the mesh tangent space.
+	UMaterialExpressionCustom* ProjectionNormal = NewObject<UMaterialExpressionCustom>(Mat);
+	ProjectionNormal->Inputs.Reset();
+	ProjectionNormal->OutputType = CMOT_Float3;
+	ProjectionNormal->Description = TEXT("World projection normal basis");
+	ProjectionNormal->Code = TEXT("float3 a = abs(FaceNormal);\n")
+		TEXT("if (a.x > a.y && a.x > a.z) return normalize(FaceNormal * N.z + float3(0, N.x * sign(FaceNormal.x), N.y));\n")
+		TEXT("if (a.y > a.z) return normalize(FaceNormal * N.z + float3(-N.x * sign(FaceNormal.y), 0, N.y));\n")
+		TEXT("return normalize(FaceNormal * N.z + float3(N.x, N.y * sign(FaceNormal.z), 0));");
+	AddCustomInput(ProjectionNormal, TEXT("N"), NormalParam);
+	AddCustomInput(ProjectionNormal, TEXT("FaceNormal"), WorldNormal);
+	Mat->GetExpressionCollection().AddExpression(ProjectionNormal);
+	UMaterialExpressionTransform* TangentNormal = NewObject<UMaterialExpressionTransform>(Mat);
+	TangentNormal->TransformSourceType = TRANSFORMSOURCE_World;
+	TangentNormal->TransformType = TRANSFORM_Tangent;
+	TangentNormal->Input.Connect(0, ProjectionNormal);
+	Mat->GetExpressionCollection().AddExpression(TangentNormal);
+	UMaterialExpressionLinearInterpolate* SurfaceNormal = NewObject<UMaterialExpressionLinearInterpolate>(Mat);
+	SurfaceNormal->A.Connect(0, NormalParam);
+	SurfaceNormal->B.Connect(0, TangentNormal);
+	SurfaceNormal->Alpha.Connect(0, UseWorld);
+	Mat->GetExpressionCollection().AddExpression(SurfaceNormal);
+	Mat->GetEditorOnlyData()->Normal.Connect(0, SurfaceNormal);
+	UMaterialExpressionScalarParameter* RoughnessOverride = NewObject<UMaterialExpressionScalarParameter>(Mat);
+	RoughnessOverride->ParameterName = TEXT("Roughness");
+	RoughnessOverride->DefaultValue = -1.f; // negative selects the authored map
+	Mat->GetExpressionCollection().AddExpression(RoughnessOverride);
+	UMaterialExpressionCustom* SurfaceRoughness = NewObject<UMaterialExpressionCustom>(Mat);
+	SurfaceRoughness->Inputs.Reset();
+	SurfaceRoughness->OutputType = CMOT_Float1;
+	SurfaceRoughness->Code = TEXT("return Override < 0.0 ? MapValue.r : saturate(Override);");
+	AddCustomInput(SurfaceRoughness, TEXT("MapValue"), RoughParam);
+	AddCustomInput(SurfaceRoughness, TEXT("Override"), RoughnessOverride);
+	Mat->GetExpressionCollection().AddExpression(SurfaceRoughness);
+	Mat->GetEditorOnlyData()->Roughness.Connect(0, SurfaceRoughness);
 	Mat->GetEditorOnlyData()->AmbientOcclusion.Connect(1, AOParam);
 	Mat->PreEditChange(nullptr);
 	Mat->PostEditChange();
@@ -996,6 +1063,39 @@ namespace
 		}
 		return Tex;
 	}
+
+	UTexture2D* ExtractPackedAO(const FString& SetId, UTexture2D* Packed)
+	{
+		// A Masks texture must not override a LinearGrayscale parameter. Author
+		// a genuine grayscale AO asset from ARM's red channel instead of binding
+		// the packed texture to a sampler with a different compression contract.
+		if (!Packed || Packed->Source.GetFormat() != TSF_BGRA8) { return nullptr; }
+		TArray64<uint8> Pixels;
+		if (!Packed->Source.GetMipData(Pixels, 0)) { return nullptr; }
+		const int32 Width = Packed->Source.GetSizeX();
+		const int32 Height = Packed->Source.GetSizeY();
+		const int64 Count = static_cast<int64>(Width) * Height;
+		if (Count <= 0 || Pixels.Num() != Count * 4) { return nullptr; }
+		TArray64<uint8> Red;
+		Red.SetNumUninitialized(Count);
+		for (int64 Pixel = 0; Pixel < Count; ++Pixel) { Red[Pixel] = Pixels[Pixel * 4 + 2]; }
+		const FString ObjectPath = QinglanTextureSetContract::TextureObjectPath(SetId, TEXT("AmbientOcclusion"));
+		UPackage* Package = CreateOrFetchPackage(ObjectPath);
+		UTexture2D* AO = NewObject<UTexture2D>(Package, TEXT("AmbientOcclusion"), RF_Public | RF_Standalone);
+		AO->PreEditChange(nullptr);
+		AO->Source.Init(Width, Height, 1, 1, TSF_G8, Red.GetData());
+		AO->SRGB = false;
+		AO->CompressionSettings = TC_Grayscale;
+		AO->LODGroup = TEXTUREGROUP_World;
+		AO->MipGenSettings = TMGS_FromTextureGroup;
+		AO->PostEditChange();
+		FAssetRegistryModule::AssetCreated(AO);
+		FSavePackageArgs Args;
+		Args.TopLevelFlags = RF_Public | RF_Standalone;
+		Args.SaveFlags = SAVE_NoError;
+		return UPackage::SavePackage(Package, AO, *FPackageName::LongPackageNameToFilename(
+			Package->GetName(), FPackageName::GetAssetPackageExtension()), Args) ? AO : nullptr;
+	}
 }
 
 bool UQinglanContentBootstrapCommandlet::BootstrapMaterials()
@@ -1033,9 +1133,26 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaterials()
 		Roughness->MaterialExpressionEditorX = -500;
 		Roughness->MaterialExpressionEditorY = 0;
 		Solid->GetExpressionCollection().AddExpression(Roughness);
+		UMaterialExpressionScalarParameter* Metallic = NewObject<UMaterialExpressionScalarParameter>(Solid);
+		Metallic->ParameterName = TEXT("Metallic");
+		Metallic->DefaultValue = 0.f;
+		Solid->GetExpressionCollection().AddExpression(Metallic);
+		UMaterialExpressionScalarParameter* Emission = NewObject<UMaterialExpressionScalarParameter>(Solid);
+		Emission->ParameterName = TEXT("Emission");
+		Emission->DefaultValue = 0.f;
+		Solid->GetExpressionCollection().AddExpression(Emission);
+		UMaterialExpressionMultiply* EmissiveColor = NewObject<UMaterialExpressionMultiply>(Solid);
+		EmissiveColor->A.Connect(0, Color);
+		EmissiveColor->B.Connect(0, Emission);
+		Solid->GetExpressionCollection().AddExpression(EmissiveColor);
 
 		Solid->GetEditorOnlyData()->BaseColor.Connect(0, Color);
 		Solid->GetEditorOnlyData()->Roughness.Connect(0, Roughness);
+		Solid->GetEditorOnlyData()->Metallic.Connect(0, Metallic);
+		Solid->GetEditorOnlyData()->EmissiveColor.Connect(0, EmissiveColor);
+		Solid->SetMaterialUsage(MATUSAGE_StaticMesh);
+		Solid->SetMaterialUsage(MATUSAGE_InstancedStaticMeshes);
+		Solid->SetMaterialUsage(MATUSAGE_SkeletalMesh);
 		Solid->PreEditChange(nullptr);
 		Solid->PostEditChange();
 		if (!SavePackage(Pkg, Solid))
@@ -1093,6 +1210,53 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaterials()
 		return NewObject<UMaterialInstanceConstant>(Pkg, AssetName, RF_Public | RF_Standalone);
 	};
 
+	// Palette materials give the modular art distinct leaf, metal and lantern
+	// responses. They use no image samplers and remain in all quality tiers.
+	UMaterial* LeafParent = nullptr;
+	{
+		const FString Path = ContentRoot + TEXT("/Materials/M_QinglanLeaf");
+		const FString FileName = FPackageName::LongPackageNameToFilename(Path, FPackageName::GetAssetPackageExtension());
+		IFileManager::Get().Delete(*FileName, false, true, true);
+		UPackage* Pkg = CreateOrFetchPackage(Path);
+		LeafParent = NewObject<UMaterial>(Pkg, TEXT("M_QinglanLeaf"), RF_Public | RF_Standalone);
+		LeafParent->BlendMode = BLEND_Opaque;
+		LeafParent->TwoSided = true;
+		LeafParent->SetShadingModel(MSM_TwoSidedFoliage);
+		UMaterialExpressionVectorParameter* Color = NewObject<UMaterialExpressionVectorParameter>(LeafParent);
+		Color->ParameterName = TEXT("Color");
+		Color->DefaultValue = FLinearColor(0.12f, 0.25f, 0.09f);
+		LeafParent->GetExpressionCollection().AddExpression(Color);
+		UMaterialExpressionScalarParameter* Roughness = NewObject<UMaterialExpressionScalarParameter>(LeafParent);
+		Roughness->ParameterName = TEXT("Roughness");
+		Roughness->DefaultValue = 0.8f;
+		LeafParent->GetExpressionCollection().AddExpression(Roughness);
+		LeafParent->GetEditorOnlyData()->BaseColor.Connect(0, Color);
+		LeafParent->GetEditorOnlyData()->SubsurfaceColor.Connect(0, Color);
+		LeafParent->GetEditorOnlyData()->Roughness.Connect(0, Roughness);
+		LeafParent->SetMaterialUsage(MATUSAGE_StaticMesh);
+		LeafParent->SetMaterialUsage(MATUSAGE_InstancedStaticMeshes);
+		LeafParent->PostEditChange();
+		if (!SavePackage(Pkg, LeafParent)) { return false; }
+	}
+	auto MakePalette = [&AcquireMIC, this](const FString& Name, UMaterial* Parent,
+		const FLinearColor& Color, float Roughness, float Metallic, float Emission)
+	{
+		UMaterialInstanceConstant* MIC = AcquireMIC(Name);
+		MIC->Parent = Parent;
+		MIC->ClearParameterValuesEditorOnly();
+		MIC->SetVectorParameterValueEditorOnly(FMaterialParameterInfo(FName(TEXT("Color"))), Color);
+		MIC->SetScalarParameterValueEditorOnly(FMaterialParameterInfo(FName(TEXT("Roughness"))), Roughness);
+		MIC->SetScalarParameterValueEditorOnly(FMaterialParameterInfo(FName(TEXT("Metallic"))), Metallic);
+		MIC->SetScalarParameterValueEditorOnly(FMaterialParameterInfo(FName(TEXT("Emission"))), Emission);
+		MIC->PostEditChange();
+		return SavePackage(MIC->GetOutermost(), MIC);
+	};
+	bool bPaletteOk = MakePalette(TEXT("M_SanctuaryLeaf"), LeafParent, FLinearColor(0.12f, 0.25f, 0.09f), 0.8f, 0.f, 0.f);
+	bPaletteOk &= MakePalette(TEXT("M_SanctuaryBronze"), Solid, FLinearColor(0.35f, 0.18f, 0.065f), 0.34f, 0.78f, 0.f);
+	bPaletteOk &= MakePalette(TEXT("M_SanctuaryGlow"), Solid, FLinearColor(1.f, 0.42f, 0.08f), 0.62f, 0.f, 5.f);
+	bPaletteOk &= MakePalette(TEXT("M_SanctuaryDistantRock"), Solid, FLinearColor(0.24f, 0.32f, 0.36f), 0.95f, 0.f, 0.12f);
+	if (!bPaletteOk) { return false; }
+
 	int32 ImportedTextures = 0;
 	int32 TexturedSets = 0;
 	bool bOk = true;
@@ -1128,6 +1292,18 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaterials()
 			}
 		}
 
+		if (!SlotTextures.Contains(TEXT("AmbientOcclusion")) && SlotTextures.Contains(TEXT("Arm")))
+		{
+			UTexture2D* AO = LoadObject<UTexture2D>(nullptr,
+				*QinglanTextureSetContract::TextureObjectPath(Set.AssetId, TEXT("AmbientOcclusion")));
+			if (!AO) { AO = ExtractPackedAO(Set.AssetId, SlotTextures[TEXT("Arm")]); }
+			if (AO) { SlotTextures.Add(TEXT("AmbientOcclusion"), AO); }
+			else
+			{
+				UE_LOG(LogTemp, Error, TEXT("Cannot extract grayscale AO from %s ARM"), *Set.AssetId);
+				bOk = false;
+			}
+		}
 		const bool bHasBaseColor = SlotTextures.Contains(TEXT("BaseColor"));
 		if (bHasBaseColor)
 		{
@@ -1151,12 +1327,6 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaterials()
 					continue; // ARM is channel-packed; the AO fallback below uses its R channel
 				}
 				UTexture2D** Found = SlotTextures.Find(Slot);
-				// cobblestone_01 / gravel_concrete have no _ao_ map; the packed ARM
-				// map stores AO in R, which is the channel the master samples.
-				if (!Found && Slot == TEXT("AmbientOcclusion"))
-				{
-					Found = SlotTextures.Find(TEXT("Arm"));
-				}
 				if (Found && *Found)
 				{
 					MIC->SetTextureParameterValueEditorOnly(FMaterialParameterInfo(FName(*ParamName)), *Found); // UE 5.8: MIC editor-only setter
@@ -1201,6 +1371,8 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaterials()
 			FMaterialParameterInfo(FName(TEXT("BaseColor"))), Skin);
 		HumanMIC->SetScalarParameterValueEditorOnly(
 			FMaterialParameterInfo(FName(TEXT("Tiling"))), 1.f);
+		HumanMIC->SetScalarParameterValueEditorOnly(
+			FMaterialParameterInfo(FName(TEXT("UseWorldMapping"))), 0.f);
 		HumanMIC->SetScalarParameterValueEditorOnly(
 			FMaterialParameterInfo(FName(TEXT("Roughness"))), 0.75f);
 		// Skeletal-mesh shader maps are only cooked when the usage flag is set on
@@ -1290,6 +1462,11 @@ namespace
 	UMaterialInterface* Mat(const TCHAR* Name)
 	{
 		const FString SetName(Name);
+		if (SetName.StartsWith(TEXT("M_Sanctuary")))
+		{
+			return LoadObject<UMaterialInterface>(nullptr,
+				*QinglanTextureSetContract::MaterialObjectPath(SetName));
+		}
 		const FString ObjectPath = QinglanTextureSetContract::ResolveSurfaceMaterialObjectPath(
 			SetName, GUseLowQualitySurfaceMaterials, GTexturedSurfaceMaterials.Contains(SetName));
 		if (UMaterialInterface* Material = LoadObject<UMaterialInterface>(nullptr, *ObjectPath))
@@ -1348,7 +1525,7 @@ namespace
 		{
 			return Mat(TEXT("M_MossWood"));
 		}
-		return Mat(TEXT("M_GrassRock"));
+		return Mat(TEXT("M_SanctuaryLeaf"));
 	}
 
 	AStaticMeshActor* SpawnDecoMesh(UWorld* World, UStaticMesh* Mesh, const FString& MeshName,
@@ -1381,7 +1558,20 @@ namespace
 			const int32 NumMaterials = Comp->GetNumMaterials();
 			for (int32 Index = 0; Index < NumMaterials; ++Index)
 			{
-				Comp->SetMaterial(Index, Material);
+				// The original FBX files use opposite slot orders: Tree4 has
+				// trunk 0/leaves 1; Tree1/2 have leaves 0/trunk 1. Prefer source
+				// material names, retaining an explicit fallback for Tree1's
+				// anonymous material names and already imported legacy assets.
+				const FString SourceSlot = Mesh->GetStaticMaterials()[Index].ImportedMaterialSlotName.ToString();
+				const bool bNamedLeaf = SourceSlot.StartsWith(TEXT("Leaves"))
+					|| (MeshName == TEXT("Tree1") && SourceSlot.Contains(TEXT("005")));
+				const bool bNamedTrunk = SourceSlot.StartsWith(TEXT("Tree"))
+					|| (MeshName == TEXT("Tree1") && SourceSlot.Contains(TEXT("001")));
+				const bool bLeafSlot = bNamedLeaf || (!bNamedTrunk
+					&& Index == (MeshName == TEXT("Tree4") ? 1 : 0));
+				UMaterialInterface* SlotMaterial = MeshName.StartsWith(TEXT("Tree")) && bLeafSlot
+					? Mat(TEXT("M_SanctuaryLeaf")) : Material;
+				Comp->SetMaterial(Index, SlotMaterial);
 			}
 		}
 		return Actor;
@@ -1461,42 +1651,7 @@ namespace
 
 	void StandardLighting(UWorld* World, const FLinearColor& SunTint, float SunIntensity, float SunPitchDeg, float SunYawDeg)
 	{
-		FActorSpawnParameters p;
-		ADirectionalLight* Sun = World->SpawnActor<ADirectionalLight>(ADirectionalLight::StaticClass(), FVector(0, 0, 3000), FRotator(SunPitchDeg, SunYawDeg, 0), p);
-		if (Sun)
-		{
-			Sun->SetActorLabel(TEXT("Sun"));
-			Sun->GetLightComponent()->SetIntensity(SunIntensity);
-			Sun->GetLightComponent()->SetLightColor(SunTint);
-			Sun->GetLightComponent()->SetMobility(EComponentMobility::Movable);
-			// AUD-55: drive the sky atmosphere from the sun so the horizon is
-			// lit instead of rendering as a black void in the packaged build.
-			if (UDirectionalLightComponent* SunComp = Cast<UDirectionalLightComponent>(Sun->GetLightComponent()))
-			{
-				SunComp->SetAtmosphereSunLight(true);
-			}
-		}
-		ASkyAtmosphere* Atmosphere = World->SpawnActor<ASkyAtmosphere>(ASkyAtmosphere::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, p);
-		if (Atmosphere)
-		{
-			Atmosphere->SetActorLabel(TEXT("SkyAtmosphere"));
-		}
-		ASkyLight* Sky = World->SpawnActor<ASkyLight>(ASkyLight::StaticClass(), FVector(0, 0, 500), FRotator::ZeroRotator, p);
-		if (Sky)
-		{
-			Sky->SetActorLabel(TEXT("SkyLight"));
-			Sky->GetLightComponent()->SetIntensity(1.0f);
-			Sky->GetLightComponent()->SetMobility(EComponentMobility::Movable);
-		}
-		AExponentialHeightFog* Fog = World->SpawnActor<AExponentialHeightFog>(AExponentialHeightFog::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, p);
-		if (Fog)
-		{
-			Fog->SetActorLabel(TEXT("HeightFog"));
-			if (UExponentialHeightFogComponent* FogComp = Fog->GetComponent())
-			{
-				FogComp->FogDensity = 0.02f;
-			}
-		}
+		QinglanLookDevelopment::AddLighting(World, SunTint, SunIntensity, SunPitchDeg, SunYawDeg);
 	}
 
 	UWorld* CreateNewMapWorld(const FString& MapName)
@@ -1582,7 +1737,11 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaps()
 		SpawnShape(Hub, EngineCube(), HallCenter + FVector(1000, 1000, 300), FVector(1000, 100, 600), Wood, TEXT("Hub_Hall_Wall_NE"));
 		SpawnShape(Hub, EngineCube(), HallCenter + FVector(-1500, 0, 300), FVector(100, 2000, 600), Wood, TEXT("Hub_Hall_Wall_W"));
 		SpawnShape(Hub, EngineCube(), HallCenter + FVector(1500, 0, 300), FVector(100, 2000, 600), Wood, TEXT("Hub_Hall_Wall_E"));
-		SpawnShape(Hub, EngineCube(), HallCenter + FVector(0, 0, 640), FVector(3400, 2400, 160), Roof, TEXT("Hub_Hall_Roof"));
+		if (!QinglanEnvironmentArt::AddHall(Hub, FVector(0, -3800, 600), Mat))
+		{
+			UE_LOG(LogTemp, Error, TEXT("Original sanctuary architecture missing; run MeshImport"));
+			bOk = false;
+		}
 
 		StandardLighting(Hub, FLinearColor(1.0f, 0.96f, 0.88f), 6.0f, -50.f, 35.f);
 		ConfigureKillZ(Hub, -5000.f); // terrace stack reaches -2000; falls route to defeat
@@ -1651,6 +1810,7 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaps()
 		ScatterNature(Hub, TEXT("Hub_Tree"), 104, FVector::ZeroVector, 600.f, 4300.f, 5500.f, 2,
 			MakeArrayView(HubTree), HubAvoid, HubPlaced, HallMin, HallMax, true);
 
+		QinglanEnvironmentArt::Dress(Hub, Mat, GUseLowQualitySurfaceMaterials);
 		bOk &= SaveWorldMap(Hub);
 		UE_LOG(LogTemp, Log, TEXT("L_Hub created"));
 	}
@@ -1660,7 +1820,6 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaps()
 	{
 		SetMapGameMode(Bamboo, LoadClass<AGameModeBase>(nullptr, TEXT("/Script/QinglanAscension.QinglanRealmGameMode")));
 		UMaterialInterface* Grass = Mat(TEXT("M_GrassRock"));
-		UMaterialInterface* BambooMat = Mat(TEXT("M_BambooVeneer"));
 		UMaterialInterface* Dirt = Mat(TEXT("M_DirtFloor"));
 
 		// Rooms 0..6 spaced 55 m apart along +X; each 45 m across (docs/01 rooms).
@@ -1673,13 +1832,7 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaps()
 			{
 				SpawnShape(Bamboo, EngineCube(), FVector(X + 2750.f, 0, -50), FVector(1000, 800, 100), Grass, *FString::Printf(TEXT("Bamboo_Corr%d"), i));
 			}
-			// Bamboo grove dressing: cylinders along room edges.
-			for (int32 b = 0; b < 8; ++b)
-			{
-				const float Ang = b * PI / 4.f;
-				const FVector C(X + FMath::Cos(Ang) * 1800.f, FMath::Sin(Ang) * 1800.f, 400.f);
-				SpawnShape(Bamboo, EngineCylinder(), C, FVector(60, 60, 900), BambooMat, *FString::Printf(TEXT("Bamboo_Room%d_Stalk%d"), i, b));
-			}
+			// Layered bamboo geometry is instanced outside the fighting space below.
 		}
 		StandardLighting(Bamboo, FLinearColor(0.85f, 0.95f, 0.85f), 4.5f, -65.f, 20.f);
 		ConfigureKillZ(Bamboo, -3000.f); // room/corridor floors top at Z=0
@@ -1781,6 +1934,7 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaps()
 			}
 		}
 
+		QinglanEnvironmentArt::Dress(Bamboo, Mat, GUseLowQualitySurfaceMaterials);
 		bOk &= SaveWorldMap(Bamboo);
 		UE_LOG(LogTemp, Log, TEXT("L_BambooHollow created"));
 	}
@@ -1900,6 +2054,7 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaps()
 			}
 		}
 
+		QinglanEnvironmentArt::Dress(Ashen, Mat, GUseLowQualitySurfaceMaterials);
 		bOk &= SaveWorldMap(Ashen);
 		UE_LOG(LogTemp, Log, TEXT("L_AshenVerge created"));
 	}
@@ -1954,6 +2109,7 @@ bool UQinglanContentBootstrapCommandlet::BootstrapMaps()
 		ScatterNature(Arena, TEXT("Arena_Bush"), 4102, FVector::ZeroVector, 0.f, 2300.f, 2800.f, 2,
 			MakeArrayView(ArenaBush), ArenaAvoid, ArenaPlaced, FVector2D::ZeroVector, FVector2D::ZeroVector, false);
 
+		QinglanEnvironmentArt::Dress(Arena, Mat, GUseLowQualitySurfaceMaterials);
 		bOk &= SaveWorldMap(Arena);
 		UE_LOG(LogTemp, Log, TEXT("L_TribulationArena created"));
 	}

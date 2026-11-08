@@ -1,0 +1,61 @@
+{
+  "source": ".local/assets-raw/quaternius/extracted/Animated Human by @Quaternius/FBX/Animated Human.fbx",
+  "cultivator": "assets/art-source/SK_Cultivator.fbx",
+  "source_sha256": "edd4fde3a73afe2a22ddb5a10a215373a0880d9a4ee32a0815879a260b8e8445",
+  "cultivator_sha256": "a7b52ede81e0427af4fea3950890a1a759eaed903aa0031b58eb1fe68d57bf86",
+  "skeleton_model_count": [
+    49,
+    49
+  ],
+  "model_names_match": true,
+  "model_hierarchy_matches": true,
+  "cluster_names_match": true,
+  "max_cluster_transform_link_difference": 0.0,
+  "bind_pose_names_match": true,
+  "max_bind_pose_matrix_difference": 0.0,
+  "source_hips_default_transform": {
+    "Lcl Translation": [
+      -0.04743848741054535,
+      3.8243913650512695,
+      0.05209650099277496
+    ],
+    "Lcl Rotation": [
+      -4.769686302620454,
+      -43.504206899479215,
+      -0.035360539668550614
+    ],
+    "Lcl Scaling": [
+      0.9999997615814209,
+      0.9999995827674866,
+      1.0000004768371582
+    ]
+  },
+  "cultivator_hips_default_transform": {
+    "Lcl Translation": [
+      -0.04743848741054535,
+      3.8243913650512695,
+      0.05209650099277496
+    ],
+    "Lcl Rotation": [
+      -4.7696858757336305,
+      -43.504210314573804,
+      -0.035360539668550614
+    ],
+    "Lcl Scaling": [
+      0.9999997615814209,
+      0.9999995827674866,
+      1.0000004768371582
+    ]
+  },
+  "scope": "Binary FBX comparison of default bone transforms, skin cluster bind matrices and BindPose matrices. UE native reference-pose and animated runtime checks remain required.",
+  "passed": true,
+  "max_model_default_translation_difference": 1.1920928955078125e-07,
+  "max_model_default_rotation_degrees_difference": 0.015050321836124425,
+  "max_model_default_scale_difference": 0.0,
+  "default_transform_tolerances": {
+    "translation": 0.0001,
+    "rotation_degrees": 0.02,
+    "scale": 0.0001
+  },
+  "default_pose_note": "Blender 4.5 evaluates original Idle frame 77 identically before and after costume generation. Compared with the older source FBX, thigh default rotations differ by at most 0.015051 degrees. Source FBX bind and cluster matrices remain exactly unchanged."
+}

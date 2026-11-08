@@ -198,7 +198,7 @@ class Wrappers(unittest.TestCase):
         self.file(self.project / 'Saved/Logs/QinglanAscension.log', 'QinglanMeshImport finished ok=1\n')
         outputs = ['Data/Techniques/DA_Tech_stub.uasset', 'Characters/SK_Stub.uasset',
                    'Input/IMC_Default.uasset', 'Data/ST_Game.uasset', 'Data/DT_Localization.uasset',
-                   'Materials/M_QinglanSolid.uasset']
+                   'Materials/M_QinglanSolid.uasset', 'Materials/M_QinglanGroundMarker.uasset']
         outputs += ['Maps/' + x + '.umap' for x in ('L_Hub', 'L_BambooHollow', 'L_AshenVerge', 'L_TribulationArena')]
         outputs += ['VFX/' + x + '.uasset' for x in ('NS_Impact', 'NS_Telegraph', 'NS_Cast')]
         outputs += ['Characters/' + x + '.uasset' for x in ('Human/ABP_Human', 'Knight/ABP_Knight',
@@ -208,6 +208,13 @@ class Wrappers(unittest.TestCase):
         outputs += ['Materials/' + x + suffix + '.uasset' for x in ('M_BambooWall', 'M_Cobblestone',
                     'M_CobblestoneAlt', 'M_StonePath', 'M_GrassRock', 'M_Cliff', 'M_DirtFloor',
                     'M_VolcanicRock', 'M_RoofTiles') for suffix in ('', '_Solid')]
+        outputs += ['Environments/Sanctuary/' + x + '.uasset' for x in (
+            'SM_SanctuaryRoof', 'SM_SanctuaryFrame', 'SM_ScholarRock', 'SM_CliffRock',
+            'SM_BambooCluster', 'SM_StoneLantern')]
+        outputs += ['Characters/Human/' + x + '.uasset' for x in (
+            'SK_Cultivator', 'T_CultivatorSkin', 'T_CultivatorWeaveNormal')]
+        outputs += ['Materials/MIC_Cultivator_' + x + '.uasset' for x in (
+            'Skin', 'InkCloth', 'IvoryCloth', 'JadeCloth', 'AntiqueGold', 'Jade', 'Leather', 'Hair')]
         env = dict(QINGLAN_HOST_PLATFORM='Mac', QINGLAN_ASSETS_RAW=str(raw),
                    STUB_OUTPUTS=json.dumps([str(self.project / 'Content/Qinglan' / x) for x in outputs]))
         success = self.run_wrapper('regenerate-content.sh', **env)

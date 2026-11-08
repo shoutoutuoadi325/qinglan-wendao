@@ -16,10 +16,12 @@ info() { echo "==> $*"; }
 
 APP_SOURCE="${QINGLAN_APP:-$REPO_ROOT/game/Saved/StagedBuilds/Mac/QinglanAscension-Mac-Shipping.app}"
 VERSION="${QINGLAN_VERSION:-0.1.0}"
+BUILD_NUMBER="${QINGLAN_BUILD_NUMBER:-1}"
 RELEASE="${QINGLAN_RELEASE:-0.1.0-alpha.1}"
 BUNDLE_ID="${QINGLAN_BUNDLE_ID:-io.github.shoutoutuoadi325.qinglan}"
 DISPLAY_NAME="${QINGLAN_DISPLAY_NAME:-Qinglan - Path of Ascension}"
 OUT_DIR="${QINGLAN_OUT_DIR:-$REPO_ROOT/dist/mac}"
+LAYOUT_PYTHON="${QINGLAN_DMG_LAYOUT_PYTHON:-}"
 DMG_NAME="Qinglan-${RELEASE}-macOS-arm64.dmg"
 MAIN_EXEC_NAME="QinglanAscension-Mac-Shipping"
 
@@ -33,10 +35,13 @@ for f in CREDITS.txt EULA.txt INSTALL.txt; do
   [ -f "$TEMPLATE_DIR/$f" ] || fail "missing template: $TEMPLATE_DIR/$f"
 done
 
-rm -rf "$OUT_DIR"
-mkdir -p "$OUT_DIR/dmg"
+if [ -e "$OUT_DIR" ]; then
+  [ -d "$OUT_DIR" ] && [ -z "$(ls -A "$OUT_DIR")" ] || fail "output directory must be new or empty: $OUT_DIR"
+fi
+DMG_ROOT="$OUT_DIR/dmg-root"
+mkdir -p "$DMG_ROOT"
 
-APP="$OUT_DIR/dmg/$DISPLAY_NAME.app"
+APP="$DMG_ROOT/$DISPLAY_NAME.app"
 info "copying $APP_SOURCE"
 ditto "$APP_SOURCE" "$APP"
 xattr -cr "$APP"
@@ -55,7 +60,7 @@ plist_set CFBundleIdentifier "$BUNDLE_ID"
 plist_set CFBundleDisplayName "$DISPLAY_NAME"
 plist_set CFBundleName "Qinglan"
 plist_set CFBundleShortVersionString "$VERSION"
-plist_set CFBundleVersion "1"
+plist_set CFBundleVersion "$BUILD_NUMBER"
 plist_set NSHumanReadableCopyright "Copyright © 2026 Qinglan Community. All rights reserved."
 
 RES="$APP/Contents/Resources"
@@ -108,10 +113,6 @@ codesign -d --entitlements :- "$APP" 2>/dev/null | grep -q "app-sandbox" \
   || fail "app-sandbox entitlement missing"
 
 # DMG payload: signed app, Applications shortcut, and player-facing docs.
-DMG_ROOT="$OUT_DIR/dmg-root"
-rm -rf "$DMG_ROOT"
-mkdir -p "$DMG_ROOT"
-ditto "$APP" "$DMG_ROOT/$DISPLAY_NAME.app"
 ln -s /Applications "$DMG_ROOT/Applications"
 for f in CREDITS.txt EULA.txt INSTALL.txt; do
   cp "$TEMPLATE_DIR/$f" "$DMG_ROOT/$f"
@@ -119,8 +120,30 @@ done
 
 DMG="$OUT_DIR/$DMG_NAME"
 info "creating $DMG"
-hdiutil create -volname "$DISPLAY_NAME" -srcfolder "$DMG_ROOT" -ov -format UDZO "$DMG" >/dev/null \
-  || fail "hdiutil create failed"
+if [ -n "$LAYOUT_PYTHON" ]; then
+  "$LAYOUT_PYTHON" "$TEMPLATE_DIR/layout-dmg.py" "$DMG_ROOT" "$DISPLAY_NAME" "$OUT_DIR/install-layout.png"
+  WORK_DMG="$OUT_DIR/install-layout-rw.dmg"
+  MOUNT="$OUT_DIR/install-layout-volume"
+  mkdir -p "$MOUNT"
+  hdiutil create -volname "$DISPLAY_NAME" -srcfolder "$DMG_ROOT" -format UDRW -fs HFS+ "$WORK_DMG" >/dev/null
+  hdiutil attach "$WORK_DMG" -mountpoint "$MOUNT" -nobrowse -noautoopen >/dev/null
+  trap 'hdiutil detach "$MOUNT" >/dev/null 2>&1 || true' EXIT
+  "$LAYOUT_PYTHON" "$TEMPLATE_DIR/layout-dmg.py" "$MOUNT" "$DISPLAY_NAME" --mounted
+  hdiutil detach "$MOUNT" >/dev/null
+  trap - EXIT
+  hdiutil convert "$WORK_DMG" -format UDZO -o "$DMG" >/dev/null
+  python3 - "$WORK_DMG" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+if path.name != "install-layout-rw.dmg" or path.is_symlink():
+    raise SystemExit("unexpected temporary disk image")
+path.unlink()
+PY
+else
+  hdiutil create -volname "$DISPLAY_NAME" -srcfolder "$DMG_ROOT" -format UDZO "$DMG" >/dev/null \
+    || fail "hdiutil create failed"
+fi
 
 ( cd "$OUT_DIR" && shasum -a 256 "$DMG_NAME" > SHA256SUMS )
 

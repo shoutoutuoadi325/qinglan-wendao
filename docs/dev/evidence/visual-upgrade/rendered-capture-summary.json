@@ -1,0 +1,33 @@
+{
+  "outputResolution": [
+    1600,
+    900
+  ],
+  "renderer": "Metal",
+  "captures": {
+    "metal-editor-bamboo.png": {
+      "sha256": "12ae5e5644d8fc8ff5c82e24177517143364cc1c50454a67b5c150d3ccc75ddb",
+      "bytes": 2198228
+    },
+    "metal-editor-gameplay.png": {
+      "sha256": "38a233f453cffcc846457c7a297bd3121770f89b9104e303ca5f2f7e1bb33d17",
+      "bytes": 2211167
+    },
+    "metal-editor-hall.png": {
+      "sha256": "b931e7a54182060b456d8b4592ca3df2f72f81343f377360eeffe3a16d5ea710",
+      "bytes": 2322744
+    },
+    "metal-editor-hero.png": {
+      "sha256": "3982cd71c0e4b396a7bb6b1bdef2ea88f039fd7fcdc3353af67c6fa31584137b",
+      "bytes": 2622255
+    },
+    "metal-shipping-gameplay.png": {
+      "sha256": "bd4c8b834a4923a02614a66399b128926148e85ec8fba465f3781d0c7ece7c15",
+      "bytes": 2189367
+    },
+    "metal-shipping-hero.png": {
+      "sha256": "d0cba62c0c3e0d139d7e8e7598c8d20791330292d643deae552139af49fdf92f",
+      "bytes": 2608786
+    }
+  }
+}

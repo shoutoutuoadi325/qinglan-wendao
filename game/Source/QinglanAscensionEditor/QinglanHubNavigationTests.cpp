@@ -44,6 +44,11 @@ bool FQinglanHubHallNavigation::RunTest(const FString& Parameters)
 			Probe.Location + FVector(0.f, 0.f, 300.f), Probe.Location - FVector(0.f, 0.f, 200.f), ECC_Pawn, Query);
 		if (TestTrue(*FString::Printf(TEXT("%s has physical ground"), Probe.Label), bHit))
 		{
+            if (!FMath::IsNearlyEqual(Ground.ImpactPoint.Z, WalkingSurfaceZ, 1.f))
+            {
+                AddInfo(FString::Printf(TEXT("%s ground hit actor=%s component=%s"), Probe.Label,
+                    *GetNameSafe(Ground.GetActor()), *GetNameSafe(Ground.GetComponent())));
+            }
 			TestTrue(*FString::Printf(TEXT("%s walking surface is 600cm (actual %.2f)"), Probe.Label, Ground.ImpactPoint.Z),
 				FMath::IsNearlyEqual(Ground.ImpactPoint.Z, WalkingSurfaceZ, 1.f));
 			TestTrue(*FString::Printf(TEXT("%s is upward-facing walkable ground"), Probe.Label), Ground.ImpactNormal.Z > 0.9f);

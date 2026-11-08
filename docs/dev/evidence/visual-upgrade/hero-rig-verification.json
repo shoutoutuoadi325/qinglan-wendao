@@ -1,0 +1,11 @@
+{
+  "source_fbx_bones": 48,
+  "cultivator_fbx_bones": 48,
+  "bone_name_difference": [],
+  "parent_hierarchy_matches": true,
+  "max_world_head_difference": 0.0,
+  "max_world_tail_difference": 0.0,
+  "max_world_matrix_difference": 0.0,
+  "passed": true,
+  "scope": "Independent Blender FBX import comparison. Unreal animation and packaged runtime checks remain required."
+}

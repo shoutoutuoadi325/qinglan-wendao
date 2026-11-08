@@ -791,8 +791,15 @@ void AQinglanCharacter::BeginPlay()
 	// sword_base/sword_tip/cast_source socket validation.
 	if (USkeletalMeshComponent* const MeshComp = GetMesh())
 	{
-		if (USkeletalMesh* const HeroMesh = Cast<USkeletalMesh>(
-				FSoftObjectPath(TEXT("/Game/Qinglan/Characters/Human/SK_Human")).TryLoad()))
+		USkeletalMesh* HeroMesh = Cast<USkeletalMesh>(
+			FSoftObjectPath(TEXT("/Game/Qinglan/Characters/Human/SK_Cultivator.SK_Cultivator")).TryLoad());
+		const bool bHasCultivatorCostume = HeroMesh != nullptr;
+		if (!HeroMesh)
+		{
+			HeroMesh = Cast<USkeletalMesh>(
+				FSoftObjectPath(TEXT("/Game/Qinglan/Characters/Human/SK_Human.SK_Human")).TryLoad());
+		}
+		if (HeroMesh)
 		{
 			MeshComp->SetSkeletalMesh(HeroMesh);
 			// The Quaternius FBX rigs import at ~5.3 m tall (SK_Human bounds
@@ -801,19 +808,27 @@ void AQinglanCharacter::BeginPlay()
 			// component scale so the mesh half-height matches the capsule, and
 			// re-seat the feet at the capsule bottom (origin may not be at the
 			// feet in the export).
-			const FBoxSphereBounds MeshBounds = HeroMesh->GetBounds();
+			// Costume details can change bounds without changing the shared rig.
+			// Keep the source rig's physical scale and foot offset so sword sockets
+			// retain their authored 90 cm span and the capsule remains aligned.
+			USkeletalMesh* ScaleReference = bHasCultivatorCostume ? Cast<USkeletalMesh>(
+				FSoftObjectPath(TEXT("/Game/Qinglan/Characters/Human/SK_Human.SK_Human")).TryLoad()) : HeroMesh;
+			const FBoxSphereBounds MeshBounds = (ScaleReference ? ScaleReference : HeroMesh)->GetBounds();
 			const float MeshHalfHeight = FMath::Max(1.f, static_cast<float>(MeshBounds.BoxExtent.Z));
 			const float MeshScale = QinglanCapsuleHalfHeight / MeshHalfHeight;
 			MeshComp->SetRelativeScale3D(FVector(MeshScale));
 			const float MeshMinZ = static_cast<float>(MeshBounds.Origin.Z - MeshBounds.BoxExtent.Z);
 			MeshComp->SetRelativeLocation(FVector(0.f, 0.f, -QinglanCapsuleHalfHeight - MeshMinZ * MeshScale));
 			MeshComp->SetRelativeRotation(FRotator(0.f, -90.f, 0.f)); // rig faces +Y in the export
-			// AUD-55: hero skin material imported from the Quaternius pack; the
-			// engine grey default read as an untextured blockout in renders.
-			if (UMaterialInterface* Skin = Cast<UMaterialInterface>(
-					FSoftObjectPath(TEXT("/Game/Qinglan/Materials/MIC_HumanCharacter.MIC_HumanCharacter")).TryLoad()))
+			// The costume stores separate cloth, skin, jade, metal and hair slots.
+			// The legacy one-slot palette applies only to the fallback Human mesh.
+			if (!bHasCultivatorCostume)
 			{
-				MeshComp->SetMaterial(0, Skin);
+				if (UMaterialInterface* Skin = Cast<UMaterialInterface>(
+					FSoftObjectPath(TEXT("/Game/Qinglan/Materials/MIC_HumanCharacter.MIC_HumanCharacter")).TryLoad()))
+				{
+					MeshComp->SetMaterial(0, Skin);
+				}
 			}
 
 			MeshComp->SetAnimInstanceClass(ResolveHumanoidAnimInstanceClass(HeroMesh));

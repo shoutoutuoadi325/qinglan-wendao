@@ -112,13 +112,11 @@ begin
   end;
   if not Exec(RuntimePath, '/install /quiet /norestart', '',
     SW_HIDE, ewWaitUntilTerminated, ResultCode) then begin
-    Result := FmtMessage(SetupMessage(msgErrorExecutingProgram),
-      ['Microsoft Visual C++ x64 Redistributable']) + #13#10 + SysErrorMessage(ResultCode);
+    Result := FmtMessage(SetupMessage(msgErrorExecutingProgram), ['Microsoft Visual C++ x64 Redistributable']) + #13#10 + SysErrorMessage(ResultCode);
     Exit;
   end;
   if (ResultCode <> 0) and (ResultCode <> 3010) then begin
-    Result := FmtMessage(SetupMessage(msgErrorExecutingProgram),
-      ['Microsoft Visual C++ x64 Redistributable']) + #13#10 +
+    Result := FmtMessage(SetupMessage(msgErrorExecutingProgram), ['Microsoft Visual C++ x64 Redistributable']) + #13#10 +
       SysErrorMessage(ResultCode) + ' (' + IntToStr(ResultCode) + ')';
     Exit;
   end;

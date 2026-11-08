@@ -25,6 +25,11 @@ on:
         type: string
         default: '93f91dc3cc7ef42924e8e1756691a6e28671b84f'
 
+      expected_recovery_tooling_commit:
+        description: 'Explicit immutable tooling commit when source_run_id is a release recovery run'
+        type: string
+        default: ''
+
 permissions:
   contents: read
   actions: read
@@ -111,9 +116,22 @@ jobs:
       SOURCE_RUN_ID: ${{ inputs.source_run_id }}
       RELEASE_VERSION: ${{ inputs.version }}
       EXPECTED_PROJECT_COMMIT: ${{ inputs.expected_project_commit }}
+      EXPECTED_RECOVERY_TOOLING_COMMIT: ${{ inputs.expected_recovery_tooling_commit }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
+          persist-credentials: false
+          lfs: false
+      - name: Check out immutable game source for regression discovery
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.expected_project_commit }}
+          path: source-validation
+          sparse-checkout: |
+            game/Source
+            game/Content/Qinglan/Audio
+            tools/ci
+            tools/build
           persist-credentials: false
           lfs: false
       - name: Verify the successful source run and download its Shipping artifact
@@ -124,15 +142,75 @@ jobs:
           if ($env:EXPECTED_PROJECT_COMMIT -notmatch '^[0-9a-f]{40}$') { throw 'Invalid source commit.' }
           if ($env:RELEASE_VERSION -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid release version.' }
           $run = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:SOURCE_RUN_ID" | ConvertFrom-Json
-          if ($LASTEXITCODE -or $run.status -ne 'completed' -or $run.conclusion -ne 'success' -or $run.head_sha -ne $env:EXPECTED_PROJECT_COMMIT) {
-            throw 'Source run must have succeeded at the expected project commit.'
+          if ($LASTEXITCODE -or $run.status -ne 'completed' -or $run.conclusion -ne 'success' -or $run.event -ne 'workflow_dispatch' -or $run.head_repository.full_name -ne $env:GITHUB_REPOSITORY) {
+              throw 'Require a successful workflow-dispatch source run from this repository.'
           }
           $tag = gh api "repos/$env:GITHUB_REPOSITORY/commits/v$env:RELEASE_VERSION" | ConvertFrom-Json
-          if ($LASTEXITCODE -or $tag.sha -ne $env:EXPECTED_PROJECT_COMMIT) { throw 'Release tag does not match the source build.' }
+          if ($LASTEXITCODE -or $tag.sha -ne $env:EXPECTED_PROJECT_COMMIT) { throw 'Release tag does not match the intended game source.' }
+          $validationCommit = (& git -C source-validation rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -or $validationCommit -ne $tag.sha) { throw 'Regression discovery must use the exact published game source.' }
+          $recovery = $false
+          if ($run.head_sha -eq $env:EXPECTED_PROJECT_COMMIT) {
+              if ($run.path -ne '.github/workflows/windows-build.yml' -or $env:EXPECTED_RECOVERY_TOOLING_COMMIT) { throw 'Unexpected regular Windows build provenance.' }
+          } else {
+              if ($env:EXPECTED_RECOVERY_TOOLING_COMMIT -notmatch '^[0-9a-f]{40}$' -or $run.head_sha -ne $env:EXPECTED_RECOVERY_TOOLING_COMMIT -or $run.path -ne '.github/workflows/windows-release-recovery.yml') {
+                  throw 'Recovery requires the explicitly reviewed tooling commit and recovery workflow.'
+              }
+              # Bind the Actions API run to the reviewed, committed workflow. Metadata in
+              # the downloaded artifact alone cannot establish the source checkout.
+              $remoteWorkflow = gh api "repos/$env:GITHUB_REPOSITORY/contents/.github/workflows/windows-release-recovery.yml?ref=$($run.head_sha)" | ConvertFrom-Json
+              if ($LASTEXITCODE) { throw 'Cannot verify the recovery workflow source.' }
+              $localWorkflowBlob = (& git rev-parse 'HEAD:.github/workflows/windows-release-recovery.yml').Trim()
+              if ($LASTEXITCODE -or $remoteWorkflow.sha -ne $localWorkflowBlob) { throw 'Source run used a different recovery workflow from the reviewed tooling.' }
+              $remoteWarmup = gh api "repos/$env:GITHUB_REPOSITORY/contents/tools/ci/windows-audio-ddc-warmup.ps1?ref=$($run.head_sha)" | ConvertFrom-Json
+              if ($LASTEXITCODE) { throw 'Cannot verify the warmup script source.' }
+              $localWarmupBlob = (& git rev-parse 'HEAD:tools/ci/windows-audio-ddc-warmup.ps1').Trim()
+              if ($LASTEXITCODE -or $remoteWarmup.sha -ne $localWarmupBlob) { throw 'Source run used a different warmup script.' }
+              $recovery = $true
+          }
           gh run download $env:SOURCE_RUN_ID --repo $env:GITHUB_REPOSITORY --name "Qinglan-Win64-Shipping-$env:SOURCE_RUN_ID" --dir "$env:RUNNER_TEMP/payload"
           if ($LASTEXITCODE) { throw 'Could not retrieve the source Shipping artifact.' }
           New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/direct-reports" | Out-Null
           $run | ConvertTo-Json -Depth 8 | Set-Content "$env:RUNNER_TEMP/direct-reports/source-run.json"
+          if ($recovery) {
+              $reports = "$env:RUNNER_TEMP/direct-reports/recovery"
+              gh run download $env:SOURCE_RUN_ID --repo $env:GITHUB_REPOSITORY --name "Qinglan-Windows-Recovery-Provenance-$env:SOURCE_RUN_ID" --dir $reports
+              if ($LASTEXITCODE) { throw 'Recovery provenance artifact is required.' }
+              $p = Get-Content "$reports/release-recovery-provenance.json" -Raw | ConvertFrom-Json
+              if ($p.status -ne 'shipping_regressions_and_store_packaging_passed' -or $p.run_id -ne $env:SOURCE_RUN_ID -or $p.run_attempt -ne $run.run_attempt -or $p.project_commit -ne $tag.sha -or $p.release_tag -ne "v$env:RELEASE_VERSION" -or $p.tooling_commit -ne $run.head_sha -or $p.workflow_path -ne $run.path -or $p.editor_cache_run_id -ne '42474888842' -or $p.editor_cache_project_commit -ne $tag.sha) { throw 'Recovery source/tooling/cache identity mismatch.' }
+              $bindings = @(
+                  @{ Path = "$env:RUNNER_TEMP/payload/build-evidence.json"; Expected = $p.build_evidence_sha256 },
+                  @{ Path = "$reports/automation/index.json"; Expected = $p.automation_report_sha256 },
+                  @{ Path = "$reports/audio-ddc-warmup.json"; Expected = $p.warmup_receipt_sha256 },
+                  @{ Path = "$reports/editor-cache-verified.json"; Expected = $p.cache_receipt_sha256 },
+                  @{ Path = 'tools/ci/windows-audio-ddc-warmup.ps1'; Expected = $p.warmup_script_sha256 }
+              )
+              foreach ($binding in $bindings) {
+                  if ($binding.Expected -notmatch '^[0-9a-f]{64}$' -or (Get-FileHash $binding.Path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $binding.Expected) { throw "Recovery evidence hash mismatch: $($binding.Path)" }
+              }
+              $build = Get-Content "$env:RUNNER_TEMP/payload/build-evidence.json" -Raw | ConvertFrom-Json
+              if ($build.project_commit -ne $tag.sha -or $build.platform -ne 'Win64' -or $build.configuration -ne 'Shipping') { throw 'Recovered Shipping build evidence mismatch.' }
+              $warmup = Get-Content "$reports/audio-ddc-warmup.json" -Raw | ConvertFrom-Json
+              if ($warmup.version -ne 1 -or $warmup.status -ne 'complete' -or -not $warmup.audio_unchanged -or $warmup.second_pass_compression_builds -ne 0 -or @($warmup.sound_waves).Count -ne 8 -or @($warmup.passes).Count -ne 2) { throw 'Audio warmup did not complete with unchanged sound assets.' }
+              $waves = @(Get-ChildItem 'source-validation/game/Content/Qinglan/Audio' -Recurse -File -Filter 'SW_*.uasset')
+              if ($waves.Count -ne @($warmup.sound_waves).Count) { throw 'Warmup coverage differs from the published audio assets.' }
+              foreach ($wave in $waves) {
+                  $relative = [IO.Path]::GetRelativePath((Resolve-Path 'source-validation/game/Content').Path, $wave.FullName).Replace('\', '/')
+                  $records = @($warmup.sound_waves | Where-Object { $_.path -eq $relative -and $_.bytes -eq $wave.Length -and $_.sha256 -eq (Get-FileHash $wave.FullName -Algorithm SHA256).Hash.ToLowerInvariant() })
+                  if ($records.Count -ne 1) { throw "Warmup sound does not match the published source: $relative" }
+              }
+              foreach ($pass in $warmup.passes) {
+                  if ($pass.exit_code -ne 0 -or $pass.processed_sound_waves -ne 8 -or $pass.engine_log -notmatch '^audio-ddc-pass-[12]-engine\.log$' -or $pass.engine_log_sha256 -notmatch '^[0-9a-f]{64}$' -or (Get-FileHash (Join-Path $reports $pass.engine_log) -Algorithm SHA256).Hash.ToLowerInvariant() -ne $pass.engine_log_sha256) { throw 'Incomplete or altered audio DDC pass evidence.' }
+              }
+              $cacheRun = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$($p.editor_cache_run_id)" | ConvertFrom-Json
+              if ($LASTEXITCODE -or $cacheRun.head_sha -ne $tag.sha -or $cacheRun.path -ne '.github/workflows/windows-build.yml' -or $cacheRun.head_repository.full_name -ne $env:GITHUB_REPOSITORY) { throw 'Original Editor cache source mismatch.' }
+              $cacheJobs = gh api --paginate --slurp "repos/$env:GITHUB_REPOSITORY/actions/runs/$($p.editor_cache_run_id)/jobs?filter=all&per_page=100" | ConvertFrom-Json
+              if ($LASTEXITCODE) { throw 'Cannot verify original Editor job.' }
+              $cacheJob = @($cacheJobs | ForEach-Object { $_.jobs } | Where-Object { $_.id -eq $p.editor_cache_job_id -and $_.name -eq 'build-editor' -and $_.conclusion -eq 'success' })
+              if ($cacheJob.Count -ne 1) { throw 'Original Editor cache job did not succeed.' }
+              python source-validation/tools/ci/validate_windows_automation.py -Project source-validation/game -Report "$reports/automation/index.json"
+              if ($LASTEXITCODE) { throw 'Recovered run must pass every unchanged regular native test.' }
+          }
       - name: Compile the desktop installer and verify the portable archive
         shell: pwsh
         run: |

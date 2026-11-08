@@ -1,0 +1,198 @@
+name: Windows v0.1.3 release recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      engine_source:
+        description: 'Licensed engine acquisition route'
+        type: choice
+        options: [source, archive]
+        default: source
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: windows-release-recovery-v0.1.3
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: v0.1.3
+  EXPECTED_PROJECT_COMMIT: 93f91dc3cc7ef42924e8e1756691a6e28671b84f
+  EDITOR_CACHE_RUN_ID: '42474888842'
+
+jobs:
+  package:
+    if: github.event.repository.private == false
+    runs-on: windows-2022
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: source
+    steps:
+      # Keep every cache-bound file at the published game revision. Recovery
+      # orchestration and DDC warmup live in a separate immutable checkout.
+      - name: Check out the published game source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: 93f91dc3cc7ef42924e8e1756691a6e28671b84f
+          path: source
+          persist-credentials: false
+          lfs: false
+      - name: Check out this recovery tooling revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          path: tooling
+          sparse-checkout: |
+            .github/workflows
+            tools/ci
+          persist-credentials: false
+          lfs: false
+      - name: Verify release, tooling and cache provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = gh api "repos/$env:GITHUB_REPOSITORY/commits/$env:RELEASE_TAG" | ConvertFrom-Json
+          if ($LASTEXITCODE -or $tag.sha -ne $env:EXPECTED_PROJECT_COMMIT) { throw 'Published release tag does not match the pinned game source.' }
+          $sourceCommit = (& git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -or $sourceCommit -ne $env:EXPECTED_PROJECT_COMMIT) { throw 'Game checkout differs from the published release.' }
+          & git diff --exit-code HEAD
+          if ($LASTEXITCODE) { throw 'Game checkout contains tracked edits before recovery.' }
+          $toolingCommit = (& git -C "$env:GITHUB_WORKSPACE/tooling" rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -or $toolingCommit -ne $env:GITHUB_SHA) { throw 'Recovery tooling differs from the workflow revision.' }
+          $cacheRun = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:EDITOR_CACHE_RUN_ID" | ConvertFrom-Json
+          if ($LASTEXITCODE -or $cacheRun.status -ne 'completed' -or $cacheRun.head_sha -ne $env:EXPECTED_PROJECT_COMMIT -or $cacheRun.path -ne '.github/workflows/windows-build.yml' -or $cacheRun.head_repository.full_name -ne $env:GITHUB_REPOSITORY) {
+            throw 'Editor cache run has unexpected source provenance.'
+          }
+          $jobs = gh api --paginate --slurp "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:EDITOR_CACHE_RUN_ID/jobs?filter=all&per_page=100" | ConvertFrom-Json
+          if ($LASTEXITCODE) { throw 'Cannot verify the editor cache build job.' }
+          $editorJobs = @($jobs | ForEach-Object { $_.jobs } | Where-Object { $_.name -eq 'build-editor' -and $_.conclusion -eq 'success' })
+          if ($editorJobs.Count -ne 1) { throw 'Require exactly one successful compiled Editor cache job.' }
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/qinglan-win64/reports" | Out-Null
+          @{ release_tag = $env:RELEASE_TAG; project_commit = $sourceCommit; tooling_commit = $toolingCommit; run_id = $env:GITHUB_RUN_ID; run_attempt = $env:GITHUB_RUN_ATTEMPT; editor_cache_run_id = $env:EDITOR_CACHE_RUN_ID; editor_cache_project_commit = $cacheRun.head_sha; editor_cache_job_id = $editorJobs[0].id; workflow_path = '.github/workflows/windows-release-recovery.yml' } |
+            ConvertTo-Json | Set-Content "$env:RUNNER_TEMP/qinglan-win64/reports/recovery-input-provenance.json"
+      - name: Check Windows toolchain, storage and repository contracts
+        run: |
+          ./tools/ci/windows-preflight.ps1 -ReportPath "$env:RUNNER_TEMP/windows-preflight.json" -RequireBuildTools
+          Get-ChildItem tools/ci/*.ps1, "$env:GITHUB_WORKSPACE/tooling/tools/ci/windows-audio-ddc-warmup.ps1" | ForEach-Object {
+            $tokens = $null; $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors)
+            if ($errors.Count) { throw ($errors | Out-String) }
+          }
+          python tools/validate_repository.py
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python tools/export_story_reading.py --check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: "Configure 32GB pagefile on D:"
+        uses: al-cheb/configure-pagefile-action@v1.4
+        with:
+          minimum-size: 16GB
+          maximum-size: 32GB
+          disk-root: "D:"
+      - name: Configure Windows Defender performance exclusions
+        run: |
+          Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE"
+          Add-MpPreference -ExclusionPath "$env:RUNNER_TEMP"
+          Add-MpPreference -ExclusionProcess "cl.exe", "link.exe", "UnrealBuildTool.exe", "UnrealEditor.exe", "UnrealEditor-Cmd.exe"
+      - name: Prepare licensed Unreal Engine 5.8.3
+        env:
+          UE_SOURCE_TOKEN: ${{ secrets.UE_SOURCE_TOKEN }}
+          UE_WINDOWS_ARCHIVE_URL: ${{ secrets.UE_WINDOWS_ARCHIVE_URL }}
+          UE_WINDOWS_ARCHIVE_SHA256: ${{ vars.UE_WINDOWS_ARCHIVE_SHA256 }}
+        run: ./tools/ci/windows-engine.ps1 -Source '${{ inputs.engine_source }}'
+      - name: Download the compiled Editor cache
+        uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
+        with:
+          name: qinglan-editor-cache-42474888842
+          run-id: 42474888842
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: ${{ runner.temp }}/editor-cache
+      - name: Restore and verify every Editor cache input and output
+        run: ./tools/ci/windows-editor-cache.ps1 -Action restore -ArchiveDir "$env:RUNNER_TEMP/editor-cache"
+      - name: Complete Windows audio derived data before test world teardown
+        run: |
+          & "$env:GITHUB_WORKSPACE/tooling/tools/ci/windows-audio-ddc-warmup.ps1" `
+            -ProjectPath "$env:GITHUB_WORKSPACE/source/game/QinglanAscension.uproject" `
+            -ReportsPath "$env:RUNNER_TEMP/qinglan-win64/reports"
+          & git diff --exit-code HEAD
+          if ($LASTEXITCODE) { throw 'DDC warmup modified tracked release inputs.' }
+      - name: Run the unchanged full regression and Shipping Store packaging script
+        env:
+          STORE_PACKAGE: 'true'
+          GDK_ARCHIVE_URL: ${{ secrets.GDK_ARCHIVE_URL }}
+        run: |
+          ./tools/ci/windows-package.ps1 `
+            -UseCachedEditorTools -StorePackage -StoreFormat msixvc `
+            -IdentityName '14E33A41.Qinglan-PathofAscension' `
+            -PublisherId 'CN=BD412261-9548-4F5A-95C1-24B072A9C1CC' `
+            -PublisherDisplayName 'Zhiqi Zhang' `
+            -StoreId '9NGLSM7P5CMB' -Version '0.1.3.0'
+      - name: Bind Shipping, regression, warmup and cache evidence
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $reports = "$env:RUNNER_TEMP/qinglan-win64/reports"
+          $package = "$env:RUNNER_TEMP/qinglan-win64/package"
+          $evidence = Get-Content "$package/build-evidence.json" -Raw | ConvertFrom-Json
+          if ($evidence.project_commit -ne $env:EXPECTED_PROJECT_COMMIT -or $evidence.configuration -ne 'Shipping' -or $evidence.platform -ne 'Win64') { throw 'Shipping source/configuration mismatch.' }
+          $changes = @(& git diff --name-only HEAD)
+          if ($LASTEXITCODE) { throw 'Cannot verify final source changes.' }
+          $allowed = @('game/Content/Qinglan/Data/ST_Game.uasset', 'game/Content/Qinglan/Data/DT_Localization.uasset')
+          if (@($changes | Where-Object { $_ -notin $allowed }).Count) { throw 'Packaging modified a tracked input beyond regenerated bilingual tables.' }
+          python tools/ci/validate_windows_automation.py -Project game -Report "$reports/automation/index.json"
+          if ($LASTEXITCODE) { throw 'Complete Windows regression report is required.' }
+          $provenance = Get-Content "$reports/recovery-input-provenance.json" -Raw | ConvertFrom-Json -AsHashtable
+          $provenance.status = 'shipping_regressions_and_store_packaging_passed'
+          $provenance.timestamp_utc = [DateTime]::UtcNow.ToString('o')
+          $provenance.build_evidence_sha256 = (Get-FileHash "$package/build-evidence.json" -Algorithm SHA256).Hash.ToLowerInvariant()
+          $provenance.store_package_evidence_sha256 = (Get-FileHash "$env:RUNNER_TEMP/qinglan-win64/store-package/store-package-evidence.json" -Algorithm SHA256).Hash.ToLowerInvariant()
+          $provenance.automation_report_sha256 = (Get-FileHash "$reports/automation/index.json" -Algorithm SHA256).Hash.ToLowerInvariant()
+          $warmup = Get-Content "$reports/audio-ddc-warmup.json" -Raw | ConvertFrom-Json
+          if ($warmup.version -ne 1 -or $warmup.status -ne 'complete' -or -not $warmup.audio_unchanged -or $warmup.second_pass_compression_builds -ne 0 -or @($warmup.sound_waves).Count -ne 8 -or @($warmup.passes).Count -ne 2) { throw 'Windows audio warmup evidence is incomplete.' }
+          $provenance.warmup_receipt_sha256 = (Get-FileHash "$reports/audio-ddc-warmup.json" -Algorithm SHA256).Hash.ToLowerInvariant()
+          $provenance.cache_receipt_sha256 = (Get-FileHash 'game/Saved/CI/editor-cache-verified.json' -Algorithm SHA256).Hash.ToLowerInvariant()
+          $provenance.warmup_script_sha256 = (Get-FileHash "$env:GITHUB_WORKSPACE/tooling/tools/ci/windows-audio-ddc-warmup.ps1" -Algorithm SHA256).Hash.ToLowerInvariant()
+          $provenance.regenerated_localization_tables = $changes
+          $provenance | ConvertTo-Json -Depth 8 | Set-Content "$reports/release-recovery-provenance.json"
+          Copy-Item 'game/Saved/CI/editor-cache-verified.json' "$reports/editor-cache-verified.json"
+      - name: Upload the verified Microsoft Store submission package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: Qinglan-MicrosoftStore-Package-${{ github.run_id }}
+          path: ${{ runner.temp }}/qinglan-win64/store-package/**
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: error
+      - name: Upload the verified Shipping payload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: Qinglan-Win64-Shipping-${{ github.run_id }}
+          path: ${{ runner.temp }}/qinglan-win64/package/**
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: error
+      - name: Upload recovery provenance for downstream installer verification
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: Qinglan-Windows-Recovery-Provenance-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/qinglan-win64/reports/release-recovery-provenance.json
+            ${{ runner.temp }}/qinglan-win64/reports/editor-cache-verified.json
+            ${{ runner.temp }}/qinglan-win64/reports/audio-ddc-warmup.json
+            ${{ runner.temp }}/qinglan-win64/reports/audio-ddc-pass-*-engine.log
+            ${{ runner.temp }}/qinglan-win64/reports/automation/index.json
+          retention-days: 7
+          if-no-files-found: error
+      - name: Save recovery diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-build-diagnostics-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/qinglan-win64/reports/**
+            ${{ runner.temp }}/windows-preflight.json
+          retention-days: 7
+          if-no-files-found: warn

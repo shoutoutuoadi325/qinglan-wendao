@@ -12,6 +12,18 @@ on:
         description: 'Successful Windows build run to repackage without rebuilding'
         type: string
         default: '40124296511'
+      direct_install:
+        description: 'Create and verify the desktop installer from this Shipping run'
+        type: boolean
+        default: false
+      version:
+        description: 'Direct-download release version'
+        type: string
+        default: '0.1.3'
+      expected_project_commit:
+        description: 'Required source commit for the direct-download payload'
+        type: string
+        default: '93f91dc3cc7ef42924e8e1756691a6e28671b84f'
 
 permissions:
   contents: read
@@ -23,7 +35,7 @@ concurrency:
 
 jobs:
   repackage:
-    if: github.event.repository.private == false
+    if: github.event.repository.private == false && !inputs.direct_install
     runs-on: windows-2022
     timeout-minutes: 60
     env:
@@ -88,4 +100,60 @@ jobs:
           name: store-repack-diagnostics-${{ github.run_id }}
           path: ${{ runner.temp }}/repack-reports/**
           retention-days: 3
+          if-no-files-found: warn
+
+  direct-installer:
+    if: github.event.repository.private == false && inputs.direct_install
+    runs-on: windows-2022
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+      RELEASE_VERSION: ${{ inputs.version }}
+      EXPECTED_PROJECT_COMMIT: ${{ inputs.expected_project_commit }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          lfs: false
+      - name: Verify the successful source run and download its Shipping artifact
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:SOURCE_RUN_ID -notmatch '^\d+$') { throw 'Invalid source run ID.' }
+          if ($env:EXPECTED_PROJECT_COMMIT -notmatch '^[0-9a-f]{40}$') { throw 'Invalid source commit.' }
+          if ($env:RELEASE_VERSION -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid release version.' }
+          $run = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:SOURCE_RUN_ID" | ConvertFrom-Json
+          if ($LASTEXITCODE -or $run.status -ne 'completed' -or $run.conclusion -ne 'success' -or $run.head_sha -ne $env:EXPECTED_PROJECT_COMMIT) {
+            throw 'Source run must have succeeded at the expected project commit.'
+          }
+          $tag = gh api "repos/$env:GITHUB_REPOSITORY/commits/v$env:RELEASE_VERSION" | ConvertFrom-Json
+          if ($LASTEXITCODE -or $tag.sha -ne $env:EXPECTED_PROJECT_COMMIT) { throw 'Release tag does not match the source build.' }
+          gh run download $env:SOURCE_RUN_ID --repo $env:GITHUB_REPOSITORY --name "Qinglan-Win64-Shipping-$env:SOURCE_RUN_ID" --dir "$env:RUNNER_TEMP/payload"
+          if ($LASTEXITCODE) { throw 'Could not retrieve the source Shipping artifact.' }
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/direct-reports" | Out-Null
+          $run | ConvertTo-Json -Depth 8 | Set-Content "$env:RUNNER_TEMP/direct-reports/source-run.json"
+      - name: Compile the desktop installer and verify the portable archive
+        shell: pwsh
+        run: |
+          ./tools/ci/windows-direct-installer.ps1 -StagedPath "$env:RUNNER_TEMP/payload/Windows" -SourceEvidencePath "$env:RUNNER_TEMP/payload/build-evidence.json" -OutputPath "$env:RUNNER_TEMP/direct" -Version $env:RELEASE_VERSION -ExpectedProjectCommit $env:EXPECTED_PROJECT_COMMIT -SourceRunId $env:SOURCE_RUN_ID
+      - name: Verify both installer languages, startup, uninstall and save preservation
+        shell: pwsh
+        run: |
+          ./tools/ci/windows-direct-install-smoke.ps1 -PackagePath "$env:RUNNER_TEMP/direct" -ReportsPath "$env:RUNNER_TEMP/direct-reports"
+      - name: Save the verified Windows downloads
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: Qinglan-Windows-Direct-${{ github.run_id }}
+          path: ${{ runner.temp }}/direct/**
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: error
+      - name: Save installer verification diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-direct-diagnostics-${{ github.run_id }}
+          path: ${{ runner.temp }}/direct-reports/**
+          retention-days: 7
           if-no-files-found: warn

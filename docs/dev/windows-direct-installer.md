@@ -30,8 +30,11 @@ the public-download outputs. It does not rebuild the game.
 The smoke check runs both language selections, compares all installed game files
 with the payload inventory, checks Start menu and desktop launch paths, starts
 the installed Shipping executable with NullRHI, and uninstalls it while checking
-that a unique save-file sentinel remains intact. The authored screenshot mode
-provides a bounded exit after world startup. NullRHI does not verify DX12 visuals.
+that a unique save-file sentinel remains intact. The existing QinglanAutoSlot QA
+aid confirms a real profile-menu row so a cold frontend can resume its paused
+world timers. The authored screenshot mode then provides a bounded exit after
+world startup. The check also verifies the created profile and hub autosave,
+and confirms uninstall preserves that profile. NullRHI does not verify DX12 visuals.
 
 ## Outputs
 

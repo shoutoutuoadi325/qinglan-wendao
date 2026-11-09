@@ -49,17 +49,30 @@ try {
                 throw "Installer shortcut has the wrong launch path: $shortcut"
             }
         }
-        # The authored screenshot mode exits only after the game world has started.
-        # NullRHI checks startup on the hosted runner without claiming DX12 rendering.
+        # A fresh profile frontend pauses world timers until a slot is selected.
+        # Use the existing QA aid to confirm a real menu row, then the authored
+        # screenshot mode exits after hub startup. NullRHI does not test DX12.
         $userPath = Join-Path $work "startup-$language"
-        $gameArguments = '-nullrhi -nosound -unattended -nosplash -QinglanShot=install-smoke -QinglanShotDelay=2 -UserDir="' + $userPath + '"'
-        $game = Start-Process -FilePath $exe -WorkingDirectory $installed -ArgumentList $gameArguments -PassThru
+        New-Item -ItemType Directory -Force -Path $userPath | Out-Null
+        $gameArguments = '-nullrhi -nosound -unattended -nosplash -QinglanAutoSlot=0 -QinglanShot=install-smoke -QinglanShotDelay=2 -UserDir="' + $userPath + '"'
+        $game = Start-Process -FilePath $exe -WorkingDirectory $installed -ArgumentList $gameArguments -PassThru -RedirectStandardOutput (Join-Path $reports "startup-$language.stdout.log") -RedirectStandardError (Join-Path $reports "startup-$language.stderr.log")
         if (-not $game.WaitForExit(120000)) {
             Stop-Process -Id $game.Id -Force
             throw 'Installed Shipping game did not exit through the startup capture mode.'
         }
         $game.Refresh()
         if ($game.ExitCode -ne 0) { throw "Installed Shipping startup failed ($($game.ExitCode))." }
+        $profiles = @(Get-ChildItem -LiteralPath $userPath -Recurse -File -Filter 'QinglanProfile_0.sav')
+        if ($profiles.Count -ne 1) { throw 'Cold startup did not create the selected profile in its isolated user directory.' }
+        $profile = $profiles[0]
+        $profileBytes = [IO.File]::ReadAllBytes($profile.FullName)
+        if ($profileBytes.Length -le 28 -or [BitConverter]::ToUInt32($profileBytes, 0) -ne 0x514C5341 -or
+            [BitConverter]::ToInt32($profileBytes, 4) -ne 1 -or [BitConverter]::ToInt32($profileBytes, 8) -ne 1 -or
+            [BitConverter]::ToInt32($profileBytes, 12) -lt 2 -or [BitConverter]::ToInt32($profileBytes, 16) -ne ($profileBytes.Length - 28)) {
+            throw 'Cold startup did not complete profile creation and the hub arrival autosave.'
+        }
+        $profileHash = (Get-FileHash -LiteralPath $profile.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        Copy-Item -LiteralPath $profile.FullName -Destination (Join-Path $reports "startup-$language-profile.sav")
         $uninstaller = Join-Path $installed 'unins000.exe'
         $uninstallLog = Join-Path $reports "uninstall-$language.log"
         $uninstallArguments = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG="' + $uninstallLog + '"'
@@ -69,12 +82,21 @@ try {
             (Get-FileHash -LiteralPath $sentinel -Algorithm SHA256).Hash -ne $sentinelHash) {
             throw 'Uninstall changed the separate saved-game sentinel.'
         }
+        if (-not (Test-Path -LiteralPath $profile.FullName) -or
+            (Get-FileHash -LiteralPath $profile.FullName -Algorithm SHA256).Hash.ToLowerInvariant() -ne $profileHash) {
+            throw 'Uninstall changed the profile created by the installed game.'
+        }
         $checks.Add(@{
             language = $language
             install_exit_code = $process.ExitCode
             installed_files_verified = $verified
             shortcuts_verified = $true
             shipping_nullrhi_startup_exit_code = $game.ExitCode
+            cold_start_profile_verified = $true
+            startup_profile_bytes = $profileBytes.Length
+            startup_profile_sequence = [BitConverter]::ToInt32($profileBytes, 12)
+            startup_profile_sha256 = $profileHash
+            startup_profile_preserved = $true
             uninstall_exit_code = $uninstall.ExitCode
             saved_game_sentinel_preserved = $true
         })
@@ -89,6 +111,11 @@ try {
     } | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $reports 'install-smoke-evidence.json') -Encoding utf8
     Write-Host 'Both installer languages, file hashes, shortcuts, Shipping startup, uninstall and save preservation passed.'
 } finally {
+    if (Test-Path -LiteralPath $work) {
+        Get-ChildItem -LiteralPath $work -Directory -Filter 'startup-*' | ForEach-Object {
+            Copy-Item -LiteralPath $_.FullName -Destination $reports -Recurse -Force
+        }
+    }
     Remove-Item -LiteralPath $sentinel -Force -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue }
 }

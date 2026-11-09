@@ -66,8 +66,9 @@ try {
         if ($profiles.Count -ne 1) { throw 'Cold startup did not create the selected profile in its isolated user directory.' }
         $profile = $profiles[0]
         $profileBytes = [IO.File]::ReadAllBytes($profile.FullName)
+        # v0.1.3 uses container version 1 and CurrentSchemaVersion 2.
         if ($profileBytes.Length -le 28 -or [BitConverter]::ToUInt32($profileBytes, 0) -ne 0x514C5341 -or
-            [BitConverter]::ToInt32($profileBytes, 4) -ne 1 -or [BitConverter]::ToInt32($profileBytes, 8) -ne 1 -or
+            [BitConverter]::ToInt32($profileBytes, 4) -ne 1 -or [BitConverter]::ToInt32($profileBytes, 8) -ne 2 -or
             [BitConverter]::ToInt32($profileBytes, 12) -lt 2 -or [BitConverter]::ToInt32($profileBytes, 16) -ne ($profileBytes.Length - 28)) {
             throw 'Cold startup did not complete profile creation and the hub arrival autosave.'
         }
@@ -95,6 +96,7 @@ try {
             cold_start_profile_verified = $true
             startup_profile_bytes = $profileBytes.Length
             startup_profile_sequence = [BitConverter]::ToInt32($profileBytes, 12)
+            startup_profile_schema = [BitConverter]::ToInt32($profileBytes, 8)
             startup_profile_sha256 = $profileHash
             startup_profile_preserved = $true
             uninstall_exit_code = $uninstall.ExitCode
